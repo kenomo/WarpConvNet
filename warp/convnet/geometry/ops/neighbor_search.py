@@ -141,6 +141,10 @@ def radius_search_warp(
         neighbor_index: [Q]
         neighbor_distance: [Q]
         neighbor_split: [M + 1]
+
+    Warnings:
+        The HashGrid supports a maximum of 4096^3 grid cells. The users must
+        ensure that the points are bounded and 2 * radius * 4096 < max_bound.
     """
     # Convert from warp to torch
     assert points.is_contiguous(), "points must be contiguous"
@@ -192,6 +196,7 @@ def batched_radius_search_warp(
     neighbor_split_list = []
     index_offset = 0
     split_offset = 0
+    # TODO(cchoy): optional parallelization for small point clouds
     for b in range(B):
         neighbor_index, neighbor_distance, neighbor_split = radius_search_warp(
             points=points[b],
