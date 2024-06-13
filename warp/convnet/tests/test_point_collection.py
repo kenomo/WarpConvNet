@@ -2,6 +2,8 @@ import unittest
 
 import torch
 import warp as wp
+
+from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn, SEARCH_MODE
 from warp.convnet.geometry.point_collection import PointCollection
 
 
@@ -16,12 +18,16 @@ class TestPointCollection(unittest.TestCase):
 
     # Test point collection construction
     def test_point_collection_construction(self):
-        Ns_cumsum = torch.tensor(self.Ns).cumsum(dim=0).tolist()
+        Ns_cumsum = self.Ns.cumsum(dim=0).tolist()
         self.assertTrue(self.pc.batched_coordinates.batch_size == self.B)
         self.assertTrue(self.pc.batched_coordinates.offsets == [0] + Ns_cumsum)
-        self.assertTrue(self.pc.batched_coordinates.batched_tensors.shape == (Ns_cumsum[-1], 3))
+        self.assertTrue(
+            self.pc.batched_coordinates.batched_tensors.shape == (Ns_cumsum[-1], 3)
+        )
         self.assertTrue(self.pc.batched_features.batch_size == self.B)
-        self.assertTrue(self.pc.batched_features.batched_tensors.shape == (Ns_cumsum[-1], self.C))
+        self.assertTrue(
+            self.pc.batched_features.batched_tensors.shape == (Ns_cumsum[-1], self.C)
+        )
 
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
@@ -32,19 +38,33 @@ class TestPointCollection(unittest.TestCase):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
         sorted_pc = pc.sort()
-        self.assertTrue(sorted_pc.batched_coordinates.batched_tensors.shape == (sum(self.Ns), 3))
-        self.assertTrue(sorted_pc.batched_features.batched_tensors.shape == (sum(self.Ns), self.C))
+        self.assertTrue(
+            sorted_pc.batched_coordinates.batched_tensors.shape == (sum(self.Ns), 3)
+        )
+        self.assertTrue(
+            sorted_pc.batched_features.batched_tensors.shape == (sum(self.Ns), self.C)
+        )
 
     # Test point collection radius search
     def test_point_collection_radius_search(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
-        query = torch.rand((self.B * 10000, 3))
-        offset = torch.tensor([0] + self.Ns.tolist())
         radius = 0.1
-        # indices, distances = pc.radius_search(query, radius)
-        # self.assertTrue(distances.shape == (self.B, max(self.Ns), 8))
+        search_result = pc.neighbors(radius=radius)
+        self.assertTrue(isinstance(search_result, NeighborSearchReturn))
+        self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
+        self.assertTrue(search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel())
+
+    def test_knn_search(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        radius = 0.1
+        search_result = pc.neighbors(mode=SEARCH_MODE.KNN, knn_k=10)
+        self.assertTrue(isinstance(search_result, NeighborSearchReturn))
+        self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
+        self.assertTrue(search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel())
 
 
 if __name__ == "__main__":
+    wp.init()
     unittest.main()

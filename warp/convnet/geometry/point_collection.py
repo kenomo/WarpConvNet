@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from enum import Enum
 
 import warp as wp
@@ -8,7 +8,12 @@ import torch
 from torch import Tensor
 
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sort_point_collection
-from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn
+from warp.convnet.geometry.ops.neighbor_search import (
+    NeighborSearchReturn,
+    SEARCH_MODE,
+    batched_knn_search,
+    batched_radius_search,
+)
 
 
 class BatchedObject:
@@ -40,6 +45,9 @@ class BatchedObject:
             tensors = torch.cat(tensors, dim=0)
 
         assert offsets is not None and isinstance(tensors, torch.Tensor)
+        assert (
+            tensors.shape[0] == offsets[-1]
+        ), f"Offsets {offsets} does not match tensors {tensors.shape}"
         self.batch_size = len(offsets) - 1
         self.offsets = offsets
         self.batched_tensors = tensors
@@ -54,10 +62,25 @@ class BatchedObject:
             tensors=self.batched_tensors.to(device),
             offsets=self.offsets,
         )
+
+    @property
+    def device(self):
+        return self.batched_tensors.device
+    
+    @property
+    def shape(self):
+        return self.batched_tensors.shape
+    
+    @property
+    def dtype(self):
+        return self.batched_tensors.dtype
     
     @property
     def device(self):
         return self.batched_tensors.device
+    
+    def numel(self):
+        return self.batched_tensors.numel()
 
     def __len__(self) -> int:
         return self.batch_size
@@ -130,7 +153,7 @@ class PointCollection:
             coords=self.batched_coordinates.to(device),
             features=self.batched_features.to(device),
         )
-    
+
     @property
     def device(self):
         return self.batched_coordinates.device
@@ -138,9 +161,7 @@ class PointCollection:
     def sort(
         self,
         ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-        grid_size: Optional[
-            int
-        ] = 1024,
+        grid_size: Optional[int] = 1024,
     ):
         """
         Sort the points according to the ordering provided.
@@ -165,11 +186,48 @@ class PointCollection:
             ),
         )
 
-    def neighbors(self, radius: float) -> NeighborSearchReturn:
+    def neighbors(
+        self,
+        mode: SEARCH_MODE = SEARCH_MODE.RADIUS,
+        batched_queries: Optional[Float[Tensor, "Q D"]] = None,
+        queries_offsets: Optional[Int[Tensor, "B + 1"]] = None,
+        radius: Optional[float] = None,
+        grid_dim: Optional[int | Tuple[int, int, int]] = 128,
+        knn_k: Optional[int] = None,
+    ) -> NeighborSearchReturn:
         """
         Returns CSR format neighbor indices
         """
-        pass
+        if batched_queries is None:
+            batched_queries = self.batched_coordinates.batched_tensors
+            queries_offsets = self.batched_coordinates.offsets
+
+        if mode == SEARCH_MODE.RADIUS:
+            assert radius is not None, "Radius must be provided for radius search"
+            neighbor_index, neighbor_distance, neighbor_split = batched_radius_search(
+                ref_positions=self.batched_coordinates.batched_tensors,
+                ref_offsets=self.batched_coordinates.offsets,
+                query_positions=batched_queries,
+                query_offsets=queries_offsets,
+                radius=radius,
+                grid_dim=grid_dim,
+            )
+            return NeighborSearchReturn(
+                neighbor_index,
+                neighbor_split,
+            )
+
+        elif mode == SEARCH_MODE.KNN:
+            assert knn_k is not None, "knn_k must be provided for knn search"
+            # M x K
+            neighbor_index = batched_knn_search(
+                ref_positions=self.batched_coordinates.batched_tensors,
+                ref_offsets=self.batched_coordinates.offsets,
+                query_positions=batched_queries,
+                query_offsets=queries_offsets,
+                k=knn_k,
+            )
+            return NeighborSearchReturn(neighbor_index)
 
     def __str__(self) -> str:
         return self.__class__.__name__

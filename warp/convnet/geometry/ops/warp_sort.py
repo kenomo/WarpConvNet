@@ -55,7 +55,7 @@ def assign_rank(
     The coords must be in the range [0, 1] and the result_order will be the z-order number of the point.
     """
     if ordering == POINT_ORDERING.Z_ORDER:
-        wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int32)
+        wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int32, device=str(coords.device))
         # Convert torch coords to wp.array of vec3
         wp_coords = wp.from_torch(coords, dtype=wp.vec3)
         wp.launch(_assign_order, len(coords), inputs=[wp_coords, wp_result_rank, grid_size])

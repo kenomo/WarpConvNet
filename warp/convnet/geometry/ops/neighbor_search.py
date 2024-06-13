@@ -1,9 +1,62 @@
-from typing import Tuple, Union
+from typing import Tuple, Optional, Literal
+from enum import Enum
 
 import torch
 import warp as wp
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
+
+
+class SEARCH_MODE(Enum):
+    RADIUS = "radius"
+    KNN = "knn"
+
+
+class NeighborSearchReturn:
+    """
+    Wrapper for the output of a neighbor search operation.
+    """
+
+    # N is the total number of neighbors for all M queries
+    _neighbors_index: Int[Tensor, "N"]  # noqa: F821
+    # M is the number of queries
+    _neighbors_row_splits: Int[Tensor, "M + 1"]  # noqa: F821
+    # optional distance
+    _neighbors_distance: Optional[Float[Tensor, "N"]]  # noqa: F821
+
+    def __init__(self, *args):
+        # If there are two args, assume they are neighbors_index and neighbors_row_splits
+        # If there is one arg, assume it is a NeighborSearchReturnType
+        if len(args) == 2:
+            self._neighbors_index = args[0].long()
+            self._neighbors_row_splits = args[1].long()
+        elif len(args) == 1:
+            # K-nn search result
+            assert isinstance(args[0], torch.Tensor)
+            # 2D tensor with shape (M, K)
+            assert args[0].ndim == 2
+            M, K = args[0].shape
+            self._neighbors_index = args[0].long()
+            self._neighbors_row_splits = torch.arange(
+                0, M * K + 1, K, device=args[0].device, dtype=torch.int32
+            )
+        else:
+            raise ValueError(
+                "NeighborSearchReturn must be initialized with 1 or 2 arguments"
+            )
+
+    @property
+    def neighbors_index(self):
+        return self._neighbors_index
+
+    @property
+    def neighbors_row_splits(self):
+        return self._neighbors_row_splits
+
+    def to(self, device: str | int | torch.device):
+        self._neighbors_index.to(device)
+        self._neighbors_row_splits.to(device)
+        return self
 
 
 @wp.kernel
@@ -63,23 +116,23 @@ def _radius_search_query(
             result_count += 1
 
 
-def _radius_search_warp(
+def _radius_search(
     points: wp.array(dtype=wp.vec3),
     queries: wp.array(dtype=wp.vec3),
     radius: float,
-    grid_dim: Union[int, Tuple[int, int, int]] = (128, 128, 128),
-    device: str = "cuda",
+    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
 ):
     # convert grid_dim to Tuple if it is int
     if isinstance(grid_dim, int):
         grid_dim = (grid_dim, grid_dim, grid_dim)
 
+    str_device = str(points.device)
     result_count = wp.zeros(shape=len(queries), dtype=wp.int32)
     grid = wp.HashGrid(
         dim_x=grid_dim[0],
         dim_y=grid_dim[1],
         dim_z=grid_dim[2],
-        device=device,
+        device=str_device,
     )
     grid.build(points=points, radius=2 * radius)
 
@@ -88,10 +141,12 @@ def _radius_search_warp(
         kernel=_radius_search_count,
         dim=len(queries),
         inputs=[grid.id, points, queries, result_count, radius],
-        device=device,
+        device=str_device,
     )
 
-    torch_offset = torch.zeros(len(result_count) + 1, device=device, dtype=torch.int32)
+    torch_offset = torch.zeros(
+        len(result_count) + 1, device=str_device, dtype=torch.int32
+    )
     result_count_torch = wp.to_torch(result_count)
     torch.cumsum(result_count_torch, dim=0, out=torch_offset[1:])
     total_count = torch_offset[-1].item()
@@ -114,18 +169,17 @@ def _radius_search_warp(
             result_point_dist,
             radius,
         ],
-        device=device,
+        device=str_device,
     )
 
     return (result_point_idx, result_point_dist, torch_offset)
 
 
-def radius_search_warp(
+def radius_search(
     points: Float[Tensor, "N 3"],
     queries: Float[Tensor, "M 3"],
     radius: float,
-    grid_dim: Union[int, Tuple[int, int, int]] = (128, 128, 128),
-    device: str = "cuda",
+    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
 ) -> Tuple[
     Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "M + 1"]
 ]:  # noqa: F821
@@ -152,12 +206,11 @@ def radius_search_warp(
     points_wp = wp.from_torch(points, dtype=wp.vec3)
     queries_wp = wp.from_torch(queries, dtype=wp.vec3)
 
-    result_point_idx, result_point_dist, torch_offset = _radius_search_warp(
+    result_point_idx, result_point_dist, torch_offset = _radius_search(
         points=points_wp,
         queries=queries_wp,
         radius=radius,
         grid_dim=grid_dim,
-        device=device,
     )
 
     # Convert from warp to torch
@@ -168,44 +221,51 @@ def radius_search_warp(
     return result_point_idx, result_point_dist, torch_offset
 
 
-def batched_radius_search_warp(
-    points: Float[Tensor, "B N 3"],
-    queries: Float[Tensor, "B M 3"],
+def batched_radius_search(
+    ref_positions: Float[Tensor, "N 3"],
+    ref_offsets: Int[Tensor, "B + 1"],
+    query_positions: Float[Tensor, "M 3"],
+    query_offsets: Int[Tensor, "B + 1"],
     radius: float,
-    grid_dim: Union[int, Tuple[int, int, int]] = (128, 128, 128),
-    device: str = "cuda",
+    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
 ) -> Tuple[
     Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "B*M + 1"]
 ]:  # noqa: F821
     """
     Args:
-        points: [B, N, 3]
-        queries: [B, M, 3]
+        ref_positions: [N, 3]
+        ref_offsets: [B + 1]
+        query_positions: [M, 3]
+        query_offsets: [B + 1]
         radius: float
         grid_dim: Union[int, Tuple[int, int, int]]
-        device: str
 
     Returns:
         neighbor_index: [Q]
         neighbor_distance: [Q]
         neighbor_split: [B*M + 1]
     """
-    B, N, _ = points.shape
+    B = len(ref_offsets) - 1
+    assert B == len(query_offsets) - 1
+    assert (
+        ref_offsets[-1] == ref_positions.shape[0]
+    ), f"Last offset {ref_offsets[-1]} != {ref_positions.shape[0]}"
+    assert (
+        query_offsets[-1] == query_positions.shape[0]
+    ), f"Last offset {query_offsets[-1]} != {query_positions.shape[0]}"
     neighbor_index_list = []
     neighbor_distance_list = []
     neighbor_split_list = []
-    index_offset = 0
     split_offset = 0
     # TODO(cchoy): optional parallelization for small point clouds
     for b in range(B):
-        neighbor_index, neighbor_distance, neighbor_split = radius_search_warp(
-            points=points[b],
-            queries=queries[b],
+        neighbor_index, neighbor_distance, neighbor_split = radius_search(
+            points=ref_positions[ref_offsets[b] : ref_offsets[b + 1]],
+            queries=query_positions[query_offsets[b] : query_offsets[b + 1]],
             radius=radius,
             grid_dim=grid_dim,
-            device=device,
         )
-        neighbor_index_list.append(neighbor_index + index_offset)
+        neighbor_index_list.append(neighbor_index + ref_offsets[b])
         neighbor_distance_list.append(neighbor_distance)
         # if b is last, append all neighbor_split since the last element is the total count
         if b == B - 1:
@@ -213,7 +273,6 @@ def batched_radius_search_warp(
         else:
             neighbor_split_list.append(neighbor_split[:-1] + split_offset)
 
-        index_offset += N
         split_offset += len(neighbor_index)
 
     # Neighbor index, Neighbor Distance, Neighbor Split
@@ -224,33 +283,123 @@ def batched_radius_search_warp(
     )
 
 
-_WARP_NEIGHBOR_SEARCH_INIT = False
-if not _WARP_NEIGHBOR_SEARCH_INIT:
-    wp.init()
-    _WARP_NEIGHBOR_SEARCH_INIT = True
+@torch.no_grad()
+def _knn_search(
+    ref_positions: Int[Tensor, "N 3"],
+    query_positions: Int[Tensor, "M 3"],
+    k: int,
+) -> Int[Tensor, "M K"]:
+    """Perform knn search using the open3d backend."""
+    assert k > 0
+    assert k < ref_positions.shape[0]
+    assert ref_positions.device == query_positions.device
+    # Critical for multi GPU
+    if ref_positions.is_cuda:
+        torch.cuda.set_device(ref_positions.device)
+    # Use topk to get the top k indices from distances
+    dists = torch.cdist(query_positions, ref_positions)
+    _, neighbors_index = torch.topk(dists, k, dim=1, largest=False)
+    return neighbors_index
 
 
-class NeighborSearchReturn:
-    pass
+@torch.no_grad()
+def _chunked_knn_search(
+    ref_positions: Int[Tensor, "N 3"],
+    query_positions: Int[Tensor, "M 3"],
+    k: int,
+    chunk_size: int = 4096,
+):
+    """Divide the out_positions into chunks and perform knn search."""
+    assert k > 0
+    assert k < ref_positions.shape[0]
+    assert chunk_size > 0
+    neighbors_index = []
+    for i in range(0, query_positions.shape[0], chunk_size):
+        chunk_out_positions = query_positions[i : i + chunk_size]
+        chunk_neighbors_index = _knn_search(ref_positions, chunk_out_positions, k)
+        neighbors_index.append(chunk_neighbors_index)
+    return torch.concatenate(neighbors_index, dim=0)
 
 
-if __name__ == "__main__":
-    torch.manual_seed(42)
+def _bvh_knn_search(
+    ref_positions: Int[Tensor, "N 3"],
+    query_positions: Int[Tensor, "M 3"],
+    k: int,
+) -> Int[Tensor, "M K"]:
+    """Perform knn search using the open3d backend."""
+    assert k > 0
+    assert k < ref_positions.shape[0]
+    assert ref_positions.device == query_positions.device
+    # Compute min/max of ref
+    min_ref = wp.from_torch(ref_positions.min(dim=0))
+    max_ref = wp.from_torch(ref_positions.max(dim=0))
+    # Convert to warp
+    ref_positions_wp = wp.from_torch(ref_positions, dtype=wp.vec3)
+    query_positions_wp = wp.from_torch(query_positions, dtype=wp.vec3)
+    # Create bvh
+    bvh = wp.Bvh(lowers=min_ref, uppers=max_ref, device=str(ref_positions.device))
+    # TODO
+    raise NotImplementedError
 
-    # Test search
-    B = 5
-    N = 100_000
-    M = 200_000
-    points = torch.rand(B, N, 3).cuda()
-    queries = torch.rand(B, M, 3).cuda()
 
-    radii = [0.05, 0.01, 0.005]
-    for radius in radii:
-        print(f"Testing radius: {radius}")
-        result_point_idx, result_point_dist, torch_offset = batched_radius_search_warp(
-            points=points, queries=queries, radius=radius
+@torch.no_grad()
+def knn_search(
+    ref_positions: Int[Tensor, "N 3"],
+    query_positions: Int[Tensor, "M 3"],
+    k: int,
+    search_method: Literal["chunk", "bvh"] = "chunk",
+    chunk_size: int = 32768,  # 2^15
+) -> Int[Tensor, "M K"]:
+    """
+    ref_positions: [N,3]
+    query_positions: [M,3]
+    k: int
+    """
+    assert 0 < k < ref_positions.shape[0]
+    assert search_method in ["chunk"]
+    # Critical for multi GPU
+    if ref_positions.is_cuda:
+        torch.cuda.set_device(ref_positions.device)
+    assert ref_positions.device == query_positions.device
+    if search_method == "chunk":
+        if query_positions.shape[0] < chunk_size:
+            neighbors_index = _knn_search(ref_positions, query_positions, k)
+        else:
+            neighbors_index = _chunked_knn_search(
+                ref_positions, query_positions, k, chunk_size=chunk_size
+            )
+    else:
+        raise ValueError(f"search_method {search_method} not supported.")
+    return neighbors_index
+
+
+@torch.no_grad()
+def batched_knn_search(
+    ref_positions: Int[Tensor, "N 3"],
+    ref_offsets: Int[Tensor, "B + 1"],
+    query_positions: Int[Tensor, "M 3"],
+    query_offsets: Int[Tensor, "B + 1"],
+    k: int,
+    search_method: Literal["chunk", "bvh"] = "chunk",
+    chunk_size: int = 4096,
+) -> Int[Tensor, "MK"]:
+    """
+    ref_positions: [N,3]
+    query_positions: [M,3]
+    k: int
+    """
+    assert (
+        ref_positions.shape[0] == query_positions.shape[0]
+    ), f"Batch size mismatch, {ref_positions.shape[0]} != {query_positions.shape[0]}"
+    neighbors = []
+    B = len(ref_offsets) - 1
+    for b in range(B):
+        neighbor_index = knn_search(
+            ref_positions[ref_offsets[b] : ref_offsets[b + 1],],
+            query_positions[query_offsets[b] : query_offsets[b + 1],],
+            k,
+            search_method,
+            chunk_size,
         )
-        print(result_point_idx.shape)
-        print(result_point_dist.shape)
-        print(torch_offset.shape)
-        print()
+        neighbors.append(neighbor_index + ref_offsets[b])
+    return torch.cat(neighbors, dim=0)
