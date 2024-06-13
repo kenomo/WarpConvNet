@@ -230,6 +230,10 @@ if not _WARP_NEIGHBOR_SEARCH_INIT:
     _WARP_NEIGHBOR_SEARCH_INIT = True
 
 
+class NeighborSearchReturn:
+    pass
+
+
 if __name__ == "__main__":
     torch.manual_seed(42)
 
