@@ -1,10 +1,11 @@
-from typing import Tuple, Optional, Literal
 from enum import Enum
+from typing import Literal, Optional, Tuple
 
 import torch
-import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
+
+import warp as wp
 
 
 class NEIGHBOR_SEARCH_MODE(Enum):
@@ -50,7 +51,7 @@ class NeighborSearchArgs:
     @property
     def k(self):
         return self._k
-    
+
     @property
     def grid_dim(self):
         return self._grid_dim
@@ -88,9 +89,7 @@ class NeighborSearchReturn:
                 0, M * K + 1, K, device=args[0].device, dtype=torch.long
             )
         else:
-            raise ValueError(
-                "NeighborSearchReturn must be initialized with 1 or 2 arguments"
-            )
+            raise ValueError("NeighborSearchReturn must be initialized with 1 or 2 arguments")
 
     @property
     def neighbors_index(self):
@@ -180,7 +179,7 @@ def _radius_search(
         grid_dim = (grid_dim, grid_dim, grid_dim)
 
     str_device = str(points.device)
-    result_count = wp.zeros(shape=len(queries), dtype=wp.int32)
+    result_count = wp.zeros(shape=len(queries), dtype=wp.int32, device=str_device)
     grid = wp.HashGrid(
         dim_x=grid_dim[0],
         dim_y=grid_dim[1],
@@ -197,18 +196,14 @@ def _radius_search(
         device=str_device,
     )
 
-    torch_offset = torch.zeros(
-        len(result_count) + 1, device=str_device, dtype=torch.int32
-    )
+    torch_offset = torch.zeros(len(result_count) + 1, device=str_device, dtype=torch.int32)
     result_count_torch = wp.to_torch(result_count)
     torch.cumsum(result_count_torch, dim=0, out=torch_offset[1:])
     total_count = torch_offset[-1].item()
-    assert (
-        total_count < 2**31 - 1
-    ), f"Total result count is too large: {total_count} > 2**31 - 1"
+    assert total_count < 2**31 - 1, f"Total result count is too large: {total_count} > 2**31 - 1"
 
-    result_point_idx = wp.zeros(shape=(total_count,), dtype=wp.int32)
-    result_point_dist = wp.zeros(shape=(total_count,), dtype=wp.float32)
+    result_point_idx = wp.zeros(shape=(total_count,), dtype=wp.int32, device=str_device)
+    result_point_dist = wp.zeros(shape=(total_count,), dtype=wp.float32, device=str_device)
 
     wp.launch(
         kernel=_radius_search_query,
@@ -229,13 +224,11 @@ def _radius_search(
 
 
 def radius_search(
-    points: Float[Tensor, "N 3"],
-    queries: Float[Tensor, "M 3"],
+    points: Float[Tensor, "N 3"],  # noqa: F821
+    queries: Float[Tensor, "M 3"],  # noqa: F821
     radius: float,
     grid_dim: Optional[int | Tuple[int, int, int]] = None,
-) -> Tuple[
-    Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "M + 1"]
-]:  # noqa: F821
+) -> Tuple[Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "M + 1"]]:  # noqa: F821
     """
     Args:
         points: [N, 3]
@@ -275,12 +268,12 @@ def radius_search(
 
 
 def batched_radius_search(
-    ref_positions: Float[Tensor, "N 3"],
-    ref_offsets: Int[Tensor, "B + 1"],
-    query_positions: Float[Tensor, "M 3"],
-    query_offsets: Int[Tensor, "B + 1"],
+    ref_positions: Float[Tensor, "N 3"],  # noqa: F821
+    ref_offsets: Int[Tensor, "B + 1"],  # noqa: F821
+    query_positions: Float[Tensor, "M 3"],  # noqa: F821
+    query_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     radius: float,
-    grid_dim: Optional[int | Tuple[int, int, int]] = None
+    grid_dim: Optional[int | Tuple[int, int, int]] = None,
 ) -> Tuple[Int[Tensor, "Q"], Float[Tensor, "Q"], Int[Tensor, "M + 1"]]:  # noqa: F821
     """
     Args:
@@ -336,10 +329,10 @@ def batched_radius_search(
 
 @torch.no_grad()
 def _knn_search(
-    ref_positions: Int[Tensor, "N 3"],
-    query_positions: Int[Tensor, "M 3"],
+    ref_positions: Int[Tensor, "N 3"],  # noqa: F821
+    query_positions: Int[Tensor, "M 3"],  # noqa: F821
     k: int,
-) -> Int[Tensor, "M K"]:
+) -> Int[Tensor, "M K"]:  # noqa: F821
     """Perform knn search using the open3d backend."""
     assert k > 0
     assert k < ref_positions.shape[0]
@@ -355,8 +348,8 @@ def _knn_search(
 
 @torch.no_grad()
 def _chunked_knn_search(
-    ref_positions: Int[Tensor, "N 3"],
-    query_positions: Int[Tensor, "M 3"],
+    ref_positions: Int[Tensor, "N 3"],  # noqa: F821
+    query_positions: Int[Tensor, "M 3"],  # noqa: F821
     k: int,
     chunk_size: int = 4096,
 ):
@@ -373,8 +366,8 @@ def _chunked_knn_search(
 
 
 def _bvh_knn_search(
-    ref_positions: Int[Tensor, "N 3"],
-    query_positions: Int[Tensor, "M 3"],
+    ref_positions: Int[Tensor, "N 3"],  # noqa: F821
+    query_positions: Int[Tensor, "M 3"],  # noqa: F821
     k: int,
 ) -> Int[Tensor, "M K"]:
     """Perform knn search using the open3d backend."""
@@ -385,20 +378,20 @@ def _bvh_knn_search(
     min_ref = wp.from_torch(ref_positions.min(dim=0))
     max_ref = wp.from_torch(ref_positions.max(dim=0))
     # Convert to warp
-    ref_positions_wp = wp.from_torch(ref_positions, dtype=wp.vec3)
-    query_positions_wp = wp.from_torch(query_positions, dtype=wp.vec3)
+    ref_positions_wp = wp.from_torch(ref_positions, dtype=wp.vec3)  # noqa: F841
+    query_positions_wp = wp.from_torch(query_positions, dtype=wp.vec3)  # noqa: F841
     # Create bvh
-    bvh = wp.Bvh(lowers=min_ref, uppers=max_ref, device=str(ref_positions.device))
+    bvh = wp.Bvh(lowers=min_ref, uppers=max_ref, device=str(ref_positions.device))  # noqa: F841
     # TODO
     raise NotImplementedError
 
 
 @torch.no_grad()
 def knn_search(
-    ref_positions: Int[Tensor, "N 3"],
-    query_positions: Int[Tensor, "M 3"],
+    ref_positions: Int[Tensor, "N 3"],  # noqa: F821
+    query_positions: Int[Tensor, "M 3"],  # noqa: F821
     k: int,
-    search_method: Literal["chunk", "bvh"] = "chunk",
+    search_method: Literal["chunk", "bvh"] = "chunk",  # noqa: F821
     chunk_size: int = 32768,  # 2^15
 ) -> Int[Tensor, "M K"]:
     """
@@ -426,14 +419,14 @@ def knn_search(
 
 @torch.no_grad()
 def batched_knn_search(
-    ref_positions: Int[Tensor, "N 3"],
-    ref_offsets: Int[Tensor, "B + 1"],
-    query_positions: Int[Tensor, "M 3"],
-    query_offsets: Int[Tensor, "B + 1"],
+    ref_positions: Int[Tensor, "N 3"],  # noqa: F821
+    ref_offsets: Int[Tensor, "B + 1"],  # noqa: F821
+    query_positions: Int[Tensor, "M 3"],  # noqa: F821
+    query_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     k: int,
-    search_method: Literal["chunk", "bvh"] = "chunk",
+    search_method: Literal["chunk", "bvh"] = "chunk",  # noqa: F821
     chunk_size: int = 4096,
-) -> Int[Tensor, "MK"]:
+) -> Int[Tensor, "MK"]:  # noqa: F821
     """
     ref_positions: [N,3]
     query_positions: [M,3]
@@ -456,59 +449,11 @@ def batched_knn_search(
     return torch.cat(neighbors, dim=0).long()
 
 
-def batched_voxel_search(
-    ref_positions: Float[Tensor, "N 3"],
-    ref_offsets: Int[Tensor, "B + 1"],
-    query_positions: Float[Tensor, "M 3"],
-    query_offsets: Int[Tensor, "B + 1"],
-) -> Tuple[Int[Tensor, "Q"], Float[Tensor, "Q"], Int[Tensor, "M + 1"]]:  # noqa: F821
-    """
-    Args:
-        ref_positions: [N, 3]
-        ref_offsets: [B + 1]
-        query_positions: [M, 3]
-        query_offsets: [B + 1]
-        radius: float
-        grid_dim: Union[int, Tuple[int, int, int]]
-
-    Returns:
-        neighbor_index: [Q]
-        neighbor_distance: [Q]
-        neighbor_split: [B + 1]
-    """
-    B = len(ref_offsets) - 1
-    assert B == len(query_offsets) - 1
-    assert (
-        ref_offsets[-1] == ref_positions.shape[0]
-    ), f"Last offset {ref_offsets[-1]} != {ref_positions.shape[0]}"
-    assert (
-        query_offsets[-1] == query_positions.shape[0]
-    ), f"Last offset {query_offsets[-1]} != {query_positions.shape[0]}"
-    neighbor_index_list = []
-    neighbor_split_list = []
-    split_offset = 0
-    # create a hash key for BXYZ. Use long int64 and split the key into 4 parts.
-    # Compute bits required for B, and x,y,z
-    bits = 64
-    # B is the number of batches. Find the nearest power of 2
-    bits_b = 1
-    while 2**bits_b < B:
-        bits_b += 1
-    bits_xyz = bits - bits_b
-    raise NotImplementedError
-
-    # Neighbor index, Neighbor Distance, Neighbor Split
-    return (
-        torch.cat(neighbor_index_list).long(),
-        torch.cat(neighbor_split_list).long(),
-    )
-
-
 def neighbor_search(
-    ref_positions: Float[Tensor, "N 3"],
-    ref_offsets: Int[Tensor, "B + 1"],
-    query_positions: Float[Tensor, "M 3"],
-    query_offsets: Int[Tensor, "B + 1"],
+    ref_positions: Float[Tensor, "N 3"],  # noqa: F821
+    ref_offsets: Int[Tensor, "B + 1"],  # noqa: F821
+    query_positions: Float[Tensor, "M 3"],  # noqa: F821
+    query_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     search_args: NeighborSearchArgs,
 ) -> NeighborSearchReturn:
     """
@@ -522,9 +467,7 @@ def neighbor_search(
         NeighborSearchReturn
     """
     if search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS:
-        assert (
-            search_args.radius is not None
-        ), "Radius must be provided for radius search"
+        assert search_args.radius is not None, "Radius must be provided for radius search"
         neighbor_index, neighbor_distance, neighbor_split = batched_radius_search(
             ref_positions=ref_positions,
             ref_offsets=ref_offsets,

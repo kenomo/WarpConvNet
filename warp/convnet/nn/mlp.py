@@ -1,9 +1,9 @@
-import torch
 from torch import nn
+
+from warp.convnet.geometry.point_collection import BatchedFeatures, PointCollection
 
 
 class MLPBlock(nn.Module):
-
     def __init__(
         self,
         in_channels: int,
@@ -30,3 +30,21 @@ class MLPBlock(nn.Module):
         # add skip connection
         out = self.activation(out + self.shortcut(x))
         return out
+
+
+class PointCollectionTransform(nn.Module):
+    def __init__(
+        self,
+        transform: nn.Module,
+    ):
+        super().__init__()
+        self.transform = transform
+
+    def forward(self, x: PointCollection):
+        return PointCollection(
+            batched_coordinates=x.batched_coordinates,
+            batched_features=BatchedFeatures(
+                self.transform(x.features),
+                offsets=x.batched_features.offsets,
+            ),
+        )

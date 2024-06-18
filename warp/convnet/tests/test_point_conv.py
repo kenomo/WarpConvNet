@@ -38,7 +38,14 @@ class TestPointConv(unittest.TestCase):
             neighbor_search_args=search_arg,
         ).to(self.device)
         # Forward pass
-        out = conv(pc)  # noqa: F841
+        out = conv(pc)
+        out.features.mean().backward()
+        # print the conv param grads
+        for name, param in conv.named_parameters():
+            if param.grad is not None:
+                print(name, param.grad.shape)
+            else:
+                print(name, "has no grad")
 
     def test_point_conv_knn(self):
         pc = self.pc

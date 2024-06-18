@@ -36,7 +36,7 @@ class PointConv(BaseModule):
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
-        reductions: List[REDUCTION_TYPES] = ("mean"),
+        reductions: List[REDUCTION_TYPES] = ("mean",),
         downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
@@ -121,7 +121,7 @@ class PointConv(BaseModule):
         self.out_transform_mlp = out_transform_mlp
 
     def __repr__(self):
-        out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels} search_type={self.neighbor_search_type} reductions={self.reductions}"
+        out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels} neighbors={self.neighbor_search_args} reductions={self.reductions}"
         if self.downsample_voxel_size is not None:
             out_str += f" down_voxel_size={self.downsample_voxel_size}"
         if self.use_rel_pos_encode:
@@ -208,12 +208,12 @@ class PointConv(BaseModule):
         out_features = self.out_transform_mlp(out_features)
 
         return PointCollection(
-            coords=BatchedCoordinates(
-                tensors=out_point_features.coords,
+            batched_coordinates=BatchedCoordinates(
+                batched_tensor=out_point_features.coords,
                 offsets=out_point_features.offsets,
             ),
-            features=BatchedFeatures(
-                tensors=out_features,
+            batched_features=BatchedFeatures(
+                batched_tensor=out_features,
                 offsets=out_point_features.offsets,
             ),
         )
