@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn, SEARCH_MODE
+from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn, NEIGHBOR_SEARCH_MODE
 from warp.convnet.geometry.point_collection import PointCollection
 
 
@@ -53,16 +53,25 @@ class TestPointCollection(unittest.TestCase):
         search_result = pc.neighbors(radius=radius)
         self.assertTrue(isinstance(search_result, NeighborSearchReturn))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
-        self.assertTrue(search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel())
+        self.assertTrue(
+            search_result.neighbors_row_splits[-1]
+            == search_result.neighbors_index.numel()
+        )
 
     def test_knn_search(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
-        radius = 0.1
-        search_result = pc.neighbors(mode=SEARCH_MODE.KNN, knn_k=10)
+        knn_k = 10
+        search_result = pc.neighbors(mode=NEIGHBOR_SEARCH_MODE.KNN, knn_k=knn_k)
         self.assertTrue(isinstance(search_result, NeighborSearchReturn))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
-        self.assertTrue(search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel())
+        self.assertTrue(sum(self.Ns) * knn_k == search_result.neighbors_index.numel())
+        self.assertTrue(
+            search_result.neighbors_row_splits[-1]
+            == search_result.neighbors_index.numel()
+        )
+
+    # Test voxel downsample
 
 
 if __name__ == "__main__":

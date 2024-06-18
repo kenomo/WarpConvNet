@@ -7,9 +7,56 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 
-class SEARCH_MODE(Enum):
+class NEIGHBOR_SEARCH_MODE(Enum):
     RADIUS = "radius"
     KNN = "knn"
+    SAME_VOXEL = "same_voxel"
+
+
+class NeighborSearchArgs:
+    """
+    Wrapper for the input of a neighbor search operation.
+    """
+
+    # The mode of the neighbor search
+    _mode: NEIGHBOR_SEARCH_MODE
+    # The radius for radius search
+    _radius: Optional[float]
+    # The number of neighbors for knn search
+    _k: Optional[int]
+    # Grid dim
+    _grid_dim: Optional[int | Tuple[int, int, int]]
+
+    def __init__(
+        self,
+        mode: NEIGHBOR_SEARCH_MODE,
+        radius: Optional[float] = None,
+        k: Optional[int] = None,
+        grid_dim: Optional[int | Tuple[int, int, int]] = None,
+    ):
+        self._mode = mode
+        self._radius = radius
+        self._k = k
+        self._grid_dim = grid_dim
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @property
+    def radius(self):
+        return self._radius
+
+    @property
+    def k(self):
+        return self._k
+    
+    @property
+    def grid_dim(self):
+        return self._grid_dim
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(mode={self._mode})"
 
 
 class NeighborSearchReturn:
@@ -38,7 +85,7 @@ class NeighborSearchReturn:
             M, K = args[0].shape
             self._neighbors_index = args[0].long()
             self._neighbors_row_splits = torch.arange(
-                0, M * K + 1, K, device=args[0].device, dtype=torch.int32
+                0, M * K + 1, K, device=args[0].device, dtype=torch.long
             )
         else:
             raise ValueError(
@@ -57,6 +104,9 @@ class NeighborSearchReturn:
         self._neighbors_index.to(device)
         self._neighbors_row_splits.to(device)
         return self
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(neighbors_index={self._neighbors_index.shape}, neighbors_row_splits={self._neighbors_row_splits.shape})"
 
 
 @wp.kernel
@@ -120,8 +170,11 @@ def _radius_search(
     points: wp.array(dtype=wp.vec3),
     queries: wp.array(dtype=wp.vec3),
     radius: float,
-    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
+    grid_dim: Optional[int | Tuple[int, int, int]] = None,
 ):
+    if grid_dim is None:
+        grid_dim = 128
+
     # convert grid_dim to Tuple if it is int
     if isinstance(grid_dim, int):
         grid_dim = (grid_dim, grid_dim, grid_dim)
@@ -179,7 +232,7 @@ def radius_search(
     points: Float[Tensor, "N 3"],
     queries: Float[Tensor, "M 3"],
     radius: float,
-    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
+    grid_dim: Optional[int | Tuple[int, int, int]] = None,
 ) -> Tuple[
     Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "M + 1"]
 ]:  # noqa: F821
@@ -227,10 +280,8 @@ def batched_radius_search(
     query_positions: Float[Tensor, "M 3"],
     query_offsets: Int[Tensor, "B + 1"],
     radius: float,
-    grid_dim: int | Tuple[int, int, int] = (128, 128, 128),
-) -> Tuple[
-    Float[Tensor, "Q"], Float[Tensor, "Q"], Float[Tensor, "B*M + 1"]
-]:  # noqa: F821
+    grid_dim: Optional[int | Tuple[int, int, int]] = None
+) -> Tuple[Int[Tensor, "Q"], Float[Tensor, "Q"], Int[Tensor, "M + 1"]]:  # noqa: F821
     """
     Args:
         ref_positions: [N, 3]
@@ -243,7 +294,7 @@ def batched_radius_search(
     Returns:
         neighbor_index: [Q]
         neighbor_distance: [Q]
-        neighbor_split: [B*M + 1]
+        neighbor_split: [B + 1]
     """
     B = len(ref_offsets) - 1
     assert B == len(query_offsets) - 1
@@ -277,9 +328,9 @@ def batched_radius_search(
 
     # Neighbor index, Neighbor Distance, Neighbor Split
     return (
-        torch.cat(neighbor_index_list),
+        torch.cat(neighbor_index_list).long(),
         torch.cat(neighbor_distance_list),
-        torch.cat(neighbor_split_list),
+        torch.cat(neighbor_split_list).long(),
     )
 
 
@@ -402,4 +453,102 @@ def batched_knn_search(
             chunk_size,
         )
         neighbors.append(neighbor_index + ref_offsets[b])
-    return torch.cat(neighbors, dim=0)
+    return torch.cat(neighbors, dim=0).long()
+
+
+def batched_voxel_search(
+    ref_positions: Float[Tensor, "N 3"],
+    ref_offsets: Int[Tensor, "B + 1"],
+    query_positions: Float[Tensor, "M 3"],
+    query_offsets: Int[Tensor, "B + 1"],
+) -> Tuple[Int[Tensor, "Q"], Float[Tensor, "Q"], Int[Tensor, "M + 1"]]:  # noqa: F821
+    """
+    Args:
+        ref_positions: [N, 3]
+        ref_offsets: [B + 1]
+        query_positions: [M, 3]
+        query_offsets: [B + 1]
+        radius: float
+        grid_dim: Union[int, Tuple[int, int, int]]
+
+    Returns:
+        neighbor_index: [Q]
+        neighbor_distance: [Q]
+        neighbor_split: [B + 1]
+    """
+    B = len(ref_offsets) - 1
+    assert B == len(query_offsets) - 1
+    assert (
+        ref_offsets[-1] == ref_positions.shape[0]
+    ), f"Last offset {ref_offsets[-1]} != {ref_positions.shape[0]}"
+    assert (
+        query_offsets[-1] == query_positions.shape[0]
+    ), f"Last offset {query_offsets[-1]} != {query_positions.shape[0]}"
+    neighbor_index_list = []
+    neighbor_split_list = []
+    split_offset = 0
+    # create a hash key for BXYZ. Use long int64 and split the key into 4 parts.
+    # Compute bits required for B, and x,y,z
+    bits = 64
+    # B is the number of batches. Find the nearest power of 2
+    bits_b = 1
+    while 2**bits_b < B:
+        bits_b += 1
+    bits_xyz = bits - bits_b
+    raise NotImplementedError
+
+    # Neighbor index, Neighbor Distance, Neighbor Split
+    return (
+        torch.cat(neighbor_index_list).long(),
+        torch.cat(neighbor_split_list).long(),
+    )
+
+
+def neighbor_search(
+    ref_positions: Float[Tensor, "N 3"],
+    ref_offsets: Int[Tensor, "B + 1"],
+    query_positions: Float[Tensor, "M 3"],
+    query_offsets: Int[Tensor, "B + 1"],
+    search_args: NeighborSearchArgs,
+) -> NeighborSearchReturn:
+    """
+    Args:
+        ref_coords: BatchedCoordinates
+        query_coords: BatchedCoordinates
+        search_args: NeighborSearchArgs
+        grid_dim: Union[int, Tuple[int, int, int]]
+
+    Returns:
+        NeighborSearchReturn
+    """
+    if search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS:
+        assert (
+            search_args.radius is not None
+        ), "Radius must be provided for radius search"
+        neighbor_index, neighbor_distance, neighbor_split = batched_radius_search(
+            ref_positions=ref_positions,
+            ref_offsets=ref_offsets,
+            query_positions=query_positions,
+            query_offsets=query_offsets,
+            radius=search_args.radius,
+            grid_dim=search_args.grid_dim,
+        )
+        return NeighborSearchReturn(
+            neighbor_index,
+            neighbor_split,
+        )
+
+    elif search_args.mode == NEIGHBOR_SEARCH_MODE.KNN:
+        assert search_args.k is not None, "knn_k must be provided for knn search"
+        # M x K
+        neighbor_index = batched_knn_search(
+            ref_positions=ref_positions,
+            ref_offsets=ref_offsets,
+            query_positions=query_positions,
+            query_offsets=query_offsets,
+            k=search_args.k,
+        )
+        return NeighborSearchReturn(neighbor_index)
+
+    elif search_args.mode == NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
+        raise NotImplementedError("Grid search not implemented yet")
