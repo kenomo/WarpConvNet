@@ -5,7 +5,7 @@ import torch.distributed as dist
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from warp.convnet.geometry.ops.neighbor_search import (
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NEIGHBOR_SEARCH_MODE,
     NeighborSearchArgs,
 )

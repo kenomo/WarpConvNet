@@ -5,12 +5,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warp.convnet.geometry.ops.neighbor_search import (
-    NeighborSearchArgs,
-    NeighborSearchReturn,
-    neighbor_search,
-)
-from warp.convnet.geometry.ops.voxel_ops import voxel_downsample
+from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
 
 
@@ -96,43 +91,19 @@ class BatchedObject:
 
 
 class BatchedCoordinates(BatchedObject):
-    def check(self):
-        assert self.batched_tensor.shape[-1] == 3, "Coordinates must have 3 dimensions"
-
-    def voxel_downsample(self, voxel_size: float):
-        """
-        Voxel downsample the coordinates
-        """
-        assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
-        perm, down_offsets, _, _ = voxel_downsample(
-            coords=self.batched_tensor,
-            voxel_size=voxel_size,
-            offsets=self.offsets,
-        )
-        return self.__class__(tensors=self.batched_tensor[perm], offsets=down_offsets)
-
     def neighbors(
         self,
-        search_args: NeighborSearchArgs,
-        query_coords: Optional["BatchedCoordinates"] = None,
-    ) -> NeighborSearchReturn:
+        query_coords: "BatchedCoordinates",
+        search_args: dict,
+    ) -> "NeighborSearchResult":
         """
-        Returns CSR format neighbor indices
+        Find the neighbors of the query_coords in the current coordinates.
+
+        Args:
+            query_coords: The coordinates to search for neighbors
+            search_args: Arguments for the search
         """
-        if query_coords is None:
-            query_coords = self
-
-        assert isinstance(
-            query_coords, BatchedCoordinates
-        ), "query_coords must be BatchedCoordinates"
-
-        return neighbor_search(
-            self.batched_tensor,
-            self.offsets,
-            query_coords.batched_tensor,
-            query_coords.offsets,
-            search_args,
-        )
+        raise NotImplementedError
 
 
 class BatchedFeatures(BatchedObject):

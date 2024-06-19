@@ -3,10 +3,10 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.neighbor_search import (
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NEIGHBOR_SEARCH_MODE,
     NeighborSearchArgs,
-    NeighborSearchReturn,
+    NeighborSearchResult,
 )
 from warp.convnet.geometry.point_collection import PointCollection
 
@@ -52,7 +52,7 @@ class TestPointCollection(unittest.TestCase):
             radius=radius,
         )
         search_result = pc.batched_coordinates.neighbors(args)
-        self.assertTrue(isinstance(search_result, NeighborSearchReturn))
+        self.assertTrue(isinstance(search_result, NeighborSearchResult))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
         self.assertTrue(
             search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel()
@@ -67,7 +67,7 @@ class TestPointCollection(unittest.TestCase):
             k=knn_k,
         )
         search_result = pc.batched_coordinates.neighbors(args)
-        self.assertTrue(isinstance(search_result, NeighborSearchReturn))
+        self.assertTrue(isinstance(search_result, NeighborSearchResult))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
         self.assertTrue(sum(self.Ns) * knn_k == search_result.neighbors_index.numel())
         self.assertTrue(

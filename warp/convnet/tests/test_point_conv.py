@@ -3,7 +3,7 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.neighbor_search import (
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NEIGHBOR_SEARCH_MODE,
     NeighborSearchArgs,
 )

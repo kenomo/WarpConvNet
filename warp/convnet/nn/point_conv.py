@@ -3,7 +3,7 @@ from typing import List, Literal, Optional
 import torch
 import torch.nn as nn
 
-from warp.convnet.geometry.ops.neighbor_search import (
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NEIGHBOR_SEARCH_MODE,
     NeighborSearchArgs,
 )

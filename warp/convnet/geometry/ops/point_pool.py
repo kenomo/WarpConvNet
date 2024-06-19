@@ -5,7 +5,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn
+from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warp.convnet.nn.encoding import sinusoidal_encode
 from warp.convnet.ops.reductions import REDUCTION_TYPES, REDUCTIONS, row_reduction
 
@@ -44,7 +44,7 @@ class FeaturePoolingArgs:
 def pool_features(
     in_feats: Float[Tensor, "N C"],  # noqa: F722,F821
     down_coords: Float[Tensor, "M D"],  # noqa: F722,F821
-    neighbors: NeighborSearchReturn,
+    neighbors: NeighborSearchResult,
     pooling_args: FeaturePoolingArgs,
     perm: Optional[Int[Tensor, "M"]] = None,  # noqa: F722,F821
 ) -> Float[Tensor, "M C"]:  # noqa: F722,F821
@@ -74,7 +74,7 @@ def pool_features(
 
 def _pool_reductions(
     in_feats: Float[Tensor, "N C"],  # noqa: F722,F821
-    neighbors: NeighborSearchReturn,
+    neighbors: NeighborSearchResult,
     pooling_args: FeaturePoolingArgs,
 ) -> Float[Tensor, "M C"]:  # noqa: F722,F821
     """

@@ -60,7 +60,7 @@ class NeighborSearchArgs:
         return f"{self.__class__.__name__}(mode={self._mode})"
 
 
-class NeighborSearchReturn:
+class NeighborSearchResult:
     """
     Wrapper for the output of a neighbor search operation.
     """
@@ -455,7 +455,7 @@ def neighbor_search(
     query_positions: Float[Tensor, "M 3"],  # noqa: F821
     query_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     search_args: NeighborSearchArgs,
-) -> NeighborSearchReturn:
+) -> NeighborSearchResult:
     """
     Args:
         ref_coords: BatchedCoordinates
@@ -476,7 +476,7 @@ def neighbor_search(
             radius=search_args.radius,
             grid_dim=search_args.grid_dim,
         )
-        return NeighborSearchReturn(
+        return NeighborSearchResult(
             neighbor_index,
             neighbor_split,
         )
@@ -491,7 +491,7 @@ def neighbor_search(
             query_offsets=query_offsets,
             k=search_args.k,
         )
-        return NeighborSearchReturn(neighbor_index)
+        return NeighborSearchResult(neighbor_index)
 
     elif search_args.mode == NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
         raise NotImplementedError("Grid search not implemented yet")

@@ -8,7 +8,11 @@ from warp.convnet.geometry.base_geometry import (
     BatchedFeatures,
     BatchedSpatialFeatures,
 )
-from warp.convnet.geometry.ops.neighbor_search import NeighborSearchReturn
+from warp.convnet.geometry.ops.neighbor_search import (
+    NeighborSearchArgs,
+    NeighborSearchResult,
+    neighbor_search,
+)
 from warp.convnet.geometry.ops.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
@@ -16,6 +20,46 @@ from warp.convnet.geometry.ops.point_pool import (
 )
 from warp.convnet.geometry.ops.voxel_ops import voxel_downsample
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sort_point_collection
+
+
+class BatchedContinuousCoordinates(BatchedCoordinates):
+    def check(self):
+        assert self.batched_tensor.shape[-1] == 3, "Coordinates must have 3 dimensions"
+
+    def voxel_downsample(self, voxel_size: float):
+        """
+        Voxel downsample the coordinates
+        """
+        assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
+        perm, down_offsets, _, _ = voxel_downsample(
+            coords=self.batched_tensor,
+            voxel_size=voxel_size,
+            offsets=self.offsets,
+        )
+        return self.__class__(tensors=self.batched_tensor[perm], offsets=down_offsets)
+
+    def neighbors(
+        self,
+        search_args: NeighborSearchArgs,
+        query_coords: Optional["BatchedCoordinates"] = None,
+    ) -> NeighborSearchResult:
+        """
+        Returns CSR format neighbor indices
+        """
+        if query_coords is None:
+            query_coords = self
+
+        assert isinstance(
+            query_coords, BatchedCoordinates
+        ), "query_coords must be BatchedCoordinates"
+
+        return neighbor_search(
+            self.batched_tensor,
+            self.offsets,
+            query_coords.batched_tensor,
+            query_coords.offsets,
+            search_args,
+        )
 
 
 class PointCollection(BatchedSpatialFeatures):
@@ -28,7 +72,8 @@ class PointCollection(BatchedSpatialFeatures):
 
     def __init__(
         self,
-        batched_coordinates: List[Float[Tensor, "N 3"]] | BatchedCoordinates,  # noqa: F722,F821
+        batched_coordinates: List[Float[Tensor, "N 3"]]
+        | BatchedContinuousCoordinates,  # noqa: F722,F821
         batched_features: List[Float[Tensor, "N C"]] | BatchedFeatures,  # noqa: F722,F821
         _ordering: POINT_ORDERING = POINT_ORDERING.RANDOM,
     ):
@@ -42,7 +87,7 @@ class PointCollection(BatchedSpatialFeatures):
             assert len(batched_coordinates) == len(batched_features)
             # Assert all elements in coords and features have same length
             assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
-            batched_coordinates = BatchedCoordinates(batched_coordinates)
+            batched_coordinates = BatchedContinuousCoordinates(batched_coordinates)
             batched_features = BatchedFeatures(batched_features)
 
         assert isinstance(batched_features, BatchedFeatures) and isinstance(
@@ -75,7 +120,7 @@ class PointCollection(BatchedSpatialFeatures):
             offsets=self.batched_coordinates.offsets,
         )
         return self.__class__(
-            batched_coordinates=BatchedCoordinates(
+            batched_coordinates=BatchedContinuousCoordinates(
                 sorted_coords, offsets=self.batched_coordinates.offsets
             ),
             batched_features=BatchedFeatures(sorted_feats, offsets=self.batched_features.offsets),
@@ -98,11 +143,13 @@ class PointCollection(BatchedSpatialFeatures):
 
         if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
             return self.__class__(
-                coords=BatchedCoordinates(batched_tensor=self.coords[perm], offsets=down_offsets),
+                coords=BatchedContinuousCoordinates(
+                    batched_tensor=self.coords[perm], offsets=down_offsets
+                ),
                 features=BatchedFeatures(batched_tensor=self.features[perm], offsets=down_offsets),
             )
 
-        neighbors = NeighborSearchReturn(vox_inices, vox_offsets)
+        neighbors = NeighborSearchResult(vox_inices, vox_offsets)
         down_coords = self.coords[perm]
         down_features = pool_features(
             in_feats=self.features,
@@ -112,7 +159,7 @@ class PointCollection(BatchedSpatialFeatures):
         )
 
         return self.__class__(
-            batched_coordinates=BatchedCoordinates(
+            batched_coordinates=BatchedContinuousCoordinates(
                 batched_tensor=down_coords, offsets=down_offsets
             ),
             batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
