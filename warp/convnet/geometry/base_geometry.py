@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 from jaxtyping import Float, Int
@@ -7,6 +7,25 @@ from torch import Tensor
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
+
+
+def _list_to_batched_tensor(
+    tensor_list: List[Float[Tensor, "N C"]]  # noqa: F821
+) -> Tuple[Float[Tensor, "N C"], Int[Tensor, "B+1"], int]:  # noqa: F821
+    """
+    Convert a list of tensors to a batched tensor.
+
+    Args:
+        tensor_list: List of tensors to batch
+
+    Returns:
+        A tuple of the batched tensor, offsets, and batch size
+    """
+    offsets = [0] + [len(c) for c in tensor_list]
+    # cumsum the offsets
+    offsets = torch.tensor(offsets, requires_grad=False).cumsum(dim=0).int()
+    batched_tensor = torch.cat(tensor_list, dim=0)
+    return batched_tensor, offsets, len(offsets) - 1
 
 
 @dataclass
@@ -32,24 +51,17 @@ class BatchedObject:
             tensors are assumed to be a list.
         """
         if isinstance(batched_tensor, list):
-            assert offsets is None, "If tensors is a list, offsets must be None."
-            offsets = [0] + [len(c) for c in batched_tensor]
-            # cumsum the offsets
-            offsets = torch.tensor(offsets, requires_grad=False).cumsum(dim=0).int()
-            batched_tensor = torch.cat(batched_tensor, dim=0)
+            assert (
+                offsets is None and batch_size is None
+            ), "If batched_tensors is a list, offsets must be None."
+            batched_tensor, offsets, batch_size = _list_to_batched_tensor(batched_tensor)
 
-        assert offsets is not None and isinstance(batched_tensor, torch.Tensor)
-        assert (
-            batched_tensor.shape[0] == offsets[-1]
-        ), f"Offsets {offsets} does not match tensors {batched_tensor.shape}"
+        if isinstance(offsets, list):
+            offsets = torch.LongTensor(offsets, requires_grad=False)
+
         if batch_size is None:
             batch_size = len(offsets) - 1
-        assert (
-            len(offsets) == batch_size + 1
-        ), f"Offsets {offsets} does not match batch size {batch_size}"
-        if isinstance(offsets, list):
-            offsets = torch.tensor(offsets, requires_grad=False).int()
-        assert isinstance(offsets, torch.Tensor) and offsets.requires_grad is False
+
         self.batch_size = batch_size
         self.offsets = offsets
         self.batched_tensor = batched_tensor
@@ -57,7 +69,19 @@ class BatchedObject:
         self.check()
 
     def check(self):
-        raise NotImplementedError
+        # offset check
+        assert isinstance(
+            self.offsets, (torch.IntTensor, torch.LongTensor)
+        ), f"Offsets must be a tensor, got {type(self.offsets)}"
+        assert self.offsets.requires_grad is False, "Offsets must not require grad"
+        assert (
+            len(self.offsets) == self.batch_size + 1
+        ), f"Offsets {self.offsets} does not match batch size {self.batch_size}"
+        # batched_tensor check
+        assert (
+            self.batched_tensor.shape[0] == self.offsets[-1]
+        ), f"Offsets {self.offsets} does not match tensors {self.batched_tensor.shape}"
+        assert isinstance(self.batched_tensor, torch.Tensor)
 
     def to(self, device: str) -> "BatchedObject":
         return self.__class__(
@@ -76,6 +100,24 @@ class BatchedObject:
     @property
     def dtype(self):
         return self.batched_tensor.dtype
+
+    def half(self):
+        return self.__class__(
+            batched_tensor=self.batched_tensor.half(),
+            offsets=self.offsets,
+        )
+
+    def float(self):
+        return self.__class__(
+            batched_tensor=self.batched_tensor.float(),
+            offsets=self.offsets,
+        )
+
+    def double(self):
+        return self.__class__(
+            batched_tensor=self.batched_tensor.double(),
+            offsets=self.offsets,
+        )
 
     def numel(self):
         return self.batched_tensor.numel()
@@ -107,9 +149,6 @@ class BatchedCoordinates(BatchedObject):
 
 
 class BatchedFeatures(BatchedObject):
-    def check(self):
-        pass
-
     @property
     def num_channels(self):
         return self.batched_tensor.shape[-1]
@@ -127,6 +166,22 @@ class BatchedSpatialFeatures:
     batched_coordinates: BatchedCoordinates
     batched_features: BatchedFeatures
     _ordering: POINT_ORDERING
+
+    def __init__(
+        self,
+        batched_coordinates: BatchedCoordinates,
+        batched_features: BatchedFeatures,
+        _ordering: POINT_ORDERING = POINT_ORDERING.RANDOM,
+    ):
+        assert isinstance(batched_features, BatchedFeatures) and isinstance(
+            batched_coordinates, BatchedCoordinates
+        )
+        assert len(batched_coordinates) == len(batched_features)
+        assert (batched_coordinates.offsets == batched_features.offsets).all()
+        # The rest of the shape checks are assumed to be done in the BatchedObject
+        self.batched_coordinates = batched_coordinates
+        self.batched_features = batched_features
+        self._ordering = _ordering
 
     def __len__(self) -> int:
         return self.batched_coordinates.batch_size
@@ -171,3 +226,24 @@ class BatchedSpatialFeatures:
 
     def sort(self):
         raise NotImplementedError
+
+    def half(self):
+        return self.__class__(
+            batched_coordinates=self.batched_coordinates.half(),
+            batched_features=self.batched_features.half(),
+            _ordering=self._ordering,
+        )
+
+    def float(self):
+        return self.__class__(
+            batched_coordinates=self.batched_coordinates.float(),
+            batched_features=self.batched_features.float(),
+            _ordering=self._ordering,
+        )
+
+    def double(self):
+        return self.__class__(
+            batched_coordinates=self.batched_coordinates.double(),
+            batched_features=self.batched_features.double(),
+            _ordering=self._ordering,
+        )

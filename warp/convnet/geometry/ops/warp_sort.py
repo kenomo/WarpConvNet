@@ -1,13 +1,13 @@
 # Sort the point collection features using Z-ordering
+from enum import Enum
 from typing import Tuple
 
-from enum import Enum
-from jaxtyping import Float, Int
-
 import torch
+from jaxtyping import Float, Int
 from torch import Tensor
 
 import warp as wp
+from warp.convnet.utils.argsort import argsort
 
 
 class POINT_ORDERING(Enum):
@@ -25,8 +25,8 @@ def _part1by2(n: int) -> int:
 
 
 @wp.kernel
-def _assign_order(
-    points: wp.array(dtype=wp.vec3),
+def _assign_order_continuous(
+    points: wp.array(dtype=wp.vec3f),
     result_order: wp.array(dtype=wp.int32),
     grid_size: int = 1024,  # 10 bits for each x, y, z
 ) -> None:
@@ -44,47 +44,82 @@ def _assign_order(
     result_order[tid] = (_part1by2(uz) << 2) | (_part1by2(uy) << 1) | _part1by2(ux)
 
 
-def assign_rank(
-    coords: Float[Tensor, "N 3"],
+@wp.kernel
+def _assign_order_discrete(
+    coords: wp.array(dtype=wp.vec3i),
+    result_order: wp.array(dtype=wp.int32),
+    min_coord: wp.vec3i,
+    grid_size: int = 1024,
+) -> None:
+    tid = wp.tid()
+    # Assign result_order the z-order number of the point. Assume the points are in the range [0, 1]
+    coord = coords[tid]
+    ux = wp.clamp(coord[0] - min_coord[0], 0, grid_size - 1)
+    uy = wp.clamp(coord[1] - min_coord[1], 0, grid_size - 1)
+    uz = wp.clamp(coord[2] - min_coord[2], 0, grid_size - 1)
+    result_order[tid] = (_part1by2(uz) << 2) | (_part1by2(uy) << 1) | _part1by2(ux)
+
+
+def sort_permutation(
+    coords: Float[Tensor, "N 3"] | Int[Tensor, "N 3"],  # noqa: F821
+    offsets: Int[Tensor, "B"] = None,  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
     grid_size: int = 1024,
-) -> Int[Tensor, "N"]:
+) -> Int[Tensor, "N"]:  # noqa: F821
     """
     Sort the points according to the ordering provided.
 
     The coords must be in the range [0, 1] and the result_order will be the z-order number of the point.
     """
+    device = str(coords.device)
     if ordering == POINT_ORDERING.Z_ORDER:
-        wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int32, device=str(coords.device))
+        wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int32, device=device)
         # Convert torch coords to wp.array of vec3
-        wp_coords = wp.from_torch(coords, dtype=wp.vec3)
-        wp.launch(_assign_order, len(coords), inputs=[wp_coords, wp_result_rank, grid_size])
-        result_rank = wp.to_torch(wp_result_rank)
-        return result_rank
+        if coords.dtype == torch.int32:
+            wp_coords = wp.from_torch(coords, dtype=wp.vec3i)
+            min_coord = wp_coords.min(dim=0)[0]
+            wp.launch(
+                _assign_order_discrete,
+                len(coords),
+                inputs=[wp_coords, wp_result_rank, min_coord, grid_size],
+            )
+        elif coords.dtype == torch.float32:
+            wp_coords = wp.from_torch(coords, dtype=wp.vec3f)
+            wp.launch(
+                _assign_order_continuous,
+                len(coords),
+                inputs=[wp_coords, wp_result_rank, grid_size],
+            )
+        else:
+            raise NotImplementedError(f"Coords dtype {coords.dtype} not implemented")
+
     else:
         raise NotImplementedError(f"Ordering {ordering} not implemented")
 
+    # Sort withint each offsets.
+    perm = argsort(wp_result_rank, device)
+    return wp.to_torch(perm)
+
 
 def sort_point_collection(
-    coords: Float[Tensor, "N 3"],
-    features: Float[Tensor, "N C"],
+    coords: Float[Tensor, "N 3"] | Int[Tensor, "N 3"],  # noqa: F821
+    features: Float[Tensor, "N C"],  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
     grid_size: int = 1024,
-    offsets: Int[Tensor, "B"] = None,
-) -> Tuple[Float[Tensor, "N 3"], Float[Tensor, "N C"]]:
+    offsets: Int[Tensor, "B"] = None,  # noqa: F821
+) -> Tuple[Float[Tensor, "N 3"], Float[Tensor, "N C"]]:  # noqa: F821
     """
     Sort the point collection features using Z-ordering
     """
-    rank = assign_rank(coords, ordering, grid_size)
     if offsets is None:
         # Torch sort
-        sorted_order = torch.argsort(rank)
+        sorted_order = sort_permutation(coords, offsets, ordering, grid_size)
     else:
         # Sort within each batch
         sorted_order = []
         # TODO(cchoy) accelerate for loop
         for i in range(len(offsets) - 1):
-            argsort = torch.argsort(rank[offsets[i] : offsets[i + 1]])
+            argsort = torch.argsort(rank[offsets[i] : offsets[i + 1]])  # noqa: F821
             sorted_order.append(argsort + offsets[i])
         sorted_order = torch.cat(sorted_order)
 

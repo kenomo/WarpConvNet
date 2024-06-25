@@ -8,7 +8,7 @@ from warp.convnet.geometry.base_geometry import (
     BatchedFeatures,
     BatchedSpatialFeatures,
 )
-from warp.convnet.geometry.ops.neighbor_search import (
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NeighborSearchArgs,
     NeighborSearchResult,
     neighbor_search,
@@ -24,6 +24,7 @@ from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sort_point_colle
 
 class BatchedContinuousCoordinates(BatchedCoordinates):
     def check(self):
+        BatchedCoordinates.check(self)
         assert self.batched_tensor.shape[-1] == 3, "Coordinates must have 3 dimensions"
 
     def voxel_downsample(self, voxel_size: float):
@@ -72,8 +73,9 @@ class PointCollection(BatchedSpatialFeatures):
 
     def __init__(
         self,
-        batched_coordinates: List[Float[Tensor, "N 3"]]
-        | BatchedContinuousCoordinates,  # noqa: F722,F821
+        batched_coordinates: (
+            List[Float[Tensor, "N 3"]] | BatchedContinuousCoordinates
+        ),  # noqa: F722,F821
         batched_features: List[Float[Tensor, "N C"]] | BatchedFeatures,  # noqa: F722,F821
         _ordering: POINT_ORDERING = POINT_ORDERING.RANDOM,
     ):
@@ -90,15 +92,7 @@ class PointCollection(BatchedSpatialFeatures):
             batched_coordinates = BatchedContinuousCoordinates(batched_coordinates)
             batched_features = BatchedFeatures(batched_features)
 
-        assert isinstance(batched_features, BatchedFeatures) and isinstance(
-            batched_coordinates, BatchedCoordinates
-        )
-        assert len(batched_coordinates) == len(batched_features)
-        assert (batched_coordinates.offsets == batched_features.offsets).all()
-        # The rest of the shape checks are assumed to be done in the BatchedObject
-        self.batched_coordinates = batched_coordinates
-        self.batched_features = batched_features
-        self._ordering = _ordering
+        BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, _ordering)
 
     def sort(
         self,

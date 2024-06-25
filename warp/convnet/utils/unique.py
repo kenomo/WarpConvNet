@@ -1,7 +1,22 @@
+from typing import Tuple
+
 import torch
+from jaxtyping import Int
+from torch import Tensor
+
+import warp as wp
+from warp.convnet.core.hashmap import VectorHashTable
 
 
-def unique(x: torch.Tensor, dim: int = 0, stable: bool = False):
+def unique_torch(
+    x: Int[Tensor, "N C"], dim: int = 0, stable: bool = False
+) -> Tuple[  # noqa: F821
+    Int[Tensor, "M C"],  # noqa: F821
+    Int[Tensor, "N"],  # noqa: F821
+    Int[Tensor, "N"],  # noqa: F821
+    Int[Tensor, "M+1"],  # noqa: F821
+    Int[Tensor, "M"],  # noqa: F821
+]:
     """
     Get unique elements along a dimension.
 
@@ -34,3 +49,15 @@ def unique(x: torch.Tensor, dim: int = 0, stable: bool = False):
         all_to_unique_offsets,
         perm,
     )
+
+
+def unique_hashmap(
+    bcoords: Int[Tensor, "N 4"]  # noqa: F821
+) -> Tuple[Int[Tensor, "M"], VectorHashTable]:  # noqa: F821
+    # Append batch index to the coordinates
+    assert "cuda" in str(
+        bcoords.device
+    ), f"Batched coordinates must be on cuda device, got {bcoords.device}"
+    table = VectorHashTable(2 * len(bcoords))
+    table.insert(wp.from_torch(bcoords, dtype=wp.vec4i))
+    return table.unique_index(), table  # this is a torch tensor
