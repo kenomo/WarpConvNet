@@ -5,7 +5,7 @@ from jaxtyping import Int
 from torch import Tensor
 
 import warp as wp
-from warp.convnet.core.hashmap import VectorHashTable
+from warp.convnet.core.hashmap import HashMethod, VectorHashTable
 
 
 def unique_torch(
@@ -52,12 +52,13 @@ def unique_torch(
 
 
 def unique_hashmap(
-    bcoords: Int[Tensor, "N 4"]  # noqa: F821
+    bcoords: Int[Tensor, "N 4"],  # noqa: F821
+    hash_method: HashMethod = HashMethod.FNV1A,
 ) -> Tuple[Int[Tensor, "M"], VectorHashTable]:  # noqa: F821
     # Append batch index to the coordinates
     assert "cuda" in str(
         bcoords.device
     ), f"Batched coordinates must be on cuda device, got {bcoords.device}"
-    table = VectorHashTable(2 * len(bcoords))
+    table = VectorHashTable(2 * len(bcoords), hash_method)
     table.insert(wp.from_torch(bcoords, dtype=wp.vec4i))
     return table.unique_index(), table  # this is a torch tensor

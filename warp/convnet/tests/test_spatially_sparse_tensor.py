@@ -2,6 +2,7 @@ import unittest
 
 import torch
 
+from warp.convnet.core.hashmap import HashMethod
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 from warp.convnet.utils.timer import Timer
@@ -10,7 +11,10 @@ from warp.convnet.utils.unique import unique_hashmap, unique_torch
 
 class TestSpatiallySparseTensor(unittest.TestCase):
     def setUp(self) -> None:
-        self.B, min_N, max_N, self.C = 3, 10000, 100000, 7
+        # Set random seed
+        torch.manual_seed(0)
+
+        self.B, min_N, max_N, self.C = 3, 100000, 1000000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.voxel_size = 0.01
         self.coords = [(torch.rand((N, 3)) / self.voxel_size).int() for N in self.Ns]
@@ -38,9 +42,9 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         coords = st.batched_coordinates
         hash_timer, torch_timer = Timer(), Timer()
         bcoords = batch_indexed_coordinates(coords.batched_tensor, coords.offsets)
-        for _ in range(10):
+        for _ in range(20):
             with hash_timer:
-                unique_index, hash_table = unique_hashmap(bcoords)
+                unique_index, hash_table = unique_hashmap(bcoords, HashMethod.CITY)
 
             with torch_timer:
                 (
@@ -51,12 +55,13 @@ class TestSpatiallySparseTensor(unittest.TestCase):
                     perm,
                 ) = unique_torch(bcoords, dim=0)
 
+        self.assertTrue(len(unique_index) == len(perm), f"{len(unique_index)} != {len(perm)}")
+        self.assertTrue((bcoords[unique_index].unique(dim=0) == unique_coords).all())
+
         print(f"Coord size: {coords.batched_tensor.shape}, N unique: {len(unique_index)}")
         print(f"Hashmap min time: {hash_timer.min_elapsed:.4e} s")
         print(f"Torch min time: {torch_timer.min_elapsed:.4e} s")
         print(f"Speedup: {torch_timer.min_elapsed / hash_timer.min_elapsed:.4e}")
-
-        self.assertTrue(len(unique_index) == len(perm), f"{len(unique_index)} != {len(perm)}")
 
 
 if __name__ == "__main__":

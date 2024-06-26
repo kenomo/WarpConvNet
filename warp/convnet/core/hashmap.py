@@ -1,9 +1,18 @@
+import enum
+
 import numpy as np
 import torch
 from jaxtyping import Int
 from torch import Tensor
 
 import warp as wp
+
+
+class HashMethod(enum.Enum):
+    FNV1A = 0
+    CITY = 1
+    MURMUR = 2
+
 
 # CUDA snippet for atomicCAS function
 atomic_cas_snippet = """
@@ -30,31 +39,38 @@ def hash_fnv1a(key: wp.vec4i, capacity: int) -> int:
 
 
 @wp.func
-def murmur_hash3(key: wp.vec4i, capacity: int) -> int:
-    c1 = 0xCC9E2D51
-    c2 = 0x1B873593
-    r1 = 15
-    r2 = 13
-    m = 5
-    n = 0xE6546B64
-
-    hash_val = 0
-
-    for i in range(4):
-        k = key[i]
-        k = k * c1
-        k = (k << r1) | (k >> (32 - r1))
-        k = k * c2
-
-        hash_val = hash_val ^ k
-        hash_val = (hash_val << r2) | (hash_val >> (32 - r2))
-        hash_val = hash_val * m + n
-
-    return (hash_val % capacity + capacity) % capacity
+def murmur_32_scramble(k: int) -> int:
+    k *= 0xCC9E2D51
+    k = (k << 15) | (k >> 17)
+    k *= 0x1B873593
+    return k
 
 
 @wp.func
-def city_hash(key: wp.vec4i, capacity: int) -> int:
+def hash_murmur(key: wp.vec4i, capacity: int) -> int:
+    h = 0x9747B28C
+
+    # Process each of the 4 integers in the vec4i key
+    for i in range(4):
+        k = key[i]
+        h ^= murmur_32_scramble(k)
+        h = (h << 13) | (h >> 19)
+        h = h * 5 + 0xE6546B64
+
+    # Finalize
+    h ^= 16  # Length of the key in bytes (4 ints * 4 bytes each)
+    h ^= h >> 16
+    h *= 0x85EBCA6B
+    h ^= h >> 13
+    h *= 0xC2B2AE35
+    h ^= h >> 16
+
+    # Ensure the hash value is positive
+    return ((h % capacity) + capacity) % capacity
+
+
+@wp.func
+def hash_city(key: wp.vec4i, capacity: int) -> int:
     hash_val = 0
     for i in range(4):
         hash_val += key[i] * 0x9E3779B9
@@ -68,37 +84,15 @@ def city_hash(key: wp.vec4i, capacity: int) -> int:
 
 
 @wp.func
-def xx_hash(key: wp.vec4i, capacity: int) -> int:
-    prime1 = 0x9E3779B1
-    prime2 = 0x85EBCA77
-    prime3 = 0xC2B2AE3D
-    prime4 = 0x27D4EB2F
-    prime5 = 0x165667B1
-
-    hash_val = 0
-
-    for i in range(4):
-        hash_val += key[i] * prime3
-        hash_val = (hash_val << 13) | (hash_val >> (32 - 13))
-        hash_val *= prime1
-
-    hash_val += 4 * prime5
-    hash_val ^= hash_val >> 15
-    hash_val *= prime2
-    hash_val ^= hash_val >> 13
-    hash_val *= prime4
-    hash_val ^= hash_val >> 16
-
-    return (hash_val % capacity + capacity) % capacity
-
-
-@wp.func
-def djb_hash(key: wp.vec4i, capacity: int) -> int:
-    hash_val = 5381
-    for i in range(4):
-        hash_val = ((hash_val << 5) + hash_val) + key[i]
-
-    return (hash_val % capacity + capacity) % capacity
+def hash_selection(hash_method: int, key: wp.vec4i, capacity: int) -> int:
+    if hash_method == 0:
+        return hash_fnv1a(key, capacity)
+    elif hash_method == 1:
+        return hash_city(key, capacity)
+    elif hash_method == 2:
+        return hash_murmur(key, capacity)
+    else:
+        return hash_fnv1a(key, capacity)
 
 
 @wp.func
@@ -115,9 +109,10 @@ def insert_kernel(
     table_kvs: wp.array(dtype=int),
     vec_keys: wp.array(dtype=wp.vec4i),
     table_capacity: int,
+    hash_method: int,
 ):
     idx = wp.tid()
-    slot = hash_fnv1a(vec_keys[idx], table_capacity)
+    slot = hash_selection(hash_method, vec_keys[idx], table_capacity)
     initial_slot = slot
     while True:
         prev = atomicCAS(table_kvs, 2 * slot, -1, slot)
@@ -137,10 +132,11 @@ def insert_unique_kernel(
     table_kvs: wp.array(dtype=int),
     vec_keys: wp.array(dtype=wp.vec4i),
     table_capacity: int,
+    hash_method: int,
 ):
     idx = wp.tid()
     vec_key = vec_keys[idx]
-    slot = hash_fnv1a(vec_key, table_capacity)
+    slot = hash_selection(hash_method, vec_key, table_capacity)
     initial_slot = slot
 
     while True:
@@ -167,10 +163,11 @@ def search_kernel(
     search_keys: wp.array(dtype=wp.vec4i),
     search_results: wp.array(dtype=int),
     table_capacity: int,
+    hash_method: int,
 ):
     idx = wp.tid()
     key = search_keys[idx]
-    slot = hash_fnv1a(key, table_capacity)
+    slot = hash_selection(hash_method, vec_keys[idx], table_capacity)
     initial_slot = slot
 
     while True:
@@ -202,9 +199,12 @@ class VectorHashTable:
     _table_kv: wp.array(dtype=wp.vec2i) = None
     _vector_keys: wp.array(dtype=wp.vec4i) = None
     capacity: int = 0
+    hash_method: int = 0
 
-    def __init__(self, capacity: int):
+    def __init__(self, capacity: int, hash_method: HashMethod = HashMethod.CITY):
         self.capacity = capacity
+        assert isinstance(hash_method, HashMethod)
+        self.hash_method = hash_method.value
 
     # setter and getter for table_kv
     @property
@@ -240,7 +240,7 @@ class VectorHashTable:
         wp.launch(
             kernel=insert_kernel,
             dim=len(vec_keys),
-            inputs=[self.table_kv, vec_keys, self.capacity],
+            inputs=[self.table_kv, vec_keys, self.capacity, self.hash_method],
         )
 
     def search(self, search_keys: wp.array(dtype=wp.vec4i)) -> wp.array(dtype=int):
@@ -248,7 +248,14 @@ class VectorHashTable:
         wp.launch(
             kernel=search_kernel,
             dim=len(search_keys),
-            inputs=[self.table_kv, self._vector_keys, search_keys, results, self.capacity],
+            inputs=[
+                self.table_kv,
+                self._vector_keys,
+                search_keys,
+                results,
+                self.capacity,
+                self.hash_method,
+            ],
         )
         return results
 
