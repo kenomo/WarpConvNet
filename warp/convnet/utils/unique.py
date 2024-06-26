@@ -26,7 +26,11 @@ def unique_torch(
         stable: bool
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        unique: unique coordinates
+        to_orig_indices: indices to original coordinates. unique[to_orig_indices] == x
+        all_to_unique_indices: indices to unique coordinates. x[all_to_unique_indices] == unique
+        all_to_unique_offsets: offsets to unique coordinates.
+        perm: permutation to sort x to unique. x[perm] == unique
 
     from https://github.com/pytorch/pytorch/issues/36748
     """
@@ -55,6 +59,15 @@ def unique_hashmap(
     bcoords: Int[Tensor, "N 4"],  # noqa: F821
     hash_method: HashMethod = HashMethod.FNV1A,
 ) -> Tuple[Int[Tensor, "M"], VectorHashTable]:  # noqa: F821
+    """
+    Args:
+        bcoords: Batched coordinates.
+        hash_method: Hash method.
+
+    Returns:
+        perm: Permutation to sort x to unique. x[perm] will be unique.
+        hash_table: Hash table.
+    """
     # Append batch index to the coordinates
     assert "cuda" in str(
         bcoords.device

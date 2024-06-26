@@ -8,6 +8,7 @@ from torch import Tensor
 
 import warp as wp
 from warp.convnet.utils.argsort import argsort
+from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
 class POINT_ORDERING(Enum):
@@ -115,13 +116,9 @@ def sort_point_collection(
         # Torch sort
         sorted_order = sort_permutation(coords, offsets, ordering, grid_size)
     else:
-        # Sort within each batch
-        sorted_order = []
-        # TODO(cchoy) accelerate for loop
-        for i in range(len(offsets) - 1):
-            argsort = torch.argsort(rank[offsets[i] : offsets[i + 1]])  # noqa: F821
-            sorted_order.append(argsort + offsets[i])
-        sorted_order = torch.cat(sorted_order)
+        # Get batch index
+        bcoords = batch_indexed_coordinates(coords, offsets)
+        sorted_order = sort_permutation(bcoords, offsets, ordering, grid_size)
 
     sorted_order = sorted_order.long()
     return coords[sorted_order], features[sorted_order]

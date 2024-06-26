@@ -74,7 +74,16 @@ class TestPointCollection(unittest.TestCase):
             search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel()
         )
 
-    # Test voxel downsample
+    def test_voxel_downsample(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        voxel_size = 0.1
+        downsampled_pc = pc.voxel_downsample(voxel_size)
+        self.assertTrue(downsampled_pc.batched_coordinates.batched_tensor.shape[1] == 3)
+        self.assertTrue(
+            downsampled_pc.batched_features.batched_tensor.shape[0]
+            == downsampled_pc.batched_coordinates.batched_tensor.shape[0]
+        )
 
 
 if __name__ == "__main__":

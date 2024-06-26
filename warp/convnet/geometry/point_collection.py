@@ -14,11 +14,15 @@ from warp.convnet.geometry.ops.neighbor_search_continuous import (
     neighbor_search,
 )
 from warp.convnet.geometry.ops.point_pool import (
+    DEFAULT_FEATURE_POOLING_ARGS,
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
     pool_features,
 )
-from warp.convnet.geometry.ops.voxel_ops import voxel_downsample
+from warp.convnet.geometry.ops.voxel_ops import (
+    voxel_downsample,
+    voxel_downsample_hashmap,
+)
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sort_point_collection
 
 
@@ -32,7 +36,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         Voxel downsample the coordinates
         """
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
-        perm, down_offsets, _, _ = voxel_downsample(
+        perm, down_offsets = voxel_downsample_hashmap(
             coords=self.batched_tensor,
             voxel_size=voxel_size,
             offsets=self.offsets,
@@ -123,25 +127,32 @@ class PointCollection(BatchedSpatialFeatures):
     def voxel_downsample(
         self,
         voxel_size: float,
-        pooling_args: FeaturePoolingArgs,
+        pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS,
     ):
         """
         Voxel downsample the coordinates
         """
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
+        if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
+            perm, down_offsets = voxel_downsample_hashmap(
+                batched_points=self.coords,
+                offsets=self.offsets,
+                voxel_size=voxel_size,
+            )
+            return self.__class__(
+                batched_coordinates=BatchedContinuousCoordinates(
+                    batched_tensor=self.coords[perm], offsets=down_offsets
+                ),
+                batched_features=BatchedFeatures(
+                    batched_tensor=self.features[perm], offsets=down_offsets
+                ),
+            )
+
         perm, down_offsets, vox_inices, vox_offsets = voxel_downsample(
             batched_points=self.coords,
             offsets=self.offsets,
             voxel_size=voxel_size,
         )
-
-        if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
-            return self.__class__(
-                coords=BatchedContinuousCoordinates(
-                    batched_tensor=self.coords[perm], offsets=down_offsets
-                ),
-                features=BatchedFeatures(batched_tensor=self.features[perm], offsets=down_offsets),
-            )
 
         neighbors = NeighborSearchResult(vox_inices, vox_offsets)
         down_coords = self.coords[perm]

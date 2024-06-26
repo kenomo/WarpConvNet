@@ -41,6 +41,11 @@ class FeaturePoolingArgs:
         self.encoded_coords_data_range = encoded_coords_data_range
 
 
+DEFAULT_FEATURE_POOLING_ARGS = FeaturePoolingArgs(
+    pooling_mode=FEATURE_POOLING_MODE.RANDOM_SAMPLE,
+)
+
+
 def pool_features(
     in_feats: Float[Tensor, "N C"],  # noqa: F722,F821
     down_coords: Float[Tensor, "M D"],  # noqa: F722,F821

@@ -127,34 +127,6 @@ def insert_kernel(
             return  # This indicates that the table is full and we couldn't insert the unique item
 
 
-@wp.kernel
-def insert_unique_kernel(
-    table_kvs: wp.array(dtype=int),
-    vec_keys: wp.array(dtype=wp.vec4i),
-    table_capacity: int,
-    hash_method: int,
-):
-    idx = wp.tid()
-    vec_key = vec_keys[idx]
-    slot = hash_selection(hash_method, vec_key, table_capacity)
-    initial_slot = slot
-
-    while True:
-        prev = atomicCAS(table_kvs, 2 * slot, -1, slot)
-        if prev == -1:  # insertion success
-            table_kvs[2 * slot + 1] = idx
-            return
-        else:  # collision exists
-            current_idx = table_kvs[2 * slot + 1]
-            if vec_equal(vec_keys[current_idx], vec_key):
-                return  # Item already exists in the table
-        slot = (slot + 1) % table_capacity
-
-        # If we circle back to the initial slot, the table is full
-        if slot == initial_slot:
-            return  # This indicates that the table is full and we couldn't insert the unique item
-
-
 # Warp kernel for searching in the hashmap
 @wp.kernel
 def search_kernel(
