@@ -171,6 +171,8 @@ def search_kernel(
     idx = wp.tid()
     key = search_keys[idx]
     slot = hash_fnv1a(key, table_capacity)
+    initial_slot = slot
+
     while True:
         current_key = table_kvs[2 * slot + 0]
         if current_key == -1:
@@ -182,6 +184,10 @@ def search_kernel(
                 search_results[idx] = vec_val
                 return
         slot = (slot + 1) % table_capacity
+
+        if slot == initial_slot:
+            search_results[idx] = -1
+            return
 
 
 # Warp kernel for preparing key-value pairs

@@ -4,14 +4,15 @@ import torch
 
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warp.convnet.utils.timer import Timer
 from warp.convnet.utils.unique import unique_hashmap, unique_torch
 
 
 class TestSpatiallySparseTensor(unittest.TestCase):
     def setUp(self) -> None:
-        self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
+        self.B, min_N, max_N, self.C = 3, 10000, 100000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
-        self.voxel_size = 0.05
+        self.voxel_size = 0.01
         self.coords = [(torch.rand((N, 3)) / self.voxel_size).int() for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
         self.st = SpatiallySparseTensor(self.coords, self.features)
@@ -35,15 +36,26 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         device = "cuda:0"
         st = self.st.to(device)
         coords = st.batched_coordinates
+        hash_timer, torch_timer = Timer(), Timer()
         bcoords = batch_indexed_coordinates(coords.batched_tensor, coords.offsets)
-        unique_index, hash_table = unique_hashmap(bcoords)
-        (
-            unique_coords,
-            to_orig_indices,
-            all_to_unique_indices,
-            all_to_unique_offsets,
-            perm,
-        ) = unique_torch(bcoords, dim=0)
+        for _ in range(10):
+            with hash_timer:
+                unique_index, hash_table = unique_hashmap(bcoords)
+
+            with torch_timer:
+                (
+                    unique_coords,
+                    to_orig_indices,
+                    all_to_unique_indices,
+                    all_to_unique_offsets,
+                    perm,
+                ) = unique_torch(bcoords, dim=0)
+
+        print(f"Coord size: {coords.batched_tensor.shape}, N unique: {len(unique_index)}")
+        print(f"Hashmap min time: {hash_timer.min_elapsed:.4e} s")
+        print(f"Torch min time: {torch_timer.min_elapsed:.4e} s")
+        print(f"Speedup: {torch_timer.min_elapsed / hash_timer.min_elapsed:.4e}")
+
         self.assertTrue(len(unique_index) == len(perm), f"{len(unique_index)} != {len(perm)}")
 
 
