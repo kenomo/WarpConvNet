@@ -1,8 +1,6 @@
-# Sort the point collection features using Z-ordering
 from enum import Enum
-from typing import Tuple
+from typing import Literal, Tuple
 
-import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -25,80 +23,95 @@ def _part1by2(n: int) -> int:
     return n
 
 
+@wp.func
+def _part1by2_long(n: wp.int64) -> wp.int64:
+    n = (n ^ (n << 32)) & 0xFFFF00000000FFFF
+    n = (n ^ (n << 16)) & 0x00FF0000FF0000FF
+    n = (n ^ (n << 8)) & 0xF00F00F00F00F00F
+    n = (n ^ (n << 4)) & 0x30C30C30C30C30C3
+    n = (n ^ (n << 2)) & 0x9249249249249249
+    return n
+
+
 @wp.kernel
-def _assign_order_continuous(
-    points: wp.array(dtype=wp.vec3f),
-    result_order: wp.array(dtype=wp.int32),
-    grid_size: int = 1024,  # 10 bits for each x, y, z
+def _assign_order_discrete_16bit(
+    bcoords: wp.array(dtype=wp.vec4i),
+    result_order: wp.array(dtype=wp.int64),
 ) -> None:
+    """
+    Assume that the coords are in the range [-2^15, 2^15 - 1] and the result_order will be the z-order number of the point.
+    the batch size should be less than 2^16=65536
+    """
     tid = wp.tid()
-    # Assign result_order the z-order number of the point. Assume the points are in the range [0, 1]
-    point = points[tid]
-    f_grid_size = float(grid_size)
-    x = wp.floor(point[0] * f_grid_size)
-    y = wp.floor(point[1] * f_grid_size)
-    z = wp.floor(point[2] * f_grid_size)
-    ux = wp.clamp(int(x), 0, grid_size - 1)
-    uy = wp.clamp(int(y), 0, grid_size - 1)
-    uz = wp.clamp(int(z), 0, grid_size - 1)
-    # 32-bit and 31-bit without the sign bit. 10 bits each
-    result_order[tid] = (_part1by2(uz) << 2) | (_part1by2(uy) << 1) | _part1by2(ux)
+    bcoord = bcoords[tid]
+
+    # Extract batch index and coordinates
+    batch_index = wp.int64(bcoord[0])
+    offset = 1 << 15  # Large enough to handle negative values up to 2^15
+    ux = wp.int64(bcoord[1] + offset)
+    uy = wp.int64(bcoord[2] + offset)
+    uz = wp.int64(bcoord[3] + offset)
+
+    # Calculate the Morton order
+    morton_code = (_part1by2_long(uz) << 2) | (_part1by2_long(uy) << 1) | _part1by2_long(ux)
+
+    # Combine the batch index with the Morton order to ensure batch continuity
+    result_order[tid] = (batch_index << 48) | morton_code
 
 
 @wp.kernel
-def _assign_order_discrete(
+def _assign_order_discrete_20bit(
     coords: wp.array(dtype=wp.vec3i),
-    result_order: wp.array(dtype=wp.int32),
-    min_coord: wp.vec3i,
-    grid_size: int = 1024,
+    result_order: wp.array(dtype=wp.int64),
 ) -> None:
     tid = wp.tid()
-    # Assign result_order the z-order number of the point. Assume the points are in the range [0, 1]
     coord = coords[tid]
-    ux = wp.clamp(coord[0] - min_coord[0], 0, grid_size - 1)
-    uy = wp.clamp(coord[1] - min_coord[1], 0, grid_size - 1)
-    uz = wp.clamp(coord[2] - min_coord[2], 0, grid_size - 1)
-    result_order[tid] = (_part1by2(uz) << 2) | (_part1by2(uy) << 1) | _part1by2(ux)
+
+    offset = 1 << 20  # Large enough to handle negative values up to 2^20
+    ux = wp.int64(coord[0] + offset)
+    uy = wp.int64(coord[1] + offset)
+    uz = wp.int64(coord[2] + offset)
+
+    # Calculate the Morton order
+    result_order[tid] = (_part1by2_long(uz) << 2) | (_part1by2_long(uy) << 1) | _part1by2_long(ux)
 
 
 def sort_permutation(
-    coords: Float[Tensor, "N 3"] | Int[Tensor, "N 3"],  # noqa: F821
+    coords: Int[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B"] = None,  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-    grid_size: int = 1024,
+    sorting_backend: Literal["torch", "warp"] = "warp",
 ) -> Int[Tensor, "N"]:  # noqa: F821
     """
     Sort the points according to the ordering provided.
 
     The coords must be in the range [0, 1] and the result_order will be the z-order number of the point.
     """
-    device = str(coords.device)
-    if ordering == POINT_ORDERING.Z_ORDER:
-        wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int32, device=device)
-        # Convert torch coords to wp.array of vec3
-        if coords.dtype == torch.int32:
-            wp_coords = wp.from_torch(coords, dtype=wp.vec3i)
-            min_coord = wp_coords.min(dim=0)[0]
-            wp.launch(
-                _assign_order_discrete,
-                len(coords),
-                inputs=[wp_coords, wp_result_rank, min_coord, grid_size],
-            )
-        elif coords.dtype == torch.float32:
-            wp_coords = wp.from_torch(coords, dtype=wp.vec3f)
-            wp.launch(
-                _assign_order_continuous,
-                len(coords),
-                inputs=[wp_coords, wp_result_rank, grid_size],
-            )
-        else:
-            raise NotImplementedError(f"Coords dtype {coords.dtype} not implemented")
-
-    else:
+    if ordering != POINT_ORDERING.Z_ORDER:
         raise NotImplementedError(f"Ordering {ordering} not implemented")
 
+    device = str(coords.device)
+    wp_result_rank = wp.zeros(shape=len(coords), dtype=wp.int64, device=device)
+    if offsets is None or len(offsets) < 2:
+        # Single batch
+        wp_coords = wp.from_torch(coords, dtype=wp.vec3i)
+        wp.launch(
+            _assign_order_discrete_20bit,
+            len(coords),
+            inputs=[wp_coords, wp_result_rank],
+        )
+    else:
+        # Multiple batches
+        bcoords = batch_indexed_coordinates(coords, offsets)
+        wp_coords = wp.from_torch(bcoords, dtype=wp.vec4i)
+        wp.launch(
+            _assign_order_discrete_16bit,
+            len(bcoords),
+            inputs=[wp_coords, wp_result_rank],
+        )
+
     # Sort withint each offsets.
-    perm = argsort(wp_result_rank, device)
+    perm = argsort(wp_result_rank, device, backend="warp")
     return wp.to_torch(perm)
 
 

@@ -1,3 +1,7 @@
+from typing import Literal
+
+import torch
+
 import warp as wp
 
 
@@ -10,7 +14,14 @@ def prepare_key_value_pairs(
     values[tid] = tid
 
 
-def argsort(data: wp.array(dtype=int), device: str) -> wp.array(dtype=int):
+def argsort(
+    data: wp.array(dtype=int), device: str, backend: Literal["torch", "warp"] = "warp"
+) -> wp.array(dtype=int):
+    if backend == "torch":
+        if isinstance(data, wp.array):
+            data = wp.to_torch(data)
+        return torch.argsort(data)
+
     N = len(data)
     keys, values = wp.empty(N, dtype=int, device=device), wp.empty(N, dtype=int, device=device)
 

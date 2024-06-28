@@ -85,6 +85,7 @@ def batch_index_from_offset(
         )
         return batch_index
 
+    # TODO(cchoy): replace it with a logger warning
     warnings.warn(
         "Using Warp backend for batch_index_from_offset. This may be slower.", stacklevel=2
     )
