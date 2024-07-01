@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Tuple
+from typing import Tuple
 
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -25,11 +25,11 @@ def _part1by2(n: int) -> int:
 
 @wp.func
 def _part1by2_long(n: wp.int64) -> wp.int64:
-    n = (n ^ (n << 32)) & 0xFFFF00000000FFFF
-    n = (n ^ (n << 16)) & 0x00FF0000FF0000FF
-    n = (n ^ (n << 8)) & 0xF00F00F00F00F00F
-    n = (n ^ (n << 4)) & 0x30C30C30C30C30C3
-    n = (n ^ (n << 2)) & 0x9249249249249249
+    n = (n ^ (n << wp.int64(32))) & wp.int64(0xFFFF00000000FFFF)
+    n = (n ^ (n << wp.int64(16))) & wp.int64(0x00FF0000FF0000FF)
+    n = (n ^ (n << wp.int64(8))) & wp.int64(0xF00F00F00F00F00F)
+    n = (n ^ (n << wp.int64(4))) & wp.int64(0x30C30C30C30C30C3)
+    n = (n ^ (n << wp.int64(2))) & wp.int64(0x9249249249249249)
     return n
 
 
@@ -53,10 +53,17 @@ def _assign_order_discrete_16bit(
     uz = wp.int64(bcoord[3] + offset)
 
     # Calculate the Morton order
-    morton_code = (_part1by2_long(uz) << 2) | (_part1by2_long(uy) << 1) | _part1by2_long(ux)
+    morton_code = (
+        (_part1by2_long(uz) << wp.int64(2))
+        | (_part1by2_long(uy) << wp.int64(1))
+        | _part1by2_long(ux)
+    )
+
+    # Erase the first 16 bits of the Morton code to make space for the batch index
+    morton_code &= wp.int64(0x0000FFFFFFFFFFFF)
 
     # Combine the batch index with the Morton order to ensure batch continuity
-    result_order[tid] = (batch_index << 48) | morton_code
+    result_order[tid] = (batch_index << wp.int64(48)) | morton_code
 
 
 @wp.kernel
@@ -73,19 +80,22 @@ def _assign_order_discrete_20bit(
     uz = wp.int64(coord[2] + offset)
 
     # Calculate the Morton order
-    result_order[tid] = (_part1by2_long(uz) << 2) | (_part1by2_long(uy) << 1) | _part1by2_long(ux)
+    result_order[tid] = (
+        (_part1by2_long(uz) << wp.int64(2))
+        | (_part1by2_long(uy) << wp.int64(1))
+        | _part1by2_long(ux)
+    )
 
 
-def sort_permutation(
+def sorting_permutation(
     coords: Int[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B"] = None,  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-    sorting_backend: Literal["torch", "warp"] = "warp",
-) -> Int[Tensor, "N"]:  # noqa: F821
+) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
     """
-    Sort the points according to the ordering provided.
+    Returns the permutation of the input coordinates that sorts them according to the ordering.
 
-    The coords must be in the range [0, 1] and the result_order will be the z-order number of the point.
+    The coords must be in the range [-2^15, 2^15 - 1] and the result_order will be the z-order number of the point.
     """
     if ordering != POINT_ORDERING.Z_ORDER:
         raise NotImplementedError(f"Ordering {ordering} not implemented")
@@ -102,7 +112,9 @@ def sort_permutation(
         )
     else:
         # Multiple batches
-        bcoords = batch_indexed_coordinates(coords, offsets)
+        bcoords = coords
+        if bcoords.shape[1] == 3:
+            bcoords = batch_indexed_coordinates(bcoords, offsets)
         wp_coords = wp.from_torch(bcoords, dtype=wp.vec4i)
         wp.launch(
             _assign_order_discrete_16bit,
@@ -111,27 +123,21 @@ def sort_permutation(
         )
 
     # Sort withint each offsets.
-    perm = argsort(wp_result_rank, device, backend="warp")
-    return wp.to_torch(perm)
+    result_rank = wp.to_torch(wp_result_rank)
+    perm = argsort(result_rank)
+    return perm, result_rank
 
 
 def sort_point_collection(
     coords: Float[Tensor, "N 3"] | Int[Tensor, "N 3"],  # noqa: F821
     features: Float[Tensor, "N C"],  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-    grid_size: int = 1024,
     offsets: Int[Tensor, "B"] = None,  # noqa: F821
 ) -> Tuple[Float[Tensor, "N 3"], Float[Tensor, "N C"]]:  # noqa: F821
     """
-    Sort the point collection features using Z-ordering
+    Sort the point collection features using Z-ordering. The offsets remain the
+    same as the permutation only sorts within each batch
     """
-    if offsets is None:
-        # Torch sort
-        sorted_order = sort_permutation(coords, offsets, ordering, grid_size)
-    else:
-        # Get batch index
-        bcoords = batch_indexed_coordinates(coords, offsets)
-        sorted_order = sort_permutation(bcoords, offsets, ordering, grid_size)
-
+    sorted_order = sorting_permutation(coords, offsets, ordering)
     sorted_order = sorted_order.long()
     return coords[sorted_order], features[sorted_order]

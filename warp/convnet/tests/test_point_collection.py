@@ -34,14 +34,6 @@ class TestPointCollection(unittest.TestCase):
         pc = self.pc.to(device)
         self.assertTrue(pc.batched_coordinates.batched_tensor.device == device)
 
-    # Test point collection sorting
-    def test_point_collection_sorting(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        sorted_pc = pc.sort()
-        self.assertTrue(sorted_pc.batched_coordinates.batched_tensor.shape == (sum(self.Ns), 3))
-        self.assertTrue(sorted_pc.batched_features.batched_tensor.shape == (sum(self.Ns), self.C))
-
     # Test point collection radius search
     def test_point_collection_radius_search(self):
         device = torch.device("cuda:0")

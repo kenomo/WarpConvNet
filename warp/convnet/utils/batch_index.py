@@ -1,4 +1,3 @@
-import warnings
 from typing import Literal, Optional
 
 import torch
@@ -14,23 +13,23 @@ snippet = """
     int curr_tid = threadIdx.x;
 
     // Load offsets into shared memory
-    if (tid < offsets_len) {
-        shared_offsets[tid] = offsets[tid];
+    if (curr_tid < offsets_len) {
+        shared_offsets[curr_tid] = offsets[curr_tid];
     }
     __syncthreads();
 
     // Find bin
     int bin = -1;
-    for (int i = 1; i < offsets_len; i++) {
-        int start = shared_offsets[i - 1];
-        int end = shared_offsets[i];
+    for (int i = 0; i < offsets_len - 1; i++) {
+        int start = shared_offsets[i];
+        int end = shared_offsets[i + 1];
         if (start <= tid && tid < end) {
             bin = i;
             break;
         }
     }
 
-    batch_index_wp[curr_tid] = bin;
+    batch_index_wp[tid] = bin;
     """
 
 
@@ -47,12 +46,14 @@ def _find_bin_native(
 @wp.func
 def _find_bin(offsets: wp.array(dtype=wp.int32), tid: int) -> int:
     N = offsets.shape[0] - 1
-    for i in range(1, N):
-        start = offsets[i - 1]
-        end = offsets[i]
+    bin_id = int(-1)
+    for i in range(N):
+        start = offsets[i]
+        end = offsets[i + 1]
         if start <= tid < end:
-            return i
-    return -1
+            bin_id = i
+            break
+    return bin_id
 
 
 @wp.kernel
@@ -69,7 +70,7 @@ def _batch_index(
 
 def batch_index_from_offset(
     offsets: Int[Tensor, "B+1"],  # noqa: F821
-    backend: Literal["torch", "warp"] = "torch",
+    backend: Literal["torch", "warp"] = "warp",
     device: Optional[str] = None,
 ) -> Int[Tensor, "N"]:  # noqa: F821
     assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
@@ -85,11 +86,6 @@ def batch_index_from_offset(
         )
         return batch_index
 
-    # TODO(cchoy): replace it with a logger warning
-    warnings.warn(
-        "Using Warp backend for batch_index_from_offset. This may be slower.", stacklevel=2
-    )
-    # cchoy: Probably slower due to copying back and forth between warp and torch
     N = offsets[-1].item()
     offsets_wp = wp.from_torch(offsets, dtype=wp.int32).to(device)
     batch_index_wp = wp.zeros(shape=(N,), dtype=wp.int32, device=device)
@@ -104,7 +100,7 @@ def batch_index_from_offset(
 def batch_indexed_coordinates(
     batched_coords: Float[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F821
-    backend: Literal["torch", "warp"] = "torch",
+    backend: Literal["torch", "warp"] = "warp",
 ) -> Float[Tensor, "N 4"]:  # noqa: F821
     device = str(batched_coords.device)
     batch_index = batch_index_from_offset(offsets, device=device, backend=backend)

@@ -23,7 +23,11 @@ from warp.convnet.geometry.ops.voxel_ops import (
     voxel_downsample,
     voxel_downsample_hashmap,
 )
-from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sort_point_collection
+from warp.convnet.geometry.ops.warp_sort import (
+    POINT_ORDERING,
+    sort_point_collection,
+    sorting_permutation,
+)
 
 
 class BatchedContinuousCoordinates(BatchedCoordinates):
@@ -66,6 +70,23 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
             search_args,
         )
 
+    def sort(
+        self,
+        ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
+        voxel_size: Optional[float] = None,
+    ):
+        """
+        Sort the points according to the ordering provided.
+        The voxel size defines the smalles descritization and points in the same voxel will have random order.
+        """
+        # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
+        assert self.device.type != "cpu", "Sorting is only supported on GPU"
+        sorted_order = sorting_permutation(self.batched_tensor, self.offsets, ordering)
+        return self.__class__(
+            batched_tensor=self.batched_tensor[sorted_order],
+            offsets=self.offsets,
+        )
+
 
 class PointCollection(BatchedSpatialFeatures):
     """
@@ -101,20 +122,18 @@ class PointCollection(BatchedSpatialFeatures):
     def sort(
         self,
         ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-        grid_size: Optional[int] = 1024,
+        voxel_size: Optional[float] = None,
     ):
         """
         Sort the points according to the ordering provided.
         The voxel size defines the smalles descritization and points in the same voxel will have random order.
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
-        assert grid_size <= 1024, f"Grid size must be <= 1024, got {grid_size}"
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
         sorted_coords, sorted_feats = sort_point_collection(
             coords=self.batched_coordinates.batched_tensor,
             features=self.batched_features.batched_tensor,
             ordering=ordering,
-            grid_size=grid_size,
             offsets=self.batched_coordinates.offsets,
         )
         return self.__class__(
