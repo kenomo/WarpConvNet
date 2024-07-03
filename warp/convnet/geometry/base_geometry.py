@@ -32,13 +32,11 @@ def _list_to_batched_tensor(
 class BatchedObject:
     batched_tensor: Float[Tensor, "N C"]  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"]  # noqa: F722,F821
-    batch_size: int
 
     def __init__(
         self,
         batched_tensor: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"],  # noqa: F722,F821
         offsets: Optional[List[int]] = None,
-        batch_size: Optional[int] = None,
     ):
         """
         Initialize a batched object with a list of tensors.
@@ -51,22 +49,20 @@ class BatchedObject:
             tensors are assumed to be a list.
         """
         if isinstance(batched_tensor, list):
-            assert (
-                offsets is None and batch_size is None
-            ), "If batched_tensors is a list, offsets must be None."
-            batched_tensor, offsets, batch_size = _list_to_batched_tensor(batched_tensor)
+            assert offsets is None, "If batched_tensors is a list, offsets must be None."
+            batched_tensor, offsets, _ = _list_to_batched_tensor(batched_tensor)
 
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets, requires_grad=False)
 
-        if batch_size is None:
-            batch_size = len(offsets) - 1
-
-        self.batch_size = batch_size
         self.offsets = offsets
         self.batched_tensor = batched_tensor
 
         self.check()
+
+    @property
+    def batch_size(self) -> int:
+        return len(self.offsets) - 1
 
     def check(self):
         # offset check
@@ -123,7 +119,7 @@ class BatchedObject:
         return self.batched_tensor.numel()
 
     def __len__(self) -> int:
-        return self.batch_size
+        return len(self.batched_tensor)
 
     def __getitem__(self, idx: int) -> Float[Tensor, "N C"]:  # noqa: F722,F821
         return self.batched_tensor[self.offsets[idx] : self.offsets[idx + 1]]
@@ -176,8 +172,8 @@ class BatchedSpatialFeatures:
         assert isinstance(batched_features, BatchedFeatures) and isinstance(
             batched_coordinates, BatchedCoordinates
         )
-        assert len(batched_coordinates) == len(batched_features)
         assert (batched_coordinates.offsets == batched_features.offsets).all()
+        assert len(batched_coordinates) == len(batched_features)
         # The rest of the shape checks are assumed to be done in the BatchedObject
         self.batched_coordinates = batched_coordinates
         self.batched_features = batched_features
@@ -185,6 +181,9 @@ class BatchedSpatialFeatures:
 
     def __len__(self) -> int:
         return self.batched_coordinates.batch_size
+
+    def numel(self):
+        return self.batched_features.numel()
 
     def __getitem__(self, idx: int) -> "BatchedSpatialFeatures":
         coords = self.batched_coordinates[idx]

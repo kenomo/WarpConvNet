@@ -3,6 +3,7 @@ import unittest
 import torch
 
 from warp.convnet.core.hashmap import HashMethod
+from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 from warp.convnet.utils.timer import Timer
@@ -62,6 +63,23 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         print(f"Hashmap min time: {hash_timer.min_elapsed:.4e} s")
         print(f"Torch min time: {torch_timer.min_elapsed:.4e} s")
         print(f"Speedup: {torch_timer.min_elapsed / hash_timer.min_elapsed:.4e}")
+
+    def test_sort(self):
+        st = self.st
+        device = torch.device("cuda:0")
+        st = st.to(device)
+        st = st.sort(ordering=POINT_ORDERING.Z_ORDER)
+
+    def test_sparse_tensor_unique(self):
+        device = torch.device("cuda:0")
+        st = self.st.to(device)
+        print(f"Number of coords: {len(st.batched_coordinates)}")
+        unique_st = st.unique()
+        print(f"Number of unique coords: {len(unique_st.batched_coordinates)}")
+        bcoords = batch_indexed_coordinates(st.batched_coordinates.batched_tensor, st.offsets)
+        self.assertTrue(
+            torch.unique(bcoords, dim=0).shape[0] == len(unique_st.batched_coordinates)
+        )
 
 
 if __name__ == "__main__":

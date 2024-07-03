@@ -20,8 +20,8 @@ from warp.convnet.geometry.ops.point_pool import (
     pool_features,
 )
 from warp.convnet.geometry.ops.voxel_ops import (
-    voxel_downsample,
-    voxel_downsample_hashmap,
+    voxel_downsample_csr_mapping,
+    voxel_downsample_random_indices,
 )
 from warp.convnet.geometry.ops.warp_sort import (
     POINT_ORDERING,
@@ -40,7 +40,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         Voxel downsample the coordinates
         """
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
-        perm, down_offsets = voxel_downsample_hashmap(
+        perm, down_offsets = voxel_downsample_random_indices(
             coords=self.batched_tensor,
             voxel_size=voxel_size,
             offsets=self.offsets,
@@ -153,7 +153,7 @@ class PointCollection(BatchedSpatialFeatures):
         """
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
         if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
-            perm, down_offsets = voxel_downsample_hashmap(
+            perm, down_offsets = voxel_downsample_random_indices(
                 batched_points=self.coords,
                 offsets=self.offsets,
                 voxel_size=voxel_size,
@@ -167,7 +167,7 @@ class PointCollection(BatchedSpatialFeatures):
                 ),
             )
 
-        perm, down_offsets, vox_inices, vox_offsets = voxel_downsample(
+        perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
             batched_points=self.coords,
             offsets=self.offsets,
             voxel_size=voxel_size,

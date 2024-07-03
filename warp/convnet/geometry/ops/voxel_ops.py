@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from jaxtyping import Float, Int
@@ -10,7 +10,7 @@ from warp.convnet.utils.unique import unique_hashmap, unique_torch
 
 # Voxel downsample
 @torch.no_grad()
-def voxel_downsample(
+def voxel_downsample_csr_mapping(
     batched_points: Float[Tensor, "N 3"],  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F722,F821
     voxel_size: float,
@@ -58,18 +58,19 @@ def voxel_downsample(
 
 
 @torch.no_grad()
-def voxel_downsample_hashmap(
+def voxel_downsample_random_indices(
     batched_points: Float[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F821
-    voxel_size: float,
+    voxel_size: Optional[float] = None,
 ) -> Tuple[Int[Tensor, "M"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Args:
-        bcoords: Batched coordinates.
-        hash_method: Hash method.
+        batched points: Float[Tensor, "N 3"] - batched points
+        offsets: Int[Tensor, "B + 1"] - offsets for each batch
+        voxel_size: Optional[float] - voxel size. Will quantize the points if voxel_size is provided.
 
     Returns:
-        perm: Permutation to sort x to unique. x[perm] will be unique.
+        unique_indices: bcoords[unique_indices] will be unique.
         batch_offsets: Batch offsets.
     """
 
@@ -79,17 +80,20 @@ def voxel_downsample_hashmap(
     device = str(batched_points.device)
     assert offsets[-1] == N, f"Offsets {offsets} does not match the number of points {N}"
 
-    voxel_coords = torch.floor(batched_points / voxel_size).int()
+    if voxel_size is not None:
+        voxel_coords = torch.floor(batched_points / voxel_size).int()
+    else:
+        voxel_coords = batched_points.int()
     batch_index = batch_index_from_offset(offsets, device)
     voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
-    perm, hash_table = unique_hashmap(voxel_coords)
+    unique_indices, hash_table = unique_hashmap(voxel_coords)
 
     if B == 1:
-        batch_offsets = torch.IntTensor([0, len(perm)])
+        batch_offsets = torch.IntTensor([0, len(unique_indices)])
     else:
-        _, batch_counts = torch.unique(batch_index[perm], return_counts=True)
+        _, batch_counts = torch.unique(batch_index[unique_indices], return_counts=True)
         batch_counts = batch_counts.cpu()
         batch_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
 
-    return perm, batch_offsets
+    return unique_indices, batch_offsets
