@@ -51,7 +51,7 @@ class TestUtils(unittest.TestCase):
         for backend in backends:
             for _ in range(20):
                 with backend_times[backend]:
-                    batch_indexed_coordinates(pc.coords, offsets, backend=backend)
+                    batch_indexed_coordinates(pc.coordinate_tensor, offsets, backend=backend)
 
         for backend in backends:
             print(

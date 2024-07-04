@@ -26,7 +26,7 @@ class TestSorting(unittest.TestCase):
         st = self.st.to(device)
         # Get the coordinates and test sorting_permutation
         permutation, rank = sorting_permutation(
-            coords=st.coords, offsets=st.offsets, ordering=POINT_ORDERING.Z_ORDER
+            coords=st.coordinate_tensor, offsets=st.offsets, ordering=POINT_ORDERING.Z_ORDER
         )
         # min max of the permutation between each offsets should not exceed offset boundaries
         max_rank = 0

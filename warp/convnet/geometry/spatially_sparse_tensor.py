@@ -111,16 +111,18 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         if ordering == self._ordering:
             return self
 
-        perm, rank = sorting_permutation(self.coords, self.offsets, ordering)  # noqa: F821
-        coords = BatchedDiscreteCoordinates(self.coords[perm], self.offsets)
-        feats = BatchedFeatures(self.features[perm], self.offsets)
+        perm, rank = sorting_permutation(
+            self.coordinate_tensor, self.offsets, ordering
+        )  # noqa: F821
+        coords = BatchedDiscreteCoordinates(self.coordinate_tensor[perm], self.offsets)
+        feats = BatchedFeatures(self.feature_tensor[perm], self.offsets)
         return self.__class__(coords, feats, ordering)
 
     def unique(self) -> "SpatiallySparseTensor":
         unique_indices, batch_offsets = voxel_downsample_random_indices(
-            self.coords,
+            self.coordinate_tensor,
             self.offsets,
         )
-        coords = BatchedDiscreteCoordinates(self.coords[unique_indices], batch_offsets)
-        feats = BatchedFeatures(self.features[unique_indices], batch_offsets)
+        coords = BatchedDiscreteCoordinates(self.coordinate_tensor[unique_indices], batch_offsets)
+        feats = BatchedFeatures(self.feature_tensor[unique_indices], batch_offsets)
         return self.__class__(coords, feats, self._ordering)

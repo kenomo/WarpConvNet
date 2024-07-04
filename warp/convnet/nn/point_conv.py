@@ -160,7 +160,7 @@ class PointConv(BaseModule):
             + self.use_rel_pos_encode * self.positional_encoding.num_channels * 3
             + (not self.use_rel_pos_encode) * self.use_rel_pos * 3
             == self.edge_transform_mlp.in_channels
-        ), f"input features shape {in_point_features.features.shape} and {out_point_features.features.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
+        ), f"input features shape {in_point_features.feature_tensor.shape} and {out_point_features.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
 
         # Get the neighbors
         neighbors = in_point_features.batched_coordinates.neighbors(
@@ -172,17 +172,17 @@ class PointConv(BaseModule):
         num_reps = neighbors_row_splits[1:] - neighbors_row_splits[:-1]
 
         # repeat the self features using num_reps
-        rep_in_features = in_point_features.features[neighbors_index]
+        rep_in_features = in_point_features.feature_tensor[neighbors_index]
         self_features = torch.repeat_interleave(
-            out_point_features.features.view(-1, out_num_channels).contiguous(),
+            out_point_features.feature_tensor.view(-1, out_num_channels).contiguous(),
             num_reps,
             dim=0,
         )
         edge_features = [rep_in_features, self_features]
         if self.use_rel_pos or self.use_rel_pos_encode:
-            in_rep_vertices = in_point_features.coords.view(-1, 3)[neighbors_index]
+            in_rep_vertices = in_point_features.coordinate_tensor.view(-1, 3)[neighbors_index]
             self_vertices = torch.repeat_interleave(
-                out_point_features.coords.view(-1, 3).contiguous(), num_reps, dim=0
+                out_point_features.coordinate_tensor.view(-1, 3).contiguous(), num_reps, dim=0
             )
             if self.use_rel_pos_encode:
                 edge_features.append(
@@ -209,11 +209,91 @@ class PointConv(BaseModule):
 
         return PointCollection(
             batched_coordinates=BatchedCoordinates(
-                batched_tensor=out_point_features.coords,
+                batched_tensor=out_point_features.coordinate_tensor,
                 offsets=out_point_features.offsets,
             ),
             batched_features=BatchedFeatures(
                 batched_tensor=out_features,
                 offsets=out_point_features.offsets,
             ),
+        )
+
+
+class PointConvBlock(BaseModule):
+    """
+    A conv block that consists of two consecutive PointConv, activation, and normalization and a skip connection
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        neighbor_search_args: NeighborSearchArgs,
+        pooling_args: Optional[FeaturePoolingArgs] = None,
+        edge_transform_mlp: Optional[nn.Module] = None,
+        out_transform_mlp: Optional[nn.Module] = None,
+        hidden_dim: Optional[int] = None,
+        channel_multiplier: int = 2,
+        use_rel_pos: bool = True,
+        use_rel_pos_encode: bool = False,
+        pos_encode_dim: int = 32,
+        pos_encode_range: float = 4,
+        reductions: List[REDUCTION_TYPES] = ("mean",),
+        downsample_voxel_size: Optional[float] = None,
+        out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
+        provided_in_channels: Optional[int] = None,
+    ):
+        super().__init__()
+        self.point_conv1 = PointConv(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            neighbor_search_args=neighbor_search_args,
+            pooling_args=pooling_args,
+            edge_transform_mlp=edge_transform_mlp,
+            out_transform_mlp=out_transform_mlp,
+            hidden_dim=hidden_dim,
+            channel_multiplier=channel_multiplier,
+            use_rel_pos=use_rel_pos,
+            use_rel_pos_encode=use_rel_pos_encode,
+            pos_encode_dim=pos_encode_dim,
+            pos_encode_range=pos_encode_range,
+            reductions=reductions,
+            downsample_voxel_size=downsample_voxel_size,
+            out_point_feature_type=out_point_feature_type,
+            provided_in_channels=provided_in_channels,
+        )
+        self.point_conv2 = PointConv(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            neighbor_search_args=neighbor_search_args,
+            pooling_args=pooling_args,
+            edge_transform_mlp=edge_transform_mlp,
+            out_transform_mlp=out_transform_mlp,
+            hidden_dim=hidden_dim,
+            channel_multiplier=channel_multiplier,
+            use_rel_pos=use_rel_pos,
+            use_rel_pos_encode=use_rel_pos_encode,
+            pos_encode_dim=pos_encode_dim,
+            pos_encode_range=pos_encode_range,
+            reductions=reductions,
+            downsample_voxel_size=downsample_voxel_size,
+            out_point_feature_type=out_point_feature_type,
+            provided_in_channels=provided_in_channels,
+        )
+        self.norm1 = nn.LayerNorm(out_channels)
+        self.norm2 = nn.LayerNorm(out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, in_point_features: PointCollection) -> PointCollection:
+        out1 = self.point_conv1(in_point_features)
+        out1 = self.norm1(out1.features)
+        out1 = self.relu(out1)
+        out2 = self.point_conv2(out1)
+        out2 = self.norm2(out2.features)
+        # Skip connection
+        out2 = out2 + out1.features
+        out2 = self.relu(out2)
+        return PointCollection(
+            batched_coordinates=out2.batched_coordinates,
+            batched_features=out2.batched_features,
         )

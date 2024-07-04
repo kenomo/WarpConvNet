@@ -154,29 +154,29 @@ class PointCollection(BatchedSpatialFeatures):
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
         if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
             perm, down_offsets = voxel_downsample_random_indices(
-                batched_points=self.coords,
+                batched_points=self.coordinate_tensor,
                 offsets=self.offsets,
                 voxel_size=voxel_size,
             )
             return self.__class__(
                 batched_coordinates=BatchedContinuousCoordinates(
-                    batched_tensor=self.coords[perm], offsets=down_offsets
+                    batched_tensor=self.coordinate_tensor[perm], offsets=down_offsets
                 ),
                 batched_features=BatchedFeatures(
-                    batched_tensor=self.features[perm], offsets=down_offsets
+                    batched_tensor=self.feature_tensor[perm], offsets=down_offsets
                 ),
             )
 
         perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
-            batched_points=self.coords,
+            batched_points=self.coordinate_tensor,
             offsets=self.offsets,
             voxel_size=voxel_size,
         )
 
         neighbors = NeighborSearchResult(vox_inices, vox_offsets)
-        down_coords = self.coords[perm]
+        down_coords = self.coordinate_tensor[perm]
         down_features = pool_features(
-            in_feats=self.features,
+            in_feats=self.feature_tensor,
             down_coords=down_coords,
             neighbors=neighbors,
             pooling_args=pooling_args,

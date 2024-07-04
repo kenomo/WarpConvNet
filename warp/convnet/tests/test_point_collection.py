@@ -77,6 +77,35 @@ class TestPointCollection(unittest.TestCase):
             == downsampled_pc.batched_coordinates.batched_tensor.shape[0]
         )
 
+    def test_binary_ops(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        # Test addition and multiplication
+        pc1 = pc + 1
+        self.assertTrue(torch.allclose(pc.feature_tensor + 1, pc1.feature_tensor))
+        pc2 = pc * 2
+        self.assertTrue(torch.allclose(pc.feature_tensor * 2, pc2.feature_tensor))
+        pc2 = pc**2
+        self.assertTrue(torch.allclose(pc.feature_tensor**2, pc2.feature_tensor))
+        pc3 = pc + pc2
+        self.assertTrue(
+            pc3.batched_coordinates.batched_tensor.shape[0]
+            == pc.batched_coordinates.batched_tensor.shape[0]
+        )
+        self.assertTrue(
+            pc3.batched_features.batched_tensor.shape[0]
+            == pc.batched_features.batched_tensor.shape[0]
+        )
+        pc4 = pc * pc2
+        self.assertTrue(
+            pc4.batched_coordinates.batched_tensor.shape[0]
+            == pc.batched_coordinates.batched_tensor.shape[0]
+        )
+        self.assertTrue(
+            pc4.batched_features.batched_tensor.shape[0]
+            == pc.batched_features.batched_tensor.shape[0]
+        )
+
 
 if __name__ == "__main__":
     wp.init()

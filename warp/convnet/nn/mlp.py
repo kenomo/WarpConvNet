@@ -44,7 +44,7 @@ class PointCollectionTransform(nn.Module):
         return PointCollection(
             batched_coordinates=x.batched_coordinates,
             batched_features=BatchedFeatures(
-                self.transform(x.features),
+                self.transform(x.feature_tensor),
                 offsets=x.batched_features.offsets,
             ),
         )
