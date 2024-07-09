@@ -16,7 +16,10 @@ from warp.convnet.geometry.point_collection import (
 from warp.convnet.nn.base_module import BaseModule
 from warp.convnet.nn.encoding import SinusoidalEncoding
 from warp.convnet.nn.mlp import MLPBlock
+from warp.convnet.nn.point_transform import PointCollectionTransform
 from warp.convnet.ops.reductions import REDUCTION_TYPES, row_reduction
+
+__all__ = ["PointConv", "PointConvBlock"]
 
 
 class PointConv(BaseModule):
@@ -163,7 +166,7 @@ class PointConv(BaseModule):
         ), f"input features shape {in_point_features.feature_tensor.shape} and {out_point_features.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
 
         # Get the neighbors
-        neighbors = in_point_features.batched_coordinates.neighbors(
+        neighbors = in_point_features.neighbors(
             query_coords=out_point_features.batched_coordinates,
             search_args=self.neighbor_search_args,
         )
@@ -232,6 +235,7 @@ class PointConvBlock(BaseModule):
         pooling_args: Optional[FeaturePoolingArgs] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
+        intermediate_dim: Optional[int] = None,
         hidden_dim: Optional[int] = None,
         channel_multiplier: int = 2,
         use_rel_pos: bool = True,
@@ -242,11 +246,16 @@ class PointConvBlock(BaseModule):
         downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
+        norm_layer1: Optional[nn.Module] = None,
+        norm_layer2: Optional[nn.Module] = None,
+        activation: Optional[nn.Module] = None,
     ):
         super().__init__()
+        if intermediate_dim is None:
+            intermediate_dim = out_channels
         self.point_conv1 = PointConv(
             in_channels=in_channels,
-            out_channels=out_channels,
+            out_channels=intermediate_dim,
             neighbor_search_args=neighbor_search_args,
             pooling_args=pooling_args,
             edge_transform_mlp=edge_transform_mlp,
@@ -263,7 +272,7 @@ class PointConvBlock(BaseModule):
             provided_in_channels=provided_in_channels,
         )
         self.point_conv2 = PointConv(
-            in_channels=out_channels,
+            in_channels=intermediate_dim,
             out_channels=out_channels,
             neighbor_search_args=neighbor_search_args,
             pooling_args=pooling_args,
@@ -280,18 +289,26 @@ class PointConvBlock(BaseModule):
             out_point_feature_type=out_point_feature_type,
             provided_in_channels=provided_in_channels,
         )
-        self.norm1 = nn.LayerNorm(out_channels)
-        self.norm2 = nn.LayerNorm(out_channels)
-        self.relu = nn.ReLU()
+
+        if norm_layer1 is None:
+            norm_layer1 = nn.LayerNorm(intermediate_dim)
+        if norm_layer2 is None:
+            norm_layer2 = nn.LayerNorm(out_channels)
+        if activation is None:
+            activation = nn.ReLU()
+
+        self.norm1 = PointCollectionTransform(norm_layer1)
+        self.norm2 = PointCollectionTransform(norm_layer2)
+        self.relu = PointCollectionTransform(activation)
 
     def forward(self, in_point_features: PointCollection) -> PointCollection:
         out1 = self.point_conv1(in_point_features)
-        out1 = self.norm1(out1.features)
+        out1 = self.norm1(out1)
         out1 = self.relu(out1)
         out2 = self.point_conv2(out1)
-        out2 = self.norm2(out2.features)
+        out2 = self.norm2(out2)
         # Skip connection
-        out2 = out2 + out1.features
+        out2 = out2 + out1
         out2 = self.relu(out2)
         return PointCollection(
             batched_coordinates=out2.batched_coordinates,

@@ -29,6 +29,8 @@ from warp.convnet.geometry.ops.warp_sort import (
     sorting_permutation,
 )
 
+__all__ = ["BatchedContinuousCoordinates", "PointCollection"]
+
 
 class BatchedContinuousCoordinates(BatchedCoordinates):
     def check(self):
@@ -187,4 +189,27 @@ class PointCollection(BatchedSpatialFeatures):
                 batched_tensor=down_coords, offsets=down_offsets
             ),
             batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
+        )
+
+    def neighbors(
+        self,
+        search_args: NeighborSearchArgs,
+        query_coords: Optional["BatchedCoordinates"] = None,
+    ) -> NeighborSearchResult:
+        """
+        Returns CSR format neighbor indices
+        """
+        if query_coords is None:
+            query_coords = self.batched_coordinates
+
+        assert isinstance(
+            query_coords, BatchedCoordinates
+        ), "query_coords must be BatchedCoordinates"
+
+        return neighbor_search(
+            self.coordinate_tensor,
+            self.offsets,
+            query_coords.batched_tensor,
+            query_coords.offsets,
+            search_args,
         )

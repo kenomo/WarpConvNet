@@ -8,6 +8,13 @@ from torch import Tensor
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
 
+__all__ = [
+    "BatchedObject",
+    "BatchedCoordinates",
+    "BatchedFeatures",
+    "BatchedSpatialFeatures",
+]
+
 
 def _list_to_batched_tensor(
     tensor_list: List[Float[Tensor, "N C"]]  # noqa: F821

@@ -12,7 +12,7 @@ from warp.convnet.geometry.ops.point_pool import (
     FeaturePoolingArgs,
 )
 from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.point_conv import PointConv
+from warp.convnet.nn.point_conv import PointConv, PointConvBlock
 
 
 class TestPointConv(unittest.TestCase):
@@ -39,7 +39,7 @@ class TestPointConv(unittest.TestCase):
         ).to(self.device)
         # Forward pass
         out = conv(pc)
-        out.features.mean().backward()
+        out.feature_tensor.mean().backward()
         # print the conv param grads
         for name, param in conv.named_parameters():
             if param.grad is not None:
@@ -62,6 +62,35 @@ class TestPointConv(unittest.TestCase):
         ).to(self.device)
         # Forward pass
         out = conv(pc)  # noqa: F841
+
+    def test_point_conv_block(self):
+        pc = self.pc
+        # Create conv layer
+        in_channels, out_channels = self.C, 16
+        search_args = NeighborSearchArgs(
+            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+            radius=0.1,
+        )
+        pool_args = FeaturePoolingArgs(
+            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+            reductions=["mean"],
+        )
+        conv = PointConvBlock(
+            in_channels,
+            out_channels,
+            neighbor_search_args=search_args,
+            pooling_args=pool_args,
+        ).to(self.device)
+        # Forward pass
+        out = conv(pc)
+        # backward
+        out.feature_tensor.mean().backward()
+        # print the conv param grads
+        for name, param in conv.named_parameters():
+            if param.grad is not None:
+                print(name, param.grad.shape)
+            else:
+                print(name, "has no grad")
 
     def test_point_conv_downsample(self):
         pc = self.pc
