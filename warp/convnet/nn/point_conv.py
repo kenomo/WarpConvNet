@@ -13,10 +13,10 @@ from warp.convnet.geometry.point_collection import (
     BatchedFeatures,
     PointCollection,
 )
-from warp.convnet.nn.base_module import BaseModule
+from warp.convnet.nn.base_module import BaseModel, BaseModule
 from warp.convnet.nn.encoding import SinusoidalEncoding
 from warp.convnet.nn.mlp import MLPBlock
-from warp.convnet.nn.point_transform import PointCollectionTransform
+from warp.convnet.nn.point_transform import PointCollectionMLP, PointCollectionTransform
 from warp.convnet.ops.reductions import REDUCTION_TYPES, row_reduction
 
 __all__ = ["PointConv", "PointConvBlock"]
@@ -124,7 +124,7 @@ class PointConv(BaseModule):
         self.out_transform_mlp = out_transform_mlp
 
     def __repr__(self):
-        out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels} neighbors={self.neighbor_search_args} reductions={self.reductions}"
+        out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels}"
         if self.downsample_voxel_size is not None:
             out_str += f" down_voxel_size={self.downsample_voxel_size}"
         if self.use_rel_pos_encode:
@@ -135,7 +135,7 @@ class PointConv(BaseModule):
     def forward(
         self,
         in_point_features: PointCollection,
-        out_point_features: Optional[PointCollection] = None,
+        query_point_features: Optional[PointCollection] = None,
     ) -> PointCollection:
         """
         When out_point_features is None, the output will be generated on the
@@ -143,31 +143,31 @@ class PointConv(BaseModule):
         """
         if self.out_point_feature_type == "provided":
             assert (
-                out_point_features is not None
-            ), "out_point_features must be provided for the provided type"
+                query_point_features is not None
+            ), "query_point_features must be provided for the provided type"
         elif self.out_point_feature_type == "downsample":
-            assert out_point_features is None
-            out_point_features = in_point_features.voxel_downsample(
+            assert query_point_features is None
+            query_point_features = in_point_features.voxel_downsample(
                 self.downsample_voxel_size,
                 pooling_args=self.pooling_args,
             )
         elif self.out_point_feature_type == "same":
-            assert out_point_features is None
-            out_point_features = in_point_features
+            assert query_point_features is None
+            query_point_features = in_point_features
 
         in_num_channels = in_point_features.num_channels
-        out_num_channels = out_point_features.num_channels
+        query_num_channels = query_point_features.num_channels
         assert (
             in_num_channels
-            + out_num_channels
+            + query_num_channels
             + self.use_rel_pos_encode * self.positional_encoding.num_channels * 3
             + (not self.use_rel_pos_encode) * self.use_rel_pos * 3
             == self.edge_transform_mlp.in_channels
-        ), f"input features shape {in_point_features.feature_tensor.shape} and {out_point_features.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
+        ), f"input features shape {in_point_features.feature_tensor.shape} and query feature shape {query_point_features.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
 
         # Get the neighbors
         neighbors = in_point_features.neighbors(
-            query_coords=out_point_features.batched_coordinates,
+            query_coords=query_point_features.batched_coordinates,
             search_args=self.neighbor_search_args,
         )
         neighbors_index = neighbors.neighbors_index.long().view(-1)
@@ -177,7 +177,7 @@ class PointConv(BaseModule):
         # repeat the self features using num_reps
         rep_in_features = in_point_features.feature_tensor[neighbors_index]
         self_features = torch.repeat_interleave(
-            out_point_features.feature_tensor.view(-1, out_num_channels).contiguous(),
+            query_point_features.feature_tensor.view(-1, query_num_channels).contiguous(),
             num_reps,
             dim=0,
         )
@@ -185,7 +185,7 @@ class PointConv(BaseModule):
         if self.use_rel_pos or self.use_rel_pos_encode:
             in_rep_vertices = in_point_features.coordinate_tensor.view(-1, 3)[neighbors_index]
             self_vertices = torch.repeat_interleave(
-                out_point_features.coordinate_tensor.view(-1, 3).contiguous(), num_reps, dim=0
+                query_point_features.coordinate_tensor.view(-1, 3).contiguous(), num_reps, dim=0
             )
             if self.use_rel_pos_encode:
                 edge_features.append(
@@ -212,12 +212,12 @@ class PointConv(BaseModule):
 
         return PointCollection(
             batched_coordinates=BatchedCoordinates(
-                batched_tensor=out_point_features.coordinate_tensor,
-                offsets=out_point_features.offsets,
+                batched_tensor=query_point_features.coordinate_tensor,
+                offsets=query_point_features.offsets,
             ),
             batched_features=BatchedFeatures(
                 batched_tensor=out_features,
-                offsets=out_point_features.offsets,
+                offsets=query_point_features.offsets,
             ),
         )
 
@@ -314,3 +314,243 @@ class PointConvBlock(BaseModule):
             batched_coordinates=out2.batched_coordinates,
             batched_features=out2.batched_features,
         )
+
+
+class PointConvUNetBlock(BaseModule):
+    """
+    Given an input module, the UNet block will return a list of point collections at each level of the UNet from the inner module.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        inner_module_in_channels: int,
+        inner_module_out_channels: int,
+        out_channels: int,
+        neighbor_search_args: NeighborSearchArgs,
+        pooling_args: Optional[FeaturePoolingArgs] = None,
+        inner_module: BaseModule = None,
+        num_down_blocks: int = 1,
+        num_up_blocks: int = 0,
+        edge_transform_mlp: Optional[nn.Module] = None,
+        out_transform_mlp: Optional[nn.Module] = None,
+        intermediate_dim: Optional[int] = None,
+        hidden_dim: Optional[int] = None,
+        channel_multiplier: int = 2,
+        use_rel_pos: bool = True,
+        use_rel_pos_encode: bool = False,
+        pos_encode_dim: int = 32,
+        pos_encode_range: float = 4,
+        reductions: List[REDUCTION_TYPES] = ("mean",),
+        downsample_voxel_size: Optional[float] = None,
+    ):
+        assert inner_module is None or isinstance(inner_module, PointConvUNetBlock)
+        assert downsample_voxel_size > 0
+
+        super().__init__()
+        down_conv_block = [
+            PointConvBlock(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                neighbor_search_args=neighbor_search_args,
+                pooling_args=pooling_args,
+                edge_transform_mlp=edge_transform_mlp,
+                out_transform_mlp=out_transform_mlp,
+                intermediate_dim=intermediate_dim,
+                hidden_dim=hidden_dim,
+                channel_multiplier=channel_multiplier,
+                use_rel_pos=use_rel_pos,
+                use_rel_pos_encode=use_rel_pos_encode,
+                pos_encode_dim=pos_encode_dim,
+                pos_encode_range=pos_encode_range,
+                reductions=reductions,
+                out_point_feature_type="same",
+            )
+        ]
+
+        for _ in range(num_down_blocks):
+            down_conv_block.append(
+                PointConvBlock(
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    neighbor_search_args=neighbor_search_args,
+                    pooling_args=pooling_args,
+                    edge_transform_mlp=edge_transform_mlp,
+                    out_transform_mlp=out_transform_mlp,
+                    intermediate_dim=intermediate_dim,
+                    hidden_dim=hidden_dim,
+                    channel_multiplier=channel_multiplier,
+                    use_rel_pos=use_rel_pos,
+                    use_rel_pos_encode=use_rel_pos_encode,
+                    pos_encode_dim=pos_encode_dim,
+                    pos_encode_range=pos_encode_range,
+                    reductions=reductions,
+                    out_point_feature_type="same",
+                )
+            )
+
+        self.down_conv_block = nn.Sequential(*down_conv_block)
+
+        self.down_conv = PointConv(
+            in_channels=in_channels,
+            out_channels=inner_module_in_channels,
+            neighbor_search_args=neighbor_search_args,
+            pooling_args=pooling_args,
+            edge_transform_mlp=edge_transform_mlp,
+            out_transform_mlp=out_transform_mlp,
+            hidden_dim=hidden_dim,
+            channel_multiplier=channel_multiplier,
+            use_rel_pos=use_rel_pos,
+            use_rel_pos_encode=use_rel_pos_encode,
+            pos_encode_dim=pos_encode_dim,
+            pos_encode_range=pos_encode_range,
+            reductions=reductions,
+            out_point_feature_type="downsample",
+            downsample_voxel_size=downsample_voxel_size,
+        )
+
+        self.inner_module = inner_module
+
+        self.up_conv = PointConv(
+            in_channels=inner_module_out_channels,
+            out_channels=out_channels,
+            neighbor_search_args=neighbor_search_args,
+            pooling_args=pooling_args,
+            edge_transform_mlp=edge_transform_mlp,
+            out_transform_mlp=out_transform_mlp,
+            hidden_dim=hidden_dim,
+            channel_multiplier=channel_multiplier,
+            use_rel_pos=use_rel_pos,
+            use_rel_pos_encode=use_rel_pos_encode,
+            pos_encode_dim=pos_encode_dim,
+            pos_encode_range=pos_encode_range,
+            reductions=reductions,
+            out_point_feature_type="provided",
+            provided_in_channels=in_channels,
+        )
+
+        if num_up_blocks > 0:
+            self.up_conv_block = nn.Sequential(
+                *[
+                    PointConvBlock(
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        neighbor_search_args=neighbor_search_args,
+                        pooling_args=pooling_args,
+                        edge_transform_mlp=edge_transform_mlp,
+                        out_transform_mlp=out_transform_mlp,
+                        intermediate_dim=intermediate_dim,
+                        hidden_dim=hidden_dim,
+                        channel_multiplier=channel_multiplier,
+                        use_rel_pos=use_rel_pos,
+                        use_rel_pos_encode=use_rel_pos_encode,
+                        pos_encode_dim=pos_encode_dim,
+                        pos_encode_range=pos_encode_range,
+                        reductions=reductions,
+                        out_point_feature_type="same",
+                    )
+                    for _ in range(num_up_blocks)
+                ]
+            )
+        else:
+            self.up_conv_block = nn.Identity()
+
+        if in_channels != out_channels:
+            self.skip = PointCollectionMLP(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                hidden_channels=max(in_channels, out_channels),
+            )
+        else:
+            self.skip = nn.Identity()
+
+    def forward(self, point_collection: PointCollection) -> List[PointCollection]:
+        """
+        Given an input point collection, the network will return a list of point collections at each level of the UNet.
+        """
+        out_down = self.down_conv_block(point_collection)
+        out_down = self.down_conv(out_down)
+        if self.inner_module is None:
+            out_inner: List[PointCollection] = [out_down]
+        else:
+            out_inner: List[PointCollection] = self.inner_module(out_down)
+        out_up = self.up_conv(out_inner[0], point_collection)
+        out_up = out_up + self.skip(point_collection)
+        out_up = self.up_conv_block(out_up)
+        return [out_up] + out_inner
+
+
+class PointConvUNet(BaseModel):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        down_channels: List[int],
+        up_channels: List[int],
+        downsample_voxel_size: float | List[float],
+        neighbor_search_args: NeighborSearchArgs,
+        voxel_size_multiplier: float = 2.0,
+        pooling_args: Optional[FeaturePoolingArgs] = None,
+        edge_transform_mlp: Optional[nn.Module] = None,
+        out_transform_mlp: Optional[nn.Module] = None,
+        intermediate_dim: Optional[int] = None,
+        hidden_dim: Optional[int] = None,
+        channel_multiplier: int = 2,
+        use_rel_pos: bool = True,
+        use_rel_pos_encode: bool = False,
+        pos_encode_dim: int = 32,
+        pos_encode_range: float = 4,
+        reductions: List[REDUCTION_TYPES] = ("mean",),
+        num_levels: int = 4,
+    ):
+        super().__init__()
+        assert len(down_channels) > num_levels and len(up_channels) > num_levels
+        self.num_levels = num_levels
+
+        if isinstance(downsample_voxel_size, float):
+            downsample_voxel_size = [
+                downsample_voxel_size * voxel_size_multiplier**i for i in range(num_levels)
+            ]
+
+        print(downsample_voxel_size)
+
+        self.in_map = PointCollectionTransform(nn.Linear(in_channels, down_channels[0]))
+
+        # Create from the deepest level to the shallowest level
+        inner_block = None
+        for i in range(num_levels - 1, -1, -1):
+            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+                radius=downsample_voxel_size[i]
+            )
+            inner_block = PointConvUNetBlock(
+                inner_module=inner_block,
+                in_channels=down_channels[i],
+                inner_module_in_channels=down_channels[i + 1],
+                inner_module_out_channels=up_channels[i + 1],
+                out_channels=up_channels[i],
+                neighbor_search_args=curr_neighbor_search_args,
+                pooling_args=pooling_args,
+                edge_transform_mlp=edge_transform_mlp,
+                out_transform_mlp=out_transform_mlp,
+                intermediate_dim=intermediate_dim,
+                hidden_dim=hidden_dim,
+                channel_multiplier=channel_multiplier,
+                use_rel_pos=use_rel_pos,
+                use_rel_pos_encode=use_rel_pos_encode,
+                pos_encode_dim=pos_encode_dim,
+                pos_encode_range=pos_encode_range,
+                reductions=reductions,
+                downsample_voxel_size=downsample_voxel_size[i],
+            )
+        self.unet = inner_block
+
+        self.out_map = PointCollectionTransform(nn.Linear(up_channels[0], out_channels))
+
+    def forward(self, point_collection: PointCollection) -> List[PointCollection]:
+        """
+        Given an input point collection, the network will return a list of point collections at each level of the UNet.
+        """
+        out = self.in_map(point_collection)
+        out = self.unet(out)
+        out[0] = self.out_map(out[0])
+        return out

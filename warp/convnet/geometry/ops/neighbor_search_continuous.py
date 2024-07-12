@@ -59,6 +59,20 @@ class NeighborSearchArgs:
     def __repr__(self):
         return f"{self.__class__.__name__}(mode={self._mode})"
 
+    def clone(
+        self,
+        mode: Optional[NEIGHBOR_SEARCH_MODE] = None,
+        radius: Optional[float] = None,
+        k: Optional[int] = None,
+        grid_dim: Optional[int | Tuple[int, int, int]] = None,
+    ):
+        return NeighborSearchArgs(
+            mode=mode if mode is not None else self._mode,
+            radius=radius if radius is not None else self._radius,
+            k=k if k is not None else self._k,
+            grid_dim=grid_dim if grid_dim is not None else self._grid_dim,
+        )
+
 
 class NeighborSearchResult:
     """

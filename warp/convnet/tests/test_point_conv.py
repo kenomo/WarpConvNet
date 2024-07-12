@@ -12,7 +12,12 @@ from warp.convnet.geometry.ops.point_pool import (
     FeaturePoolingArgs,
 )
 from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.point_conv import PointConv, PointConvBlock
+from warp.convnet.nn.point_conv import (
+    PointConv,
+    PointConvBlock,
+    PointConvUNet,
+    PointConvUNetBlock,
+)
 
 
 class TestPointConv(unittest.TestCase):
@@ -114,6 +119,73 @@ class TestPointConv(unittest.TestCase):
         ).to(self.device)
         # Forward pass
         out = conv(pc)  # noqa: F841
+
+    def test_point_conv_unet_block(self):
+        pc = self.pc
+        # Create conv layer
+        in_channels, out_channels = self.C, 16
+        search_args = NeighborSearchArgs(
+            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+            radius=0.1,
+        )
+        pool_args = FeaturePoolingArgs(
+            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+            reductions=["mean"],
+        )
+        conv = PointConvUNetBlock(
+            in_channels=in_channels,
+            inner_module_in_channels=32,
+            inner_module_out_channels=32,
+            out_channels=out_channels,
+            neighbor_search_args=search_args,
+            pooling_args=pool_args,
+            downsample_voxel_size=0.1,
+        ).to(self.device)
+        # Forward pass
+        out = conv(pc)
+        # backward
+        out[0].feature_tensor.mean().backward()
+        # print the conv param grads
+        for name, param in conv.named_parameters():
+            if param.grad is not None:
+                print(name, param.grad.shape)
+            else:
+                print(name, "has no grad")
+
+    def test_point_conv_unet(self):
+        pc = self.pc
+        # Create conv layer
+        in_channels, out_channels = self.C, 16
+        search_args = NeighborSearchArgs(
+            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+            radius=0.1,
+        )
+        pool_args = FeaturePoolingArgs(
+            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+            reductions=["mean"],
+        )
+        down_channels = [16, 32, 64]
+        up_channels = [16, 32, 64]
+        conv = PointConvUNet(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            down_channels=down_channels,
+            up_channels=up_channels,
+            neighbor_search_args=search_args,
+            pooling_args=pool_args,
+            downsample_voxel_size=0.1,
+            num_levels=2,
+        ).to(self.device)
+        # Forward pass
+        out = conv(pc)
+        # backward
+        out[0].feature_tensor.mean().backward()
+        # print the conv param grads
+        for name, param in conv.named_parameters():
+            if param.grad is not None:
+                print(name, param.grad.shape)
+            else:
+                print(name, "has no grad")
 
 
 if __name__ == "__main__":

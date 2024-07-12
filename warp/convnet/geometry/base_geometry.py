@@ -273,6 +273,14 @@ class BatchedSpatialFeatures:
         return self.batched_features.batched_tensor
 
     @property
+    def coordinate_shape(self):
+        return tuple(self.batched_coordinates.shape)
+
+    @property
+    def feature_shape(self):
+        return tuple(self.batched_features.shape)
+
+    @property
     def offsets(self):
         return self.batched_coordinates.offsets
 
@@ -309,7 +317,7 @@ class BatchedSpatialFeatures:
 
     def binary_op(self, value: object, op: str) -> "BatchedSpatialFeatures":
         if isinstance(value, BatchedSpatialFeatures):
-            assert self.equal_shape(value)
+            assert self.equal_shape(value), f"Shapes do not match. {self} != {value}"
             return self._apply_feature_transform(lambda x: getattr(x, op)(value.feature_tensor))
         elif isinstance(value, (int, float)) or (torch.is_tensor(value) and value.numel() == 1):
             return self._apply_feature_transform(lambda x: getattr(x, op)(value))
@@ -350,11 +358,11 @@ class BatchedSpatialFeatures:
 
     def __str__(self) -> str:
         """Short representation of the object."""
-        return f"{self.__class__.__name__}(offsets={self.offsets}, feature_shape={self.batched_features.shape}, coords_shape={self.batched_coordinates.shape})"
+        return f"{self.__class__.__name__}(feature_shape={self.feature_shape}, coords_shape={self.coordinate_shape})"
 
     def __repr__(self) -> str:
         """Detailed representation of the object."""
-        return f"{self.__class__.__name__}(offsets={self.offsets}, feature_shape={self.batched_features.shape}, coords_shape={self.batched_coordinates.shape}, device={self.device}, dtype={self.batched_features.dtype})"
+        return f"{self.__class__.__name__}(offsets={self.offsets}, feature_shape={self.feature_shape}, coords_shape={self.coordinate_shape}, device={self.device}, dtype={self.batched_features.dtype})"
 
     def numel(self):
         return self.batched_features.numel()

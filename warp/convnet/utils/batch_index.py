@@ -87,7 +87,7 @@ def batch_index_from_offset(
         return batch_index
 
     N = offsets[-1].item()
-    offsets_wp = wp.from_torch(offsets, dtype=wp.int32).to(device)
+    offsets_wp = wp.from_torch(offsets.int(), dtype=wp.int32).to(device)
     batch_index_wp = wp.zeros(shape=(N,), dtype=wp.int32, device=device)
     wp.launch(
         _batch_index,
