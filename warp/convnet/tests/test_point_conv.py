@@ -12,12 +12,8 @@ from warp.convnet.geometry.ops.point_pool import (
     FeaturePoolingArgs,
 )
 from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.point_conv import (
-    PointConv,
-    PointConvBlock,
-    PointConvUNet,
-    PointConvUNetBlock,
-)
+from warp.convnet.models.point_conv_unet import PointConvUNet
+from warp.convnet.nn.point_conv import PointConv, PointConvBlock, PointConvUNetBlock
 
 
 class TestPointConv(unittest.TestCase):
