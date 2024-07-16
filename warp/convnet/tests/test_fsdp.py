@@ -10,8 +10,9 @@ from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NeighborSearchArgs,
 )
 from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.mlp import MLPBlock, PointCollectionTransform
+from warp.convnet.nn.mlp import MLPBlock
 from warp.convnet.nn.point_conv import PointConv
+from warp.convnet.nn.point_transform import PointCollectionTransform
 
 
 class TestFSDP(unittest.TestCase):

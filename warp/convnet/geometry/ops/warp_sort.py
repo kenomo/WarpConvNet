@@ -33,21 +33,13 @@ def _part1by2_long(n: wp.int64) -> wp.int64:
     return n
 
 
-@wp.kernel
-def _assign_order_discrete_16bit(
-    bcoords: wp.array(dtype=wp.vec4i),
-    result_order: wp.array(dtype=wp.int64),
-) -> None:
+@wp.func
+def morton_code(bcoord: wp.vec4i) -> wp.int64:
     """
     Assume that the coords are in the range [-2^15, 2^15 - 1] and the result_order will be the z-order number of the point.
     the batch size should be less than 2^16=65536
     """
-    tid = wp.tid()
-    bcoord = bcoords[tid]
-
-    # Extract batch index and coordinates
-    batch_index = wp.int64(bcoord[0])
-    offset = 1 << 15  # Large enough to handle negative values up to 2^15
+    offset = 1 << 15
     ux = wp.int64(bcoord[1] + offset)
     uy = wp.int64(bcoord[2] + offset)
     uz = wp.int64(bcoord[3] + offset)
@@ -63,7 +55,20 @@ def _assign_order_discrete_16bit(
     morton_code &= wp.int64(0x0000FFFFFFFFFFFF)
 
     # Combine the batch index with the Morton order to ensure batch continuity
-    result_order[tid] = (batch_index << wp.int64(48)) | morton_code
+    return (wp.int64(bcoord[0]) << wp.int64(48)) | morton_code
+
+
+@wp.kernel
+def _assign_order_discrete_16bit(
+    bcoords: wp.array(dtype=wp.vec4i),
+    result_order: wp.array(dtype=wp.int64),
+) -> None:
+    """
+    Assume that the coords are in the range [-2^15, 2^15 - 1] and the result_order will be the z-order number of the point.
+    the batch size should be less than 2^16=65536
+    """
+    tid = wp.tid()
+    result_order[tid] = morton_code(bcoords[tid])
 
 
 @wp.kernel

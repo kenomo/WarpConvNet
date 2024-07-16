@@ -19,7 +19,7 @@ from warp.convnet.nn.mlp import MLPBlock
 from warp.convnet.nn.point_transform import PointCollectionMLP, PointCollectionTransform
 from warp.convnet.ops.reductions import REDUCTION_TYPES, row_reduction
 
-__all__ = ["PointConv", "PointConvBlock"]
+__all__ = ["PointConv", "PointConvBlock", "PointConvUNetBlock", "PointConvUNet"]
 
 
 class PointConv(BaseModule):

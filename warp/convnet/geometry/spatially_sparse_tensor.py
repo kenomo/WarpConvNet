@@ -4,6 +4,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
+from warp.convnet.core.hashmap import VectorHashTable
 from warp.convnet.geometry.base_geometry import (
     BatchedCoordinates,
     BatchedFeatures,
@@ -12,11 +13,13 @@ from warp.convnet.geometry.base_geometry import (
 )
 from warp.convnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
+from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
 class BatchedDiscreteCoordinates(BatchedCoordinates):
     voxel_size: float
     voxel_origin: Float[Tensor, "3"]
+    _hashmap: Optional[VectorHashTable]
 
     def __init__(
         self,
@@ -83,6 +86,13 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         )
         return self.__class__(self.batched_tensor[unique_indices], batch_offsets)
 
+    @property
+    def hashmap(self) -> VectorHashTable:
+        if not hasattr(self, "_hashmap") or self._hashmap is None:
+            bcoords = batch_indexed_coordinates(self.batched_tensor, self.offsets)
+            self._hashmap = VectorHashTable.from_keys(bcoords)
+        return self._hashmap
+
 
 class SpatiallySparseTensor(BatchedSpatialFeatures):
     batched_coordinates: BatchedDiscreteCoordinates
@@ -126,3 +136,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[unique_indices], batch_offsets)
         feats = BatchedFeatures(self.feature_tensor[unique_indices], batch_offsets)
         return self.__class__(coords, feats, self._ordering)
+
+    @property
+    def coordinate_hashmap(self) -> VectorHashTable:
+        return self.batched_coordinates.hashmap

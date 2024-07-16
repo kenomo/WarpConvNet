@@ -57,7 +57,7 @@ def unique_torch(
 
 def unique_hashmap(
     bcoords: Int[Tensor, "N 4"],  # noqa: F821
-    hash_method: HashMethod = HashMethod.FNV1A,
+    hash_method: HashMethod = HashMethod.CITY,
 ) -> Tuple[Int[Tensor, "M"], VectorHashTable]:  # noqa: F821
     """
     Args:

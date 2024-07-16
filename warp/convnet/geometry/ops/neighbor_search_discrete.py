@@ -1,120 +1,92 @@
-from typing import Optional, Tuple
-
 import torch
 
 import warp as wp
+from warp.convnet.core.hashmap import HashStruct, VectorHashTable, search_func
+from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
 @wp.kernel
-def _radius_search_count(
-    hashgrid: wp.uint64,
-    points: wp.array(dtype=wp.vec3),
-    queries: wp.array(dtype=wp.vec3),
-    result_count: wp.array(dtype=wp.int32),
-    radius: wp.float32,
+def conv_kernel_map(
+    in_hashmap: HashStruct,
+    query_coords: wp.array(dtype=wp.vec4i),
+    kernel_offset: wp.vec4i,
+    found_in_coord_index: wp.array(dtype=int),
 ):
-    tid = wp.tid()
+    """
+    Compute whether query + offset is in in_coords and return the index of the found input coordinate.
 
-    # create grid query around point
-    qp = queries[tid]
-    query = wp.hash_grid_query(hashgrid, qp, radius)
-    index = int(0)
-    result_count_tid = int(0)
-
-    while wp.hash_grid_query_next(query, index):
-        neighbor = points[index]
-
-        # compute distance to neighbor point
-        dist = wp.length(qp - neighbor)
-        if dist <= radius:
-            result_count_tid += 1
-
-    result_count[tid] = result_count_tid
+    For definitions, please refer to Sec. 4.2. of https://arxiv.org/pdf/1904.08755
+    """
+    idx = wp.tid()
+    query_coord = query_coords[idx] + kernel_offset
+    index = search_func(
+        in_hashmap.table_kvs,
+        in_hashmap.vector_keys,
+        query_coord,
+        in_hashmap.capacity,
+        in_hashmap.hash_method,
+    )
+    found_in_coord_index[idx] = index
 
 
 @wp.kernel
-def _radius_search_query(
-    hashgrid: wp.uint64,
-    points: wp.array(dtype=wp.vec3),
-    queries: wp.array(dtype=wp.vec3),
-    result_offset: wp.array(dtype=wp.int32),
-    result_point_idx: wp.array(dtype=wp.int32),
-    result_point_dist: wp.array(dtype=wp.float32),
-    radius: wp.float32,
+def num_neighbors_kernel(
+    in_hashmap: HashStruct,
+    query_coords: wp.array(dtype=wp.vec4i),
+    neighbor_distance_threshold: int,
+    num_neighbors: wp.array(dtype=int),
 ):
-    tid = wp.tid()
+    idx = wp.tid()
 
-    # create grid query around point
-    qp = queries[tid]
-    query = wp.hash_grid_query(hashgrid, qp, radius)
-    index = int(0)
-    result_count = int(0)
-    offset_tid = result_offset[tid]
+    curr_num_neighbors = int(0)
+    # Loop over the neighbors
+    for i in range(neighbor_distance_threshold):
+        for j in range(neighbor_distance_threshold):
+            for k in range(neighbor_distance_threshold):
+                # Compute query coord
+                query_coord = query_coords[idx] + wp.vec4i(0, i, j, k)
+                index = search_func(
+                    in_hashmap.table_kvs,
+                    in_hashmap.vector_keys,
+                    query_coord,
+                    in_hashmap.capacity,
+                    in_hashmap.hash_method,
+                )
+                if index >= 0:
+                    curr_num_neighbors += 1
 
-    while wp.hash_grid_query_next(query, index):
-        neighbor = points[index]
-
-        # compute distance to neighbor point
-        dist = wp.length(qp - neighbor)
-        if dist <= radius:
-            result_point_idx[offset_tid + result_count] = index
-            result_point_dist[offset_tid + result_count] = dist
-            result_count += 1
+    num_neighbors[idx] = curr_num_neighbors
 
 
-def _radius_search(
-    points: wp.array(dtype=wp.vec3),
-    queries: wp.array(dtype=wp.vec3),
-    radius: float,
-    grid_dim: Optional[int | Tuple[int, int, int]] = None,
+def neighbor_search(
+    in_coords: torch.Tensor,
+    in_coords_offsets: torch.Tensor,
+    query_coords: torch.Tensor,
+    query_coords_offsets: torch.Tensor,
+    neighbor_distance_threshold: int,
 ):
-    if grid_dim is None:
-        grid_dim = 128
+    # device checks
+    str_device = str(in_coords.device)
+    assert in_coords.device == query_coords.device
 
-    # convert grid_dim to Tuple if it is int
-    if isinstance(grid_dim, int):
-        grid_dim = (grid_dim, grid_dim, grid_dim)
+    # Convert the coordinates to batched coordinates
+    in_bcoords = batch_indexed_coordinates(in_coords, in_coords_offsets)
+    query_bcoords = batch_indexed_coordinates(query_coords, query_coords_offsets)
 
-    str_device = str(points.device)
-    result_count = wp.zeros(shape=len(queries), dtype=wp.int32, device=str_device)
-    grid = wp.HashGrid(
-        dim_x=grid_dim[0],
-        dim_y=grid_dim[1],
-        dim_z=grid_dim[2],
-        device=str_device,
-    )
-    grid.build(points=points, radius=2 * radius)
+    # Create the hashmap for in_coords
+    in_coords_hashmap = VectorHashTable.from_keys(in_bcoords)
 
-    # For 10M radius search, the result can overflow and fail
+    # Compute the number of neighbors for each query point
+    num_neighbors = wp.empty(len(query_bcoords), dtype=int, device=str_device)
+
+    # Launch num neighbor kernel
     wp.launch(
-        kernel=_radius_search_count,
-        dim=len(queries),
-        inputs=[grid.id, points, queries, result_count, radius],
-        device=str_device,
-    )
-
-    torch_offset = torch.zeros(len(result_count) + 1, device=str_device, dtype=torch.int32)
-    result_count_torch = wp.to_torch(result_count)
-    torch.cumsum(result_count_torch, dim=0, out=torch_offset[1:])
-    total_count = torch_offset[-1].item()
-    assert total_count < 2**31 - 1, f"Total result count is too large: {total_count} > 2**31 - 1"
-
-    result_point_idx = wp.zeros(shape=(total_count,), dtype=wp.int32, device=str_device)
-    result_point_dist = wp.zeros(shape=(total_count,), dtype=wp.float32, device=str_device)
-
-    wp.launch(
-        kernel=_radius_search_query,
-        dim=len(queries),
+        kernel=num_neighbors_kernel,
+        dim=len(query_bcoords),
         inputs=[
-            grid.id,
-            points,
-            queries,
-            wp.from_torch(torch_offset),
-            result_point_idx,
-            result_point_dist,
-            radius,
+            in_coords_hashmap.table_kv,
+            in_coords_hashmap.vector_keys,
+            query_bcoords,
+            num_neighbors,
         ],
-        device=str_device,
     )
-
-    return (result_point_idx, result_point_dist, torch_offset)
