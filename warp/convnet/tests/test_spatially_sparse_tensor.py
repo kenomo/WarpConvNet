@@ -81,6 +81,9 @@ class TestSpatiallySparseTensor(unittest.TestCase):
             torch.unique(bcoords, dim=0).shape[0] == len(unique_st.batched_coordinates)
         )
 
+    def test_neighbor(self):
+        pass
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,13 +3,18 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.neighbor_search_discrete import num_neighbors_kernel
+import warp.utils
+from warp.convnet.geometry.ops.neighbor_search_discrete import (
+    kernel_map_hashmap,
+    neighbor_search_hashmap,
+    num_neighbors_kernel,
+)
 from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
-class TestSorting(unittest.TestCase):
+class TestNeighborSearchDiscrete(unittest.TestCase):
     def setUp(self):
         self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
@@ -50,7 +55,48 @@ class TestSorting(unittest.TestCase):
             ],
         )
 
+        # cumsum
+        cumsum_num_neighbors = wp.empty_like(num_neighbors)
+        warp.utils.array_scan(num_neighbors, cumsum_num_neighbors)
+
         print(num_neighbors.numpy())
+
+    def test_neighbor_search(self):
+        device = torch.device("cuda:0")
+        st: SpatiallySparseTensor = self.st.to(device)
+        batched_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
+        batched_coords_wp = wp.from_torch(batched_coords, dtype=wp.vec4i)
+
+        # Define the neighbor distance threshold
+        neighbor_distance_threshold = 3
+        hashmap = st.coordinate_hashmap
+        in_index, query_index = neighbor_search_hashmap(
+            hashmap._hash_struct,
+            batched_coords_wp,
+            neighbor_distance_threshold,
+        )
+        print(in_index, query_index)
+
+    def test_kernel_map(self):
+        device = torch.device("cuda:0")
+        st: SpatiallySparseTensor = self.st.to(device)
+
+        kernel_offsets = torch.tensor(
+            [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0]],
+            dtype=torch.int32,
+            device=device,
+        )
+
+        bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
+        st_hashmap = st.coordinate_hashmap
+
+        kernel_map = kernel_map_hashmap(
+            st_hashmap._hash_struct,
+            bcoords,
+            kernel_offsets,
+        )
+
+        print(kernel_map)
 
 
 if __name__ == "__main__":
