@@ -70,10 +70,11 @@ def _batch_index(
 
 def batch_index_from_offset(
     offsets: Int[Tensor, "B+1"],  # noqa: F821
-    backend: Literal["torch", "warp"] = "warp",
     device: Optional[str] = None,
+    backend: Literal["torch", "warp"] = "warp",
 ) -> Int[Tensor, "N"]:  # noqa: F821
     assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
+    assert backend in ["torch", "warp"], "backend must be either torch or warp"
 
     if device is not None:
         offsets = offsets.to(device)
@@ -85,6 +86,12 @@ def batch_index_from_offset(
             .repeat_interleave(offsets[1:] - offsets[:-1])
         )
         return batch_index
+
+    if device is None:
+        device = str(offsets.device)
+
+    # Assert this is not cpu
+    assert "cpu" not in device, "device must be a cuda device"
 
     N = offsets[-1].item()
     offsets_wp = wp.from_torch(offsets.int(), dtype=wp.int32).to(device)

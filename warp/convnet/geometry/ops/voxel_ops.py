@@ -84,7 +84,7 @@ def voxel_downsample_random_indices(
         voxel_coords = torch.floor(batched_points / voxel_size).int()
     else:
         voxel_coords = batched_points.int()
-    batch_index = batch_index_from_offset(offsets, device)
+    batch_index = batch_index_from_offset(offsets, device=device)
     voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
     unique_indices, hash_table = unique_hashmap(voxel_coords)
