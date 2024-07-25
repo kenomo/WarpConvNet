@@ -8,7 +8,7 @@ from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.nn.base_module import BaseModel
 from warp.convnet.nn.point_conv import PointConvUNetBlock
 from warp.convnet.nn.point_transform import PointCollectionTransform
-from warp.convnet.ops.reductions import REDUCTION_TYPES
+from warp.convnet.ops.reductions import REDUCTION_TYPES_STR
 
 __all__ = ["PointConvUNet"]
 
@@ -33,7 +33,7 @@ class PointConvUNet(BaseModel):
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
-        reductions: List[REDUCTION_TYPES] = ("mean",),
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
         num_levels: int = 4,
     ):
         super().__init__()

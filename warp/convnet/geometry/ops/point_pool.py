@@ -7,7 +7,7 @@ from torch import Tensor
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warp.convnet.nn.encoding import sinusoidal_encode
-from warp.convnet.ops.reductions import REDUCTION_TYPES, REDUCTIONS, row_reduction
+from warp.convnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 
 class FEATURE_POOLING_MODE(Enum):
@@ -18,21 +18,29 @@ class FEATURE_POOLING_MODE(Enum):
 
 class FeaturePoolingArgs:
     pooling_mode: FEATURE_POOLING_MODE
-    reductions: List[REDUCTION_TYPES]
+    reductions: List[REDUCTIONS]
     encoded_coords_dim: int
     encoded_coords_data_range: float
 
     def __init__(
         self,
         pooling_mode: FEATURE_POOLING_MODE,
-        reductions: Optional[List[REDUCTION_TYPES]] = None,
+        reductions: Optional[List[REDUCTIONS | REDUCTION_TYPES_STR]] = None,
         encoded_coords_dim: Optional[int] = None,
         encoded_coords_data_range: Optional[float] = None,
     ):
+        # Type conversions
+        if isinstance(pooling_mode, str):
+            pooling_mode = FEATURE_POOLING_MODE(pooling_mode)
         assert isinstance(pooling_mode, FEATURE_POOLING_MODE)
+        if reductions is None:
+            reductions = [REDUCTIONS.MEAN]
+        reductions = [
+            REDUCTIONS(reduction) if isinstance(reduction, str) else reduction
+            for reduction in reductions
+        ]
+
         self.pooling_mode = pooling_mode
-        if pooling_mode == FEATURE_POOLING_MODE.REDUCTIONS:
-            assert [reduction in REDUCTIONS for reduction in reductions]
         self.reductions = reductions
         if pooling_mode == FEATURE_POOLING_MODE.ENCODED_COORDS:
             assert encoded_coords_dim is not None and encoded_coords_dim % 2 == 0

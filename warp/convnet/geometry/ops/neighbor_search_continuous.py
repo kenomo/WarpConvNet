@@ -35,6 +35,9 @@ class NeighborSearchArgs:
         k: Optional[int] = None,
         grid_dim: Optional[int | Tuple[int, int, int]] = None,
     ):
+        if isinstance(mode, str):
+            mode = NEIGHBOR_SEARCH_MODE(mode)
+
         self._mode = mode
         self._radius = radius
         self._k = k

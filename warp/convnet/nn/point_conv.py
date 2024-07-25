@@ -17,7 +17,7 @@ from warp.convnet.nn.base_module import BaseModule
 from warp.convnet.nn.encoding import SinusoidalEncoding
 from warp.convnet.nn.mlp import MLPBlock
 from warp.convnet.nn.point_transform import PointCollectionMLP, PointCollectionTransform
-from warp.convnet.ops.reductions import REDUCTION_TYPES, row_reduction
+from warp.convnet.ops.reductions import REDUCTION_TYPES_STR, row_reduction
 
 __all__ = ["PointConv", "PointConvBlock", "PointConvUNetBlock"]
 
@@ -39,7 +39,7 @@ class PointConv(BaseModule):
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
-        reductions: List[REDUCTION_TYPES] = ("mean",),
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
         downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
@@ -242,7 +242,7 @@ class PointConvBlock(BaseModule):
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
-        reductions: List[REDUCTION_TYPES] = ("mean",),
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
         downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
@@ -341,7 +341,7 @@ class PointConvUNetBlock(BaseModule):
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
-        reductions: List[REDUCTION_TYPES] = ("mean",),
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
         downsample_voxel_size: Optional[float] = None,
     ):
         assert inner_module is None or isinstance(inner_module, PointConvUNetBlock)
