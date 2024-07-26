@@ -20,10 +20,10 @@ class PointConvUNet(BaseModel):
         out_channels: int,
         down_channels: List[int],
         up_channels: List[int],
-        downsample_voxel_size: float | List[float],
         neighbor_search_args: NeighborSearchArgs,
-        voxel_size_multiplier: float = 2.0,
-        pooling_args: Optional[FeaturePoolingArgs] = None,
+        neighbor_search_radii: List[float],
+        pooling_args: FeaturePoolingArgs,
+        downsample_voxel_sizes: List[float],
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
         intermediate_dim: Optional[int] = None,
@@ -37,23 +37,25 @@ class PointConvUNet(BaseModel):
         num_levels: int = 4,
     ):
         super().__init__()
-        assert len(down_channels) > num_levels and len(up_channels) > num_levels
+        assert len(down_channels) == num_levels + 1 and len(up_channels) == num_levels + 1
+        assert len(downsample_voxel_sizes) == num_levels
+        assert len(neighbor_search_radii) == num_levels
+        for i in range(num_levels - 1):
+            assert downsample_voxel_sizes[i] < downsample_voxel_sizes[i + 1]
+            assert neighbor_search_radii[i] < neighbor_search_radii[i + 1]
+
         self.num_levels = num_levels
-
-        if isinstance(downsample_voxel_size, float):
-            downsample_voxel_size = [
-                downsample_voxel_size * voxel_size_multiplier**i for i in range(num_levels)
-            ]
-
-        print(downsample_voxel_size)
-
         self.in_map = PointCollectionTransform(nn.Linear(in_channels, down_channels[0]))
 
         # Create from the deepest level to the shallowest level
         inner_block = None
+        # start from the innermost block. This has the largest receptive field, radius, and voxel size
         for i in range(num_levels - 1, -1, -1):
             curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
-                radius=downsample_voxel_size[i]
+                radius=neighbor_search_radii[i]
+            )
+            curr_pooling_args: FeaturePoolingArgs = pooling_args.clone(
+                downsample_voxel_size=downsample_voxel_sizes[i]
             )
             inner_block = PointConvUNetBlock(
                 inner_module=inner_block,
@@ -62,7 +64,7 @@ class PointConvUNet(BaseModel):
                 inner_module_out_channels=up_channels[i + 1],
                 out_channels=up_channels[i],
                 neighbor_search_args=curr_neighbor_search_args,
-                pooling_args=pooling_args,
+                pooling_args=curr_pooling_args,
                 edge_transform_mlp=edge_transform_mlp,
                 out_transform_mlp=out_transform_mlp,
                 intermediate_dim=intermediate_dim,
@@ -73,7 +75,6 @@ class PointConvUNet(BaseModel):
                 pos_encode_dim=pos_encode_dim,
                 pos_encode_range=pos_encode_range,
                 reductions=reductions,
-                downsample_voxel_size=downsample_voxel_size[i],
             )
         self.unet = inner_block
 

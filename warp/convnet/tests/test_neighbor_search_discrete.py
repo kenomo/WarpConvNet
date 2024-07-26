@@ -16,6 +16,7 @@ from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 class TestNeighborSearchDiscrete(unittest.TestCase):
     def setUp(self):
+        wp.init()
         self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]

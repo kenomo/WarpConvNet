@@ -128,7 +128,7 @@ class PointCollection(BatchedSpatialFeatures):
     ):
         """
         Sort the points according to the ordering provided.
-        The voxel size defines the smalles descritization and points in the same voxel will have random order.
+        The voxel size defines the smalles discretization and points in the same voxel will have random order.
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"

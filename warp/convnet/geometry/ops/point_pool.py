@@ -21,6 +21,8 @@ class FeaturePoolingArgs:
     reductions: List[REDUCTIONS]
     encoded_coords_dim: int
     encoded_coords_data_range: float
+    downsample_voxel_size: float
+    num_random_samples: int
 
     def __init__(
         self,
@@ -28,6 +30,8 @@ class FeaturePoolingArgs:
         reductions: Optional[List[REDUCTIONS | REDUCTION_TYPES_STR]] = None,
         encoded_coords_dim: Optional[int] = None,
         encoded_coords_data_range: Optional[float] = None,
+        downsample_voxel_size: Optional[float] = None,
+        num_random_samples: Optional[int] = None,
     ):
         # Type conversions
         if isinstance(pooling_mode, str):
@@ -47,6 +51,30 @@ class FeaturePoolingArgs:
             assert encoded_coords_data_range is not None
         self.encoded_coords_dim = encoded_coords_dim
         self.encoded_coords_data_range = encoded_coords_data_range
+        self.downsample_voxel_size = downsample_voxel_size
+        self.num_random_samples = num_random_samples
+
+    def clone(self, downsample_voxel_size: Optional[float] = None) -> "FeaturePoolingArgs":
+        return FeaturePoolingArgs(
+            pooling_mode=self.pooling_mode,
+            reductions=self.reductions,
+            encoded_coords_dim=self.encoded_coords_dim,
+            encoded_coords_data_range=self.encoded_coords_data_range,
+            downsample_voxel_size=downsample_voxel_size or self.downsample_voxel_size,
+            num_random_samples=self.num_random_samples,
+        )
+
+    def __repr__(self) -> str:
+        out_str = f"FeaturePoolingArgs({self.pooling_mode} "
+        if self.pooling_mode == FEATURE_POOLING_MODE.REDUCTIONS:
+            out_str += (
+                f"reductions={self.reductions} downsample_voxel_size={self.downsample_voxel_size})"
+            )
+        elif self.pooling_mode == FEATURE_POOLING_MODE.ENCODED_COORDS:
+            out_str += f"encoded_coords_dim={self.encoded_coords_dim} encoded_coords_data_range={self.encoded_coords_data_range})"
+        elif self.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
+            out_str += f"num_random_samples={self.num_random_samples})"
+        return out_str
 
 
 DEFAULT_FEATURE_POOLING_ARGS = FeaturePoolingArgs(

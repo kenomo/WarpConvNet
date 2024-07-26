@@ -75,7 +75,7 @@ class BatchedObject:
         # offset check
         assert isinstance(
             self.offsets, (torch.IntTensor, torch.LongTensor)
-        ), f"Offsets must be a tensor, got {type(self.offsets)}"
+        ), f"Offsets must be a cpu IntTensor, LongTensor, got {self.offsets}"
         assert self.offsets.requires_grad is False, "Offsets must not require grad"
         assert (
             len(self.offsets) == self.batch_size + 1

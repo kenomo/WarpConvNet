@@ -40,14 +40,11 @@ class PointConv(BaseModule):
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
         reductions: List[REDUCTION_TYPES_STR] = ("mean",),
-        downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
     ):
         """If use_relative_position_encoding is True, the positional encoding vertex coordinate
         difference is added to the edge features.
-
-        downsample_voxel_size: If not None, the input point cloud will be downsampled.
 
         out_point_feature_type: If "upsample", the output point features will be upsampled to the input point cloud size.
 
@@ -59,37 +56,30 @@ class PointConv(BaseModule):
             isinstance(reductions, (tuple, list)) and len(reductions) > 0
         ), f"reductions must be a list or tuple of length > 0, got {reductions}"
         if out_point_feature_type == "provided":
-            assert (
-                downsample_voxel_size is None
-            ), "downsample_voxel_size is only used for downsample"
+            assert pooling_args is None
             assert (
                 provided_in_channels is not None
             ), "provided_in_channels must be provided for provided type"
         elif out_point_feature_type == "downsample":
-            assert (
-                downsample_voxel_size is not None
-            ), "downsample_voxel_size must be provided for downsample"
+            assert pooling_args is not None, "pooling_args must be provided for downsample type"
             assert (
                 provided_in_channels is None
             ), "provided_in_channels must be None for downsample type"
-            assert pooling_args is not None, "pooling_args must be provided for downsample type"
         elif out_point_feature_type == "same":
-            assert (
-                downsample_voxel_size is None
-            ), "downsample_voxel_size is only used for downsample"
+            assert pooling_args is None, "pooling_args is only used for downsample"
             assert provided_in_channels is None, "provided_in_channels must be None for same type"
         if (
-            downsample_voxel_size is not None
+            pooling_args is not None
+            and pooling_args.downsample_voxel_size is not None
             and neighbor_search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS
-            and downsample_voxel_size > neighbor_search_args.radius
+            and pooling_args.downsample_voxel_size > neighbor_search_args.radius
         ):
             raise ValueError(
-                f"downsample_voxel_size {downsample_voxel_size} must be <= radius {neighbor_search_args.radius}"
+                f"downsample_voxel_size {pooling_args.downsample_voxel_size} must be <= radius {neighbor_search_args.radius}"
             )
 
         assert isinstance(neighbor_search_args, NeighborSearchArgs)
         self.reductions = reductions
-        self.downsample_voxel_size = downsample_voxel_size
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.use_rel_pos = use_rel_pos
@@ -125,8 +115,6 @@ class PointConv(BaseModule):
 
     def __repr__(self):
         out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels}"
-        if self.downsample_voxel_size is not None:
-            out_str += f" down_voxel_size={self.downsample_voxel_size}"
         if self.use_rel_pos_encode:
             out_str += f" rel_pos_encode={self.use_rel_pos_encode}"
         out_str += ")"
@@ -148,7 +136,7 @@ class PointConv(BaseModule):
         elif self.out_point_feature_type == "downsample":
             assert query_point_features is None
             query_point_features = in_point_features.voxel_downsample(
-                self.downsample_voxel_size,
+                self.pooling_args.downsample_voxel_size,
                 pooling_args=self.pooling_args,
             )
         elif self.out_point_feature_type == "same":
@@ -232,7 +220,6 @@ class PointConvBlock(BaseModule):
         in_channels: int,
         out_channels: int,
         neighbor_search_args: NeighborSearchArgs,
-        pooling_args: Optional[FeaturePoolingArgs] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
         intermediate_dim: Optional[int] = None,
@@ -243,7 +230,6 @@ class PointConvBlock(BaseModule):
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
         reductions: List[REDUCTION_TYPES_STR] = ("mean",),
-        downsample_voxel_size: Optional[float] = None,
         out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
         norm_layer1: Optional[nn.Module] = None,
@@ -251,13 +237,13 @@ class PointConvBlock(BaseModule):
         activation: Optional[nn.Module] = None,
     ):
         super().__init__()
+        assert out_point_feature_type == "same", "Only same type is supported for now"
         if intermediate_dim is None:
             intermediate_dim = out_channels
         self.point_conv1 = PointConv(
             in_channels=in_channels,
             out_channels=intermediate_dim,
             neighbor_search_args=neighbor_search_args,
-            pooling_args=pooling_args,
             edge_transform_mlp=edge_transform_mlp,
             out_transform_mlp=out_transform_mlp,
             hidden_dim=hidden_dim,
@@ -267,15 +253,13 @@ class PointConvBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            downsample_voxel_size=downsample_voxel_size,
-            out_point_feature_type=out_point_feature_type,
+            out_point_feature_type="same",
             provided_in_channels=provided_in_channels,
         )
         self.point_conv2 = PointConv(
             in_channels=intermediate_dim,
             out_channels=out_channels,
             neighbor_search_args=neighbor_search_args,
-            pooling_args=pooling_args,
             edge_transform_mlp=edge_transform_mlp,
             out_transform_mlp=out_transform_mlp,
             hidden_dim=hidden_dim,
@@ -285,8 +269,7 @@ class PointConvBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            downsample_voxel_size=downsample_voxel_size,
-            out_point_feature_type=out_point_feature_type,
+            out_point_feature_type="same",
             provided_in_channels=provided_in_channels,
         )
 
@@ -319,6 +302,10 @@ class PointConvBlock(BaseModule):
 class PointConvUNetBlock(BaseModule):
     """
     Given an input module, the UNet block will return a list of point collections at each level of the UNet from the inner module.
+
+    +------------+   +------------+   +-------------+   +------------+   +-----------+   +----------------+
+    | Down Blocks| ->| Down Conv  | ->| Inner Module| ->| Up Conv    | ->| Up Blocks | ->| Skip Connection|
+    +------------+   +------------+   +-------------+   +------------+   +-----------+   +----------------+
     """
 
     def __init__(
@@ -342,10 +329,8 @@ class PointConvUNetBlock(BaseModule):
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
         reductions: List[REDUCTION_TYPES_STR] = ("mean",),
-        downsample_voxel_size: Optional[float] = None,
     ):
         assert inner_module is None or isinstance(inner_module, PointConvUNetBlock)
-        assert downsample_voxel_size > 0
 
         super().__init__()
         down_conv_block = [
@@ -353,7 +338,6 @@ class PointConvUNetBlock(BaseModule):
                 in_channels=in_channels,
                 out_channels=in_channels,
                 neighbor_search_args=neighbor_search_args,
-                pooling_args=pooling_args,
                 edge_transform_mlp=edge_transform_mlp,
                 out_transform_mlp=out_transform_mlp,
                 intermediate_dim=intermediate_dim,
@@ -374,7 +358,6 @@ class PointConvUNetBlock(BaseModule):
                     in_channels=in_channels,
                     out_channels=in_channels,
                     neighbor_search_args=neighbor_search_args,
-                    pooling_args=pooling_args,
                     edge_transform_mlp=edge_transform_mlp,
                     out_transform_mlp=out_transform_mlp,
                     intermediate_dim=intermediate_dim,
@@ -406,7 +389,6 @@ class PointConvUNetBlock(BaseModule):
             pos_encode_range=pos_encode_range,
             reductions=reductions,
             out_point_feature_type="downsample",
-            downsample_voxel_size=downsample_voxel_size,
         )
 
         self.inner_module = inner_module
@@ -415,7 +397,6 @@ class PointConvUNetBlock(BaseModule):
             in_channels=inner_module_out_channels,
             out_channels=out_channels,
             neighbor_search_args=neighbor_search_args,
-            pooling_args=pooling_args,
             edge_transform_mlp=edge_transform_mlp,
             out_transform_mlp=out_transform_mlp,
             hidden_dim=hidden_dim,
@@ -436,7 +417,6 @@ class PointConvUNetBlock(BaseModule):
                         in_channels=out_channels,
                         out_channels=out_channels,
                         neighbor_search_args=neighbor_search_args,
-                        pooling_args=pooling_args,
                         edge_transform_mlp=edge_transform_mlp,
                         out_transform_mlp=out_transform_mlp,
                         intermediate_dim=intermediate_dim,
