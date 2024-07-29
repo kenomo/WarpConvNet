@@ -9,7 +9,7 @@ from warp.convnet.utils.unique import unique_hashmap, unique_torch
 
 
 # Voxel downsample
-@torch.no_grad()
+@torch.inference_mode()
 def voxel_downsample_csr_mapping(
     batched_points: Float[Tensor, "N 3"],  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F722,F821
@@ -57,7 +57,7 @@ def voxel_downsample_csr_mapping(
     return perm, unique_offsets, to_unique_index, index_offsets
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def voxel_downsample_random_indices(
     batched_points: Float[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F821

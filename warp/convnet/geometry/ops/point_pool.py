@@ -6,13 +6,27 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warp.convnet.geometry.ops.voxel_ops import (
+    voxel_downsample_csr_mapping,
+    voxel_downsample_random_indices,
+)
 from warp.convnet.nn.encoding import sinusoidal_encode
 from warp.convnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
+
+__all__ = [
+    "REDUCTIONS",
+    "REDUCTION_TYPES_STR",
+    "FeaturePoolingArgs",
+    "FEATURE_POOLING_MODE",
+    "DEFAULT_FEATURE_POOLING_ARGS",
+    "pool_features",
+]
 
 
 class FEATURE_POOLING_MODE(Enum):
     REDUCTIONS = "reductions"
     ENCODED_COORDS = "encoded_coords"
+    RELATIVE_COORDS = "relative_coords"
     RANDOM_SAMPLE = "random_sample"
 
 
@@ -142,7 +156,7 @@ def _pool_reductions(
 
 
 def _pool_encoded_coords(
-    down_coords: Float[Tensor, "M D"],  # noqa: F722,F821
+    coordinates: Float[Tensor, "M D"],  # noqa: F722,F821
     pooling_args: FeaturePoolingArgs,
 ) -> Float[Tensor, "M C"]:  # noqa: F722,F821
     """
@@ -159,5 +173,50 @@ def _pool_encoded_coords(
         torch.arange(start=0, end=pooling_args.encoded_coords_dim // 2, dtype=float)
         / pooling_args.encoded_coords_data_range
     )
-    encoded_coords = sinusoidal_encode(down_coords, freqs)
+    encoded_coords = sinusoidal_encode(coordinates, freqs)
     return encoded_coords
+
+
+def point_collection_pool(
+    pc: "PointCollection",  # noqa: F821
+    pooling_args: FeaturePoolingArgs,
+) -> "PointCollection":  # noqa: F821
+    voxel_size = pooling_args.downsample_voxel_size
+    if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
+        perm, down_offsets = voxel_downsample_random_indices(
+            batched_points=pc.coordinate_tensor,
+            offsets=pc.offsets,
+            voxel_size=voxel_size,
+        )
+        return pc.__class__(
+            batched_coordinates=pc.batched_coordinates.__class__(
+                batched_tensor=pc.coordinate_tensor[perm], offsets=down_offsets
+            ),
+            batched_features=pc.batched_features.__class__(
+                batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
+            ),
+        )
+
+    perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
+        batched_points=pc.coordinate_tensor,
+        offsets=pc.offsets,
+        voxel_size=voxel_size,
+    )
+
+    neighbors = NeighborSearchResult(vox_inices, vox_offsets)
+    down_coords = pc.coordinate_tensor[perm]
+    down_features = pool_features(
+        in_feats=pc.feature_tensor,
+        down_coords=down_coords,
+        neighbors=neighbors,
+        pooling_args=pooling_args,
+    )
+
+    return pc.__class__(
+        batched_coordinates=pc.batched_coordinates.__class__(
+            batched_tensor=down_coords, offsets=down_offsets
+        ),
+        batched_features=pc.batched_features.__class__(
+            batched_tensor=down_features, offsets=down_offsets
+        ),
+    )

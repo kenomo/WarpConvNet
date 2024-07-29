@@ -175,14 +175,11 @@ class PointConv(BaseModule):
             self_vertices = torch.repeat_interleave(
                 query_point_features.coordinate_tensor.view(-1, 3).contiguous(), num_reps, dim=0
             )
+            rel_coords = in_rep_vertices.view(-1, 3) - self_vertices.view(-1, 3)
             if self.use_rel_pos_encode:
-                edge_features.append(
-                    self.positional_encoding(
-                        in_rep_vertices.view(-1, 3) - self_vertices.view(-1, 3)
-                    )
-                )
+                edge_features.append(self.positional_encoding(rel_coords))
             elif self.use_rel_pos:
-                edge_features.append(in_rep_vertices - self_vertices)
+                edge_features.append(rel_coords)
         edge_features = torch.cat(edge_features, dim=1)
         edge_features = self.edge_transform_mlp(edge_features)
         # if in_weight is not None:
