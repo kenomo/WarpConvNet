@@ -3,7 +3,11 @@ from typing import List, Optional
 import torch.nn as nn
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchArgs
-from warp.convnet.geometry.ops.point_pool import FeaturePoolingArgs
+from warp.convnet.geometry.ops.point_pool import (
+    FeaturePoolingArgs,
+    point_collection_pool,
+)
+from warp.convnet.geometry.ops.point_unpool import point_collection_unpool
 from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.nn.base_module import BaseModel
 from warp.convnet.nn.point_conv import PointConvUNetBlock
@@ -24,6 +28,7 @@ class PointConvUNet(BaseModel):
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],
+        initial_downsample_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
         intermediate_dim: Optional[int] = None,
@@ -77,14 +82,29 @@ class PointConvUNet(BaseModel):
                 reductions=reductions,
             )
         self.unet = inner_block
+        if initial_downsample_voxel_size is None:
+            initial_downsample_voxel_size = downsample_voxel_sizes[0] / 2
+        self.initial_pooling_args = pooling_args.clone(
+            downsample_voxel_size=initial_downsample_voxel_size
+        )
 
-        self.out_map = PointCollectionTransform(nn.Linear(up_channels[0], out_channels))
+        self.out_map = PointCollectionTransform(
+            nn.Linear(up_channels[0] + in_channels, out_channels)
+        )
 
-    def forward(self, point_collection: PointCollection) -> List[PointCollection]:
+    def forward(self, in_pc: PointCollection) -> List[PointCollection]:
         """
         Given an input point collection, the network will return a list of point collections at each level of the UNet.
         """
-        out = self.in_map(point_collection)
+
+        # downsample
+        pooled_pc, nsearch = point_collection_pool(in_pc, self.initial_pooling_args)
+        out = self.in_map(pooled_pc)
+
+        # forward pass through the UNet
         out = self.unet(out)
-        out[0] = self.out_map(out[0])
-        return out
+
+        # upsample
+        unpooled_pc = point_collection_unpool(out[0], in_pc, nsearch, concat_unpooled_pc=True)
+        unpooled_pc = self.out_map(unpooled_pc)
+        return unpooled_pc, *out

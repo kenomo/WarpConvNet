@@ -65,7 +65,7 @@ class TestPointConv(unittest.TestCase):
 
 def test():
     device = torch.device("cuda:0")
-    B, min_N, max_N, C = 3, 1000, 10000, 7
+    B, min_N, max_N, C = 3, 10000, 100000, 7
     Ns = torch.randint(min_N, max_N, (B,))
     coords = [torch.rand((N, 3)) for N in Ns]
     features = [torch.rand((N, C)) for N in Ns]
@@ -83,14 +83,17 @@ def test():
     )
     down_channels = [16, 32, 64]
     up_channels = [16, 32, 64]
+    neighbor_search_radii = [0.1, 0.2]
+    downsample_voxel_sizes = [0.1, 0.2]
     conv = PointConvUNet(
         in_channels=in_channels,
+        out_channels=out_channels,
         down_channels=down_channels,
         up_channels=up_channels,
-        out_channels=out_channels,
         neighbor_search_args=search_args,
+        neighbor_search_radii=neighbor_search_radii,
         pooling_args=pool_args,
-        downsample_voxel_sizes=0.1,
+        downsample_voxel_sizes=downsample_voxel_sizes,
         num_levels=2,
     ).to(device)
     # Forward pass
@@ -103,3 +106,8 @@ def test():
             print(name, param.grad.shape)
         else:
             print(name, "has no grad")
+
+
+if __name__ == "__main__":
+    wp.init()
+    test()

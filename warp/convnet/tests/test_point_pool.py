@@ -9,6 +9,10 @@ from warp.convnet.geometry.ops.point_pool import (
     FeaturePoolingArgs,
     point_collection_pool,
 )
+from warp.convnet.geometry.ops.point_unpool import (
+    FEATURE_UNPOOLING_MODE,
+    point_collection_unpool,
+)
 from warp.convnet.geometry.point_collection import PointCollection
 
 
@@ -32,9 +36,32 @@ class TestPointPool(unittest.TestCase):
             downsample_voxel_size=0.1,
         )
         # Pool features
-        pooled_pc = point_collection_pool(pc, pooling_args)
+        pooled_pc, neighbor_search_result = point_collection_pool(pc, pooling_args)
         self.assertTrue(pooled_pc.batched_features.batch_size == self.B)
         self.assertTrue(pooled_pc.batched_features.batched_tensor.shape[1] == 2 * self.C)
+
+        # Unpool features
+        unpooling_mode = FEATURE_UNPOOLING_MODE.REPEAT
+        unpooled_pc = point_collection_unpool(
+            pooled_pc,
+            pc,
+            neighbor_search_result,
+            concat_unpooled_pc=False,
+            unpooling_mode=unpooling_mode,
+        )
+
+        # Check if the unpooled features have the same shape
+        N_tot = sum(self.Ns)
+        self.assertTrue(unpooled_pc.feature_shape == (N_tot, 2 * self.C))
+
+        unpooled_pc = point_collection_unpool(
+            pooled_pc,
+            pc,
+            neighbor_search_result,
+            concat_unpooled_pc=True,
+            unpooling_mode=unpooling_mode,
+        )
+        self.assertTrue(unpooled_pc.feature_shape == (N_tot, 3 * self.C))
 
 
 if __name__ == "__main__":
