@@ -35,6 +35,13 @@ class TestPointCollection(unittest.TestCase):
         pc = self.pc.to(device)
         self.assertTrue(pc.batched_coordinates.batched_tensor.device == device)
 
+        # Test point collection from concatenated tensors
+        coords = torch.cat(self.coords, dim=0)
+        features = torch.cat(self.features, dim=0)
+        offsets = torch.IntTensor([0] + Ns_cumsum)
+        pc = PointCollection(coords, features, offsets=offsets)
+        self.assertTrue(pc.batched_coordinates.batch_size == self.B)
+
     # Test point collection radius search
     def test_point_collection_radius_search(self):
         device = torch.device("cuda:0")

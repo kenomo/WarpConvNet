@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from warp.convnet.core.hashmap import VectorHashTable
@@ -101,8 +101,11 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
     def __init__(
         self,
-        batched_coordinates: List[Float[Tensor, "N 3"]] | BatchedDiscreteCoordinates,
-        batched_features: List[Float[Tensor, "N C"]] | BatchedFeatures,
+        batched_coordinates: List[Float[Tensor, "N 3"]]
+        | Float[Tensor, "N 3"]
+        | BatchedDiscreteCoordinates,
+        batched_features: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures,
+        offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
         _ordering: Optional[POINT_ORDERING] = POINT_ORDERING.RANDOM,
     ):
         if isinstance(batched_coordinates, list):
@@ -114,6 +117,14 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
             batched_coordinates = BatchedDiscreteCoordinates(batched_coordinates)
             batched_features = BatchedFeatures(batched_features)
+        elif isinstance(batched_coordinates, Tensor):
+            assert (
+                isinstance(batched_features, Tensor) and offsets is not None
+            ), "If coordinate is a tensor, features must be a tensor and offsets must be provided."
+            batched_coordinates = BatchedDiscreteCoordinates(
+                tensors=batched_coordinates, offsets=offsets
+            )
+            batched_features = BatchedFeatures(batched_features, offsets=offsets)
 
         BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, _ordering)
 
