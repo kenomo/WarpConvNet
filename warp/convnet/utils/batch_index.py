@@ -12,9 +12,13 @@ snippet = """
 
     int curr_tid = threadIdx.x;
 
-    // Load offsets into shared memory
-    if (curr_tid < offsets_len) {
-        shared_offsets[curr_tid] = offsets[curr_tid];
+    // Load offsets into shared memory.
+    // To avoid last thread block from not loading the full offsets,
+    // we only load the offsets if the current thread is 0.
+    if (curr_tid == 0) {
+        for (int i = 0; i < offsets_len; i++) {
+            shared_offsets[i] = offsets[i];
+        }
     }
     __syncthreads();
 

@@ -53,6 +53,7 @@ def voxel_downsample_csr_mapping(
         _, batch_counts = torch.unique(batch_index[perm], return_counts=True)
         batch_counts = batch_counts.cpu()
         unique_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
+    assert len(unique_offsets) == B + 1
 
     return perm, unique_offsets, to_unique_index, index_offsets
 

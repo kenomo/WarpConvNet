@@ -15,6 +15,7 @@ from warp.convnet.utils.timer import Timer
 class TestUtils(unittest.TestCase):
     def setUp(self) -> None:
         # Set random seed
+        wp.init()
         torch.manual_seed(0)
 
         self.B, min_N, max_N, self.C = 3, 100000, 1000000, 7
