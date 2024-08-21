@@ -114,6 +114,7 @@ def sorting_permutation(
             _assign_order_discrete_20bit,
             len(coords),
             inputs=[wp_coords, wp_result_rank],
+            device=device,
         )
     else:
         # Multiple batches
@@ -125,6 +126,7 @@ def sorting_permutation(
             _assign_order_discrete_16bit,
             len(bcoords),
             inputs=[wp_coords, wp_result_rank],
+            device=device,
         )
 
     # Sort withint each offsets.

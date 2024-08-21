@@ -117,11 +117,13 @@ class HashStruct:
             len(vec_keys) <= self.capacity / 2
         ), f"Number of keys {len(vec_keys)} exceeds capacity {self.capacity}"
 
-        self.table_kvs = wp.empty(2 * self.capacity, dtype=int, device=vec_keys.device)
+        device = vec_keys.device
+        self.table_kvs = wp.empty(2 * self.capacity, dtype=int, device=device)
         wp.launch(
             kernel=prepare_key_value_pairs,
             dim=self.capacity,
             inputs=[self.table_kvs],
+            device=device,
         )
 
         self.vector_keys = vec_keys
@@ -129,10 +131,12 @@ class HashStruct:
             kernel=insert_kernel,
             dim=len(vec_keys),
             inputs=[self.table_kvs, vec_keys, self.capacity, self.hash_method],
+            device=device,
         )
 
     def search(self, search_keys: wp.array(dtype=wp.vec4i)) -> wp.array(dtype=int):
-        results = wp.empty(len(search_keys), dtype=int, device=search_keys.device)
+        device = search_keys.device
+        results = wp.empty(len(search_keys), dtype=int, device=device)
         wp.launch(
             kernel=search_kernel,
             dim=len(search_keys),
@@ -141,6 +145,7 @@ class HashStruct:
                 search_keys,
                 results,
             ],
+            device=device,
         )
         return results
 
@@ -281,7 +286,7 @@ class VectorHashTable:
 
 def test():
     # Define device
-    device = "cuda"
+    device = "cuda:0"
 
     # Define hashmap size and create arrays
     capacity = 128
@@ -291,6 +296,7 @@ def test():
         kernel=prepare_key_value_pairs,
         dim=capacity,
         inputs=[table_kvs],
+        device=device,
     )
 
     # Create example keys

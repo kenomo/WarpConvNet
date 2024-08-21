@@ -104,6 +104,7 @@ def batch_index_from_offset(
         _batch_index,
         N,
         inputs=[offsets_wp, batch_index_wp],
+        device=device,
     )
     return wp.to_torch(batch_index_wp)
 

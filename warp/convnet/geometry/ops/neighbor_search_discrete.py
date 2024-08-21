@@ -122,6 +122,7 @@ def neighbor_search_hashmap(
             neighbor_distance_threshold,
             num_neighbors,
         ],
+        device=device,
     )
 
     # array_scan to compute the total number and offsets of neighbors
@@ -146,6 +147,7 @@ def neighbor_search_hashmap(
             in_coords_index,
             query_coords_index,
         ],
+        device=device,
     )
 
     return in_coords_index, query_coords_index
@@ -204,6 +206,7 @@ def kernel_map_hashmap(
             len(kernel_offsets),
             found_in_coord_index_wp,
         ],
+        device=device,
     )
 
     found_in_coord_index = wp.to_torch(found_in_coord_index_wp).reshape(
