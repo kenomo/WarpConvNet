@@ -1,5 +1,6 @@
 from typing import Literal, Optional
 
+import numpy as np
 import torch
 import torch.bin
 from jaxtyping import Float, Int
@@ -8,32 +9,31 @@ from torch import Tensor
 import warp as wp
 
 snippet = """
-    __shared__ int shared_offsets[128];
+    __shared__ int shared_offsets[256];
 
-    int curr_tid = threadIdx.x;
+    int block_tid = threadIdx.x;
 
     // Load offsets into shared memory.
-    // To avoid last thread block from not loading the full offsets,
-    // we only load the offsets if the current thread is 0.
-    if (curr_tid == 0) {
-        for (int i = 0; i < offsets_len; i++) {
-            shared_offsets[i] = offsets[i];
-        }
+    // Make sure that the last block loads the full offsets.
+    if (block_tid < offsets_len) {
+        shared_offsets[block_tid] = offsets[block_tid];
     }
     __syncthreads();
 
-    // Find bin
-    int bin = -1;
-    for (int i = 0; i < offsets_len - 1; i++) {
-        int start = shared_offsets[i];
-        int end = shared_offsets[i + 1];
-        if (start <= tid && tid < end) {
-            bin = i;
-            break;
+    if (tid < batch_index_len) {
+        // Find bin
+        int bin = -1;
+        for (int i = 0; i < offsets_len - 1; i++) {
+            int start = shared_offsets[i];
+            int end = shared_offsets[i + 1];
+            if (start <= tid && tid < end) {
+                bin = i;
+                break;
+            }
         }
-    }
 
-    batch_index_wp[tid] = bin;
+        batch_index_wp[tid] = bin;
+    }
     """
 
 
@@ -43,6 +43,7 @@ def _find_bin_native(
     offsets_len: int,
     tid: int,
     batch_index_wp: wp.array(dtype=wp.int32),
+    batch_index_len: int,
 ):
     ...
 
@@ -66,10 +67,10 @@ def _batch_index(
     batch_index_wp: wp.array(dtype=wp.int32),
 ) -> None:
     tid = wp.tid()
-    if offsets.shape[0] > 128:
+    if offsets.shape[0] > 256:
         batch_index_wp[tid] = _find_bin(offsets, tid)
     else:
-        _find_bin_native(offsets, offsets.shape[0], tid, batch_index_wp)
+        _find_bin_native(offsets, offsets.shape[0], tid, batch_index_wp, batch_index_wp.shape[0])
 
 
 def batch_index_from_offset(
@@ -102,7 +103,7 @@ def batch_index_from_offset(
     batch_index_wp = wp.zeros(shape=(N,), dtype=wp.int32, device=device)
     wp.launch(
         _batch_index,
-        N,
+        int(np.ceil(N / 256.0)) * 256,
         inputs=[offsets_wp, batch_index_wp],
         device=device,
     )
