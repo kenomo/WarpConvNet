@@ -40,7 +40,7 @@ class PointConv(BaseModule):
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
         reductions: List[REDUCTION_TYPES_STR] = ("mean",),
-        out_point_feature_type: Literal["provided", "downsample", "same"] = "same",
+        out_point_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
     ):
         """If use_relative_position_encoding is True, the positional encoding vertex coordinate
@@ -55,17 +55,17 @@ class PointConv(BaseModule):
         assert (
             isinstance(reductions, (tuple, list)) and len(reductions) > 0
         ), f"reductions must be a list or tuple of length > 0, got {reductions}"
-        if out_point_feature_type == "provided":
+        if out_point_type == "provided":
             assert pooling_args is None
             assert (
                 provided_in_channels is not None
             ), "provided_in_channels must be provided for provided type"
-        elif out_point_feature_type == "downsample":
+        elif out_point_type == "downsample":
             assert pooling_args is not None, "pooling_args must be provided for downsample type"
             assert (
                 provided_in_channels is None
             ), "provided_in_channels must be None for downsample type"
-        elif out_point_feature_type == "same":
+        elif out_point_type == "same":
             assert pooling_args is None, "pooling_args is only used for downsample"
             assert provided_in_channels is None, "provided_in_channels must be None for same type"
         if (
@@ -84,7 +84,7 @@ class PointConv(BaseModule):
         self.out_channels = out_channels
         self.use_rel_pos = use_rel_pos
         self.use_rel_pos_encode = use_rel_pos_encode
-        self.out_point_feature_type = out_point_feature_type
+        self.out_point_feature_type = out_point_type
         self.neighbor_search_args = neighbor_search_args
         self.pooling_args = pooling_args
         self.positional_encoding = SinusoidalEncoding(pos_encode_dim, data_range=pos_encode_range)
@@ -250,7 +250,7 @@ class PointConvBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            out_point_feature_type="same",
+            out_point_type="same",
             provided_in_channels=provided_in_channels,
         )
         self.point_conv2 = PointConv(
@@ -266,7 +266,7 @@ class PointConvBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            out_point_feature_type="same",
+            out_point_type="same",
             provided_in_channels=provided_in_channels,
         )
 
@@ -294,6 +294,198 @@ class PointConvBlock(BaseModule):
             batched_coordinates=out2.batched_coordinates,
             batched_features=out2.batched_features,
         )
+
+
+class PointConvEncoder(BaseModule):
+    """
+    Generate a list of output point collections from each level of the encoder
+    given an input point collection.
+    """
+
+    def __init__(
+        self,
+        encoder_channels: List[int],
+        num_blocks_per_level: List[int] | int,
+        neighbor_search_args: NeighborSearchArgs,
+        neighbor_search_radii: List[float],
+        pooling_args: Optional[FeaturePoolingArgs],
+        downsample_voxel_sizes: List[float],
+        channel_multiplier: int = 2,
+        use_rel_pos: bool = True,
+        use_rel_pos_encode: bool = False,
+        pos_encode_dim: int = 32,
+        pos_encode_range: float = 4,
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
+        num_levels: int = 4,
+    ):
+        super().__init__()
+        self.num_levels = num_levels
+        if isinstance(num_blocks_per_level, int):
+            num_blocks_per_level = [num_blocks_per_level] * num_levels
+        assert len(encoder_channels) == num_levels + 1
+        assert len(num_blocks_per_level) == self.num_levels
+        assert len(downsample_voxel_sizes) == self.num_levels
+        assert len(neighbor_search_radii) == self.num_levels
+        for i in range(self.num_levels - 1):
+            assert downsample_voxel_sizes[i] < downsample_voxel_sizes[i + 1]
+            assert neighbor_search_radii[i] < neighbor_search_radii[i + 1]
+
+        self.down_blocks = nn.ModuleList()
+
+        for i in range(self.num_levels):
+            in_channels = encoder_channels[i]
+            out_channels = encoder_channels[i + 1]
+            num_reps = num_blocks_per_level[i]
+            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+                radius=neighbor_search_radii[i]
+            )
+            curr_pooling_args: FeaturePoolingArgs = pooling_args.clone(
+                downsample_voxel_size=downsample_voxel_sizes[i]
+            )
+            # Fisrt block out_point_feature_type is downsample, rest are conv blocks are "same"
+            down_block = [
+                PointConv(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    neighbor_search_args=curr_neighbor_search_args,
+                    pooling_args=curr_pooling_args,
+                    use_rel_pos=use_rel_pos,
+                    use_rel_pos_encode=use_rel_pos_encode,
+                    pos_encode_dim=pos_encode_dim,
+                    pos_encode_range=pos_encode_range,
+                    reductions=reductions,
+                    out_point_type="downsample",
+                )
+            ]
+
+            for _ in range(num_reps - 1):
+                down_block.append(
+                    PointConvBlock(
+                        out_channels,
+                        out_channels,
+                        curr_neighbor_search_args,
+                        channel_multiplier,
+                        use_rel_pos,
+                        use_rel_pos_encode,
+                        pos_encode_dim,
+                        pos_encode_range,
+                        reductions,
+                        out_point_feature_type="same",
+                    )
+                )
+
+            self.down_blocks.append(nn.Sequential(*down_block))
+
+    def forward(self, in_point_features: PointCollection) -> List[PointCollection]:
+        out_point_features = []
+        for down_block in self.down_blocks:
+            out_point_features.append(in_point_features)
+            in_point_features = down_block(in_point_features)
+        out_point_features.append(in_point_features)
+        return out_point_features
+
+
+class PointConvDecoder(BaseModule):
+    def __init__(
+        self,
+        decoder_channels: List[int],  # descending
+        encoder_channels: List[int],  # ascending
+        num_blocks_per_level: List[int],
+        neighbor_search_args: NeighborSearchArgs,
+        neighbor_search_radii: List[float],  # descending
+        channel_multiplier: int = 2,
+        use_rel_pos: bool = True,
+        use_rel_pos_encode: bool = False,
+        pos_encode_dim: int = 32,
+        pos_encode_range: float = 4,
+        reductions: List[REDUCTION_TYPES_STR] = ("mean",),
+        num_levels: int = 4,
+    ):
+        super().__init__()
+        self.num_levels = num_levels
+        assert len(decoder_channels) == num_levels + 1
+        assert len(num_blocks_per_level) == self.num_levels
+        # Comming from encoder, the encoder_channels are in ascending order
+        assert len(encoder_channels) >= num_levels + 1
+        assert len(neighbor_search_radii) >= self.num_levels
+        for i in range(self.num_levels - 1):
+            assert neighbor_search_radii[i] < neighbor_search_radii[i + 1]
+        assert (
+            encoder_channels[-1] == decoder_channels[0]
+        ), f"Last encoder channel must match first decoder channel, got last encoder channel {encoder_channels[-1]} != first decoder channel {decoder_channels[0]}"
+
+        self.up_convs = nn.ModuleList()
+        self.skips = nn.ModuleList()
+        self.up_blocks = nn.ModuleList()
+
+        for i in range(self.num_levels):
+            in_channels = decoder_channels[i]
+            out_channels = decoder_channels[i + 1]
+            enc_channels = encoder_channels[-(i + 2)]
+            num_reps = num_blocks_per_level[i]
+            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+                radius=neighbor_search_radii[i]
+            )
+            # Up-sampling convolution
+            self.up_convs.append(
+                PointConv(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    neighbor_search_args=curr_neighbor_search_args,
+                    use_rel_pos=use_rel_pos,
+                    use_rel_pos_encode=use_rel_pos_encode,
+                    pos_encode_dim=pos_encode_dim,
+                    pos_encode_range=pos_encode_range,
+                    reductions=reductions,
+                    out_point_type="provided",
+                    provided_in_channels=enc_channels,
+                )
+            )
+
+            # Skip connection
+            if enc_channels != out_channels:
+                self.skips.append(
+                    PointCollectionMLP(
+                        in_channels=enc_channels,
+                        out_channels=out_channels,
+                        hidden_channels=max(enc_channels, out_channels),
+                    )
+                )
+            else:
+                self.skips.append(nn.Identity())
+
+            # Additional up-convolution blocks
+            up_block = []
+            for _ in range(num_reps - 1):
+                up_block.append(
+                    PointConvBlock(
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        neighbor_search_args=curr_neighbor_search_args,
+                        channel_multiplier=channel_multiplier,
+                        use_rel_pos=use_rel_pos,
+                        use_rel_pos_encode=use_rel_pos_encode,
+                        pos_encode_dim=pos_encode_dim,
+                        pos_encode_range=pos_encode_range,
+                        reductions=reductions,
+                        out_point_feature_type="same",
+                    )
+                )
+            self.up_blocks.append(nn.Sequential(*up_block))
+
+    def forward(
+        self, in_point_features: PointCollection, encoder_outs: List[PointCollection]
+    ) -> List[PointCollection]:
+        out_pcs = []
+        out_point_features = in_point_features
+        for i, (up_conv, skip, up_block) in enumerate(
+            zip(self.up_convs, self.skips, self.up_blocks)
+        ):
+            out_point_features = up_conv(out_point_features, encoder_outs[-(i + 2)])
+            out_point_features = out_point_features + skip(encoder_outs[-(i + 2)])
+            out_point_features = up_block(out_point_features)
+            out_pcs.append(out_point_features)
+        return out_pcs
 
 
 class PointConvUNetBlock(BaseModule):
@@ -385,7 +577,7 @@ class PointConvUNetBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            out_point_feature_type="downsample",
+            out_point_type="downsample",
         )
 
         self.inner_module = inner_module
@@ -403,7 +595,7 @@ class PointConvUNetBlock(BaseModule):
             pos_encode_dim=pos_encode_dim,
             pos_encode_range=pos_encode_range,
             reductions=reductions,
-            out_point_feature_type="provided",
+            out_point_type="provided",
             provided_in_channels=in_channels,
         )
 

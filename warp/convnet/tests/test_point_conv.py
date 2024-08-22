@@ -106,7 +106,7 @@ class TestPointConv(unittest.TestCase):
             out_channels,
             neighbor_search_args=search_args,
             pooling_args=pool_args,
-            out_point_feature_type="downsample",
+            out_point_type="downsample",
         ).to(self.device)
         # Forward pass
         out = conv(pc)  # noqa: F841
