@@ -197,6 +197,20 @@ class PointConvEncoderDecoder(BaseModel):
     def forward(
         self, in_pc: PointCollection
     ) -> Tuple[PointCollection, List[PointCollection], List[PointCollection]]:
+        """
+        Given an input point collection, the network will return a list of point
+        collections at each level of the encoder and decoder
+
+        Returns:
+            out_pc: The final output point collection
+            decoder_outs: A list of point collections at each level of the
+                decoder. From the deepest level (low res) to the shallowest
+                level (high res)
+
+            encoder_outs: A list of point collections at each level of the
+                encoder. From the shallowest level (high res) to the deepest
+                level (low res)
+        """
         # Downsample
         pooled_pc, nsearch = point_collection_pool(in_pc, self.initial_pooling_args)
         out = self.in_map(pooled_pc)

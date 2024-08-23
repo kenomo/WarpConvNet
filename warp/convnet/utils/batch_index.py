@@ -114,8 +114,14 @@ def batch_indexed_coordinates(
     batched_coords: Float[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F821
     backend: Literal["torch", "warp"] = "warp",
+    return_type: Literal["torch", "warp"] = "torch",
 ) -> Float[Tensor, "N 4"]:  # noqa: F821
     device = str(batched_coords.device)
     batch_index = batch_index_from_offset(offsets, device=device, backend=backend)
     batched_coords = torch.cat([batch_index.unsqueeze(1), batched_coords], dim=1)
-    return batched_coords
+    if return_type == "torch":
+        return batched_coords
+    elif return_type == "warp":
+        return wp.from_torch(batched_coords, dtype=wp.vec4i)
+    else:
+        raise ValueError("return_type must be either torch or warp")
