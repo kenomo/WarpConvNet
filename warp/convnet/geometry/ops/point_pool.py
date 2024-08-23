@@ -79,15 +79,12 @@ class FeaturePoolingArgs:
         )
 
     def __repr__(self) -> str:
-        out_str = f"FeaturePoolingArgs({self.pooling_mode} "
         if self.pooling_mode == FEATURE_POOLING_MODE.REDUCTIONS:
-            out_str += (
-                f"reductions={self.reductions} downsample_voxel_size={self.downsample_voxel_size})"
-            )
+            out_str = f"{self.pooling_mode.name}({self.downsample_voxel_size})"
         elif self.pooling_mode == FEATURE_POOLING_MODE.ENCODED_COORDS:
-            out_str += f"encoded_coords_dim={self.encoded_coords_dim} encoded_coords_data_range={self.encoded_coords_data_range})"
+            out_str = f"{self.pooling_mode.name}(encoded_coords_dim={self.encoded_coords_dim} encoded_coords_data_range={self.encoded_coords_data_range})"
         elif self.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
-            out_str += f"num_random_samples={self.num_random_samples})"
+            out_str = f"{self.pooling_mode.name}({self.num_random_samples})"
         return out_str
 
 

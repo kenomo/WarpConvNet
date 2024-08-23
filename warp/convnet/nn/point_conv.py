@@ -1,3 +1,4 @@
+import warnings
 from typing import List, Literal, Optional
 
 import torch
@@ -16,7 +17,10 @@ from warp.convnet.geometry.point_collection import (
 from warp.convnet.nn.base_module import BaseModule
 from warp.convnet.nn.encoding import SinusoidalEncoding
 from warp.convnet.nn.mlp import MLPBlock
-from warp.convnet.nn.point_transform import PointCollectionMLP, PointCollectionTransform
+from warp.convnet.nn.point_transform import (
+    PointCollectionLinear,
+    PointCollectionTransform,
+)
 from warp.convnet.ops.reductions import REDUCTION_TYPES_STR, row_reduction
 
 __all__ = ["PointConv", "PointConvBlock", "PointConvUNetBlock"]
@@ -65,6 +69,16 @@ class PointConv(BaseModule):
             assert (
                 provided_in_channels is None
             ), "provided_in_channels must be None for downsample type"
+            # print warning if search radius is not \sqrt(3) times the downsample voxel size
+            if (
+                pooling_args.downsample_voxel_size is not None
+                and neighbor_search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS
+                and neighbor_search_args.radius < pooling_args.downsample_voxel_size * (3**0.5)
+            ):
+                warnings.warn(
+                    f"neighbor search radius {neighbor_search_args.radius} is less than sqrt(3) times the downsample voxel size {pooling_args.downsample_voxel_size}",
+                    stacklevel=2,
+                )
         elif out_point_type == "same":
             assert pooling_args is None, "pooling_args is only used for downsample"
             assert provided_in_channels is None, "provided_in_channels must be None for same type"
@@ -117,6 +131,10 @@ class PointConv(BaseModule):
         out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels}"
         if self.use_rel_pos_encode:
             out_str += f" rel_pos_encode={self.use_rel_pos_encode}"
+        if self.pooling_args is not None:
+            out_str += f" pooling={self.pooling_args}"
+        if self.neighbor_search_args is not None:
+            out_str += f" neighbor={self.neighbor_search_args}"
         out_str += ")"
         return out_str
 
@@ -173,7 +191,9 @@ class PointConv(BaseModule):
         if self.use_rel_pos or self.use_rel_pos_encode:
             in_rep_vertices = in_point_features.coordinate_tensor.view(-1, 3)[neighbors_index]
             self_vertices = torch.repeat_interleave(
-                query_point_features.coordinate_tensor.view(-1, 3).contiguous(), num_reps, dim=0
+                query_point_features.coordinate_tensor.view(-1, 3).contiguous(),
+                num_reps,
+                dim=0,
             )
             rel_coords = in_rep_vertices.view(-1, 3) - self_vertices.view(-1, 3)
             if self.use_rel_pos_encode:
@@ -326,29 +346,33 @@ class PointConvEncoder(BaseModule):
         assert len(num_blocks_per_level) == self.num_levels
         assert len(downsample_voxel_sizes) == self.num_levels
         assert len(neighbor_search_radii) == self.num_levels
-        for i in range(self.num_levels - 1):
-            assert downsample_voxel_sizes[i] < downsample_voxel_sizes[i + 1]
-            assert neighbor_search_radii[i] < neighbor_search_radii[i + 1]
+        for level in range(self.num_levels - 1):
+            assert downsample_voxel_sizes[level] < downsample_voxel_sizes[level + 1]
+            assert neighbor_search_radii[level] < neighbor_search_radii[level + 1]
+            # print warning if search radius is not \sqrt(3) times the downsample voxel size
+            if neighbor_search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS:
+                assert neighbor_search_radii[level] > downsample_voxel_sizes[level] * (
+                    3**0.5
+                ), f"neighbor search radius {neighbor_search_radii[level]} is less than sqrt(3) times the downsample voxel size {downsample_voxel_sizes[level]} at level {level}"
 
         self.down_blocks = nn.ModuleList()
 
-        for i in range(self.num_levels):
-            in_channels = encoder_channels[i]
-            out_channels = encoder_channels[i + 1]
-            num_reps = num_blocks_per_level[i]
-            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
-                radius=neighbor_search_radii[i]
+        for level in range(self.num_levels):
+            in_channels = encoder_channels[level]
+            out_channels = encoder_channels[level + 1]
+            down_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+                radius=2 * downsample_voxel_sizes[level]
             )
-            curr_pooling_args: FeaturePoolingArgs = pooling_args.clone(
-                downsample_voxel_size=downsample_voxel_sizes[i]
+            down_pooling_args: FeaturePoolingArgs = pooling_args.clone(
+                downsample_voxel_size=downsample_voxel_sizes[level]
             )
             # Fisrt block out_point_feature_type is downsample, rest are conv blocks are "same"
             down_block = [
                 PointConv(
                     in_channels=in_channels,
                     out_channels=out_channels,
-                    neighbor_search_args=curr_neighbor_search_args,
-                    pooling_args=curr_pooling_args,
+                    neighbor_search_args=down_neighbor_search_args,
+                    pooling_args=down_pooling_args,
                     use_rel_pos=use_rel_pos,
                     use_rel_pos_encode=use_rel_pos_encode,
                     pos_encode_dim=pos_encode_dim,
@@ -358,18 +382,21 @@ class PointConvEncoder(BaseModule):
                 )
             ]
 
-            for _ in range(num_reps - 1):
+            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+                radius=neighbor_search_radii[level]
+            )
+            for _ in range(num_blocks_per_level[level]):
                 down_block.append(
                     PointConvBlock(
-                        out_channels,
-                        out_channels,
-                        curr_neighbor_search_args,
-                        channel_multiplier,
-                        use_rel_pos,
-                        use_rel_pos_encode,
-                        pos_encode_dim,
-                        pos_encode_range,
-                        reductions,
+                        in_channels=out_channels,
+                        out_channels=out_channels,
+                        neighbor_search_args=curr_neighbor_search_args,
+                        channel_multiplier=channel_multiplier,
+                        use_rel_pos=use_rel_pos,
+                        use_rel_pos_encode=use_rel_pos_encode,
+                        pos_encode_dim=pos_encode_dim,
+                        pos_encode_range=pos_encode_range,
+                        reductions=reductions,
                         out_point_feature_type="same",
                     )
                 )
@@ -408,8 +435,10 @@ class PointConvDecoder(BaseModule):
         # Comming from encoder, the encoder_channels are in ascending order
         assert len(encoder_channels) >= num_levels + 1
         assert len(neighbor_search_radii) >= self.num_levels
-        for i in range(self.num_levels - 1):
-            assert neighbor_search_radii[i] < neighbor_search_radii[i + 1]
+        for level in range(self.num_levels - 1):
+            assert (
+                neighbor_search_radii[level] > neighbor_search_radii[level + 1]
+            ), f"neighbor search radius must be in descending order, got {neighbor_search_radii}"
         assert (
             encoder_channels[-1] == decoder_channels[0]
         ), f"Last encoder channel must match first decoder channel, got last encoder channel {encoder_channels[-1]} != first decoder channel {decoder_channels[0]}"
@@ -418,13 +447,12 @@ class PointConvDecoder(BaseModule):
         self.skips = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
 
-        for i in range(self.num_levels):
-            in_channels = decoder_channels[i]
-            out_channels = decoder_channels[i + 1]
-            enc_channels = encoder_channels[-(i + 2)]
-            num_reps = num_blocks_per_level[i]
+        for level in range(self.num_levels):
+            in_channels = decoder_channels[level]
+            out_channels = decoder_channels[level + 1]
+            enc_channels = encoder_channels[-(level + 2)]
             curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
-                radius=neighbor_search_radii[i]
+                radius=neighbor_search_radii[level]
             )
             # Up-sampling convolution
             self.up_convs.append(
@@ -445,10 +473,10 @@ class PointConvDecoder(BaseModule):
             # Skip connection
             if enc_channels != out_channels:
                 self.skips.append(
-                    PointCollectionMLP(
+                    PointCollectionLinear(
                         in_channels=enc_channels,
                         out_channels=out_channels,
-                        hidden_channels=max(enc_channels, out_channels),
+                        bias=True,
                     )
                 )
             else:
@@ -456,7 +484,7 @@ class PointConvDecoder(BaseModule):
 
             # Additional up-convolution blocks
             up_block = []
-            for _ in range(num_reps - 1):
+            for _ in range(num_blocks_per_level[level]):
                 up_block.append(
                     PointConvBlock(
                         in_channels=out_channels,
@@ -625,10 +653,10 @@ class PointConvUNetBlock(BaseModule):
             self.up_conv_block = nn.Identity()
 
         if in_channels != out_channels:
-            self.skip = PointCollectionMLP(
+            self.skip = PointCollectionLinear(
                 in_channels=in_channels,
                 out_channels=out_channels,
-                hidden_channels=max(in_channels, out_channels),
+                bias=True,
             )
         else:
             self.skip = nn.Identity()

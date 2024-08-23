@@ -38,8 +38,8 @@ class TestPointConvEncoder(unittest.TestCase):
             reductions=["mean"],
         )
         enc_channels = [16, 32, 64]
-        dec_channels = [64, 48]
-        neighbor_search_radii = [0.1, 0.2]
+        dec_channels = [64, 48, 32]
+        neighbor_search_radii = [0.18, 0.4]
         downsample_voxel_sizes = [0.1, 0.2]
         first_search_arg = search_args.clone(radius=neighbor_search_radii[0])
         first_pool_arg = pool_args.clone(downsample_voxel_size=downsample_voxel_sizes[0] / 2)
@@ -62,12 +62,10 @@ class TestPointConvEncoder(unittest.TestCase):
         decoder = PointConvDecoder(
             decoder_channels=dec_channels,
             encoder_channels=enc_channels,
-            num_blocks_per_level=[
-                1,
-            ],
+            num_blocks_per_level=[1, 1],
             neighbor_search_args=search_args,
             neighbor_search_radii=neighbor_search_radii[::-1],
-            num_levels=1,
+            num_levels=2,
         ).to(self.device)
 
         # Forward pass
@@ -95,24 +93,25 @@ class TestPointConvEncoder(unittest.TestCase):
             reductions=["mean"],
         )
         enc_channels = [16, 32, 64]
-        dec_channels = [64, 48]
-        neighbor_search_radii = [0.1, 0.2]
+        dec_channels = [64, 48, 48]
+        neighbor_search_radii = [0.2, 0.4]
         downsample_voxel_sizes = [0.1, 0.2]
 
         model = PointConvEncoderDecoder(
             in_channels=in_channels,
             out_channels=out_channels,
             num_levels_enc=2,
-            num_levels_dec=1,
+            num_levels_dec=2,
             encoder_channels=enc_channels,
             decoder_channels=dec_channels,
             num_encoder_blocks_per_level=[1, 1],
-            num_decoder_blocks_per_level=[1],
+            num_decoder_blocks_per_level=[1, 1],
             neighbor_search_args=search_args,
             neighbor_search_radii=neighbor_search_radii,
             pooling_args=pool_args,
             downsample_voxel_sizes=downsample_voxel_sizes,
         ).to(self.device)
+        print(model)
         out, out_dec, out_enc = model(pc)
         # backward
         out.feature_tensor.mean().backward()

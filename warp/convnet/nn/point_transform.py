@@ -11,6 +11,7 @@ __all__ = [
     "PointCollectionTransform",
     "PointCollectionCat",
     "PointCollectionSum",
+    "PointCollectionLinear",
     "PointCollectionMLP",
 ]
 
@@ -65,6 +66,11 @@ class PointCollectionSum(PointCollectionTransform):
     def __init__(self):
         # sum
         super().__init__(lambda *x: torch.sum(torch.stack(x), dim=0))
+
+
+class PointCollectionLinear(PointCollectionTransform):
+    def __init__(self, in_channels: int, out_channels: int, bias: bool = True):
+        super().__init__(nn.Linear(in_channels, out_channels, bias=bias))
 
 
 class PointCollectionMLP(PointCollectionTransform):

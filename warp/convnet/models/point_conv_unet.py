@@ -18,7 +18,7 @@ from warp.convnet.nn.point_conv import (
 from warp.convnet.nn.point_transform import PointCollectionTransform
 from warp.convnet.ops.reductions import REDUCTION_TYPES_STR
 
-__all__ = ["PointConvUNet"]
+__all__ = ["PointConvUNet", "PointConvEncoderDecoder"]
 
 
 class PointConvUNet(BaseModel):

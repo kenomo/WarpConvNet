@@ -60,13 +60,12 @@ class NeighborSearchArgs:
         return self._grid_dim
 
     def __repr__(self):
-        out_str = f"{self.__class__.__name__}(mode={self._mode}"
         if self._mode == NEIGHBOR_SEARCH_MODE.RADIUS:
-            out_str += f", radius={self._radius})"
+            out_str = f"{self._mode.name}({self._radius})"
         elif self._mode == NEIGHBOR_SEARCH_MODE.KNN:
-            out_str += f", k={self._k})"
+            out_str = f"{self._mode._name}({self._k})"
         elif self._mode == NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
-            out_str += f", grid_dim={self._grid_dim})"
+            out_str = f"VOXEL({self._grid_dim})"
         return out_str
 
     def clone(
