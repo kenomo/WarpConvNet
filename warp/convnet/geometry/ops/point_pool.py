@@ -181,6 +181,8 @@ def point_collection_pool(
     pooling_args: FeaturePoolingArgs,
 ) -> Tuple["PointCollection", NeighborSearchResult]:  # noqa: F821
     voxel_size = pooling_args.downsample_voxel_size
+    extra_attributes = pc.extra_attributes.copy()
+    extra_attributes["voxel_size"] = voxel_size
     if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
         perm, down_offsets = voxel_downsample_random_indices(
             batched_points=pc.coordinate_tensor,
@@ -195,6 +197,7 @@ def point_collection_pool(
                 batched_features=pc.batched_features.__class__(
                     batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
                 ),
+                **extra_attributes,
             ),
             None,
         )
@@ -222,6 +225,7 @@ def point_collection_pool(
             batched_features=pc.batched_features.__class__(
                 batched_tensor=down_features, offsets=down_offsets
             ),
+            **extra_attributes,
         ),
         neighbors,
     )

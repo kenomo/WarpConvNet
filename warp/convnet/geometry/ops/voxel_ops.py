@@ -12,6 +12,12 @@ from warp.convnet.utils.batch_index import (
 )
 from warp.convnet.utils.unique import unique_hashmap, unique_torch
 
+__all__ = [
+    "voxel_downsample_csr_mapping",
+    "voxel_downsample_random_indices",
+    "voxel_downsample_mapping",
+]
+
 
 # Voxel downsample
 @torch.no_grad()

@@ -107,7 +107,7 @@ class PointCollection(BatchedSpatialFeatures):
             List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures
         ),  # noqa: F722,F821
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
-        _ordering: POINT_ORDERING = POINT_ORDERING.RANDOM,
+        **kwargs,
     ):
         """
         Initialize a point collection with coordinates and features.
@@ -130,7 +130,12 @@ class PointCollection(BatchedSpatialFeatures):
             )
             batched_features = BatchedFeatures(batched_features, offsets=offsets)
 
-        BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, _ordering)
+        BatchedSpatialFeatures.__init__(
+            self,
+            batched_coordinates,
+            batched_features,
+            **kwargs,
+        )
 
     def sort(
         self,
@@ -195,11 +200,15 @@ class PointCollection(BatchedSpatialFeatures):
             pooling_args=pooling_args,
         )
 
+        extra_args = self._extra_attributes.copy()
+        extra_args["voxel_size"] = voxel_size
+
         return self.__class__(
             batched_coordinates=BatchedContinuousCoordinates(
                 batched_tensor=down_coords, offsets=down_offsets
             ),
             batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
+            **extra_args,
         )
 
     def neighbors(
@@ -224,3 +233,11 @@ class PointCollection(BatchedSpatialFeatures):
             query_coords.offsets,
             search_args,
         )
+
+    @property
+    def voxel_size(self):
+        return self._extra_attributes.get("voxel_size", None)
+
+    @property
+    def ordering(self):
+        return self._extra_attributes.get("ordering", None)

@@ -97,7 +97,6 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
 class SpatiallySparseTensor(BatchedSpatialFeatures):
     batched_coordinates: BatchedDiscreteCoordinates
     batched_features: BatchedFeatures
-    _ordering: POINT_ORDERING
 
     def __init__(
         self,
@@ -106,7 +105,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         | BatchedDiscreteCoordinates,
         batched_features: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures,
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
-        _ordering: Optional[POINT_ORDERING] = POINT_ORDERING.RANDOM,
+        **kwargs,
     ):
         if isinstance(batched_coordinates, list):
             assert isinstance(
@@ -126,10 +125,10 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             )
             batched_features = BatchedFeatures(batched_features, offsets=offsets)
 
-        BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, _ordering)
+        BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, **kwargs)
 
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "SpatiallySparseTensor":
-        if ordering == self._ordering:
+        if ordering == self.ordering:
             return self
 
         perm, rank = sorting_permutation(
@@ -137,7 +136,9 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         )  # noqa: F821
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[perm], self.offsets)
         feats = BatchedFeatures(self.feature_tensor[perm], self.offsets)
-        return self.__class__(coords, feats, ordering)
+        kwargs = self._extra_attributes.copy()
+        kwargs["ordering"] = ordering
+        return self.__class__(coords, feats, **kwargs)
 
     def unique(self) -> "SpatiallySparseTensor":
         unique_indices, batch_offsets = voxel_downsample_random_indices(
@@ -146,8 +147,16 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         )
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[unique_indices], batch_offsets)
         feats = BatchedFeatures(self.feature_tensor[unique_indices], batch_offsets)
-        return self.__class__(coords, feats, self._ordering)
+        return self.__class__(coords, feats, **self._extra_attributes)
 
     @property
     def coordinate_hashmap(self) -> VectorHashTable:
         return self.batched_coordinates.hashmap
+
+    @property
+    def voxel_size(self):
+        return self._extra_attributes.get("voxel_size", None)
+
+    @property
+    def ordering(self):
+        return self._extra_attributes.get("ordering", None)

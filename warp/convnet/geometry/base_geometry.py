@@ -1,12 +1,11 @@
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
-from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
 
 __all__ = [
     "BatchedObject",
@@ -42,7 +41,7 @@ class BatchedObject:
 
     def __init__(
         self,
-        batched_tensor: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"],  # noqa: F722,F821
+        batched_tensor: (List[Float[Tensor, "N C"]] | Float[Tensor, "N C"]),  # noqa: F722,F821
         offsets: Optional[List[int]] = None,
     ):
         """
@@ -233,13 +232,13 @@ class BatchedSpatialFeatures:
 
     batched_coordinates: BatchedCoordinates
     batched_features: BatchedFeatures
-    _ordering: POINT_ORDERING
+    _extra_attributes: Dict[str, Any] = field(default_factory=dict, init=False)  # Store extra args
 
     def __init__(
         self,
         batched_coordinates: BatchedCoordinates,
         batched_features: BatchedFeatures,
-        _ordering: POINT_ORDERING = POINT_ORDERING.RANDOM,
+        **kwargs,  # extra arguments for subclasses
     ):
         assert isinstance(batched_features, BatchedFeatures) and isinstance(
             batched_coordinates, BatchedCoordinates
@@ -249,19 +248,24 @@ class BatchedSpatialFeatures:
         # The rest of the shape checks are assumed to be done in the BatchedObject
         self.batched_coordinates = batched_coordinates
         self.batched_features = batched_features
-        self._ordering = _ordering
+        # Extra arguments for subclasses
+        self._extra_attributes = kwargs
 
     def __getitem__(self, idx: int) -> "BatchedSpatialFeatures":
         coords = self.batched_coordinates[idx]
         features = self.batched_features[idx]
         return self.__class__(
-            batched_coordinates=coords, batched_features=features, offsets=[0, len(coords)]
+            batched_coordinates=coords,
+            batched_features=features,
+            offsets=[0, len(coords)],
+            **self._extra_attributes,
         )
 
     def to(self, device: str) -> "BatchedSpatialFeatures":
         return self.__class__(
             batched_coordinates=self.batched_coordinates.to(device),
             batched_features=self.batched_features.to(device),
+            **self._extra_attributes,
         )
 
     @property
@@ -303,7 +307,7 @@ class BatchedSpatialFeatures:
         return self.__class__(
             batched_coordinates=self.batched_coordinates,
             batched_features=BatchedFeatures(out_features, self.batched_features.offsets),
-            _ordering=self._ordering,
+            **self._extra_attributes,
         )
 
     def half(self):
@@ -362,7 +366,19 @@ class BatchedSpatialFeatures:
 
     def __repr__(self) -> str:
         """Detailed representation of the object."""
-        return f"{self.__class__.__name__}(offsets={self.offsets}, feature_shape={self.feature_shape}, coords_shape={self.coordinate_shape}, device={self.device}, dtype={self.batched_features.dtype})"
+        out_str = f"{self.__class__.__name__}(offsets={self.offsets.tolist()}, feature_shape={self.feature_shape}, coords_shape={self.coordinate_shape}, device={self.device}, dtype={self.batched_features.dtype}"
+        if self._extra_attributes:
+            out_dict = {k: v for k, v in self._extra_attributes.items() if v is not None}
+            # if out_dict has values, add it to the string
+            if out_dict:
+                out_str += ", "
+                out_str += ", ".join([f"{k}={v}" for k, v in out_dict.items()])
+        out_str += ")"
+        return out_str
 
     def numel(self):
         return self.batched_features.numel()
+
+    @property
+    def extra_attributes(self):
+        return self._extra_attributes.copy()

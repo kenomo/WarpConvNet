@@ -5,9 +5,14 @@ import torch.distributed as dist
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+import warp as wp
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NEIGHBOR_SEARCH_MODE,
     NeighborSearchArgs,
+)
+from warp.convnet.geometry.ops.point_pool import (
+    FEATURE_POOLING_MODE,
+    FeaturePoolingArgs,
 )
 from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.nn.mlp import MLPBlock
@@ -33,12 +38,19 @@ class TestFSDP(unittest.TestCase):
             mode=NEIGHBOR_SEARCH_MODE.RADIUS,
             radius=0.1,
         )
+        pooling_arg = FeaturePoolingArgs(
+            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+            reductions=["mean"],
+            downsample_voxel_size=0.1,
+        )
         torch.cuda.set_device(device)
         model = nn.Sequential(
             PointConv(
                 in_channels,
                 out_channels,
                 neighbor_search_args=search_arg,
+                pooling_args=pooling_arg,
+                out_point_type="downsample",
             ),
             PointCollectionTransform(
                 MLPBlock(out_channels, hidden_channels=32, out_channels=out_channels)
@@ -54,7 +66,9 @@ class TestFSDP(unittest.TestCase):
         optim = torch.optim.Adam(fsdp_model.parameters(), lr=0.0001)
         for _ in range(100):
             out = fsdp_model(pc)
-            loss = out.features.mean()
+            print(out)
+            assert out.voxel_size is not None
+            loss = out.feature_tensor.mean()
             loss.backward()
             optim.step()
 
@@ -66,4 +80,5 @@ if __name__ == "__main__":
     torchrun --nproc_per_node=2 warp/convnet/tests/test_fsdp.py
     """
     dist.init_process_group(backend="nccl")
+    wp.init()
     unittest.main()

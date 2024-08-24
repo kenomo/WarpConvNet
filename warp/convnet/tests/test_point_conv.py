@@ -110,6 +110,12 @@ class TestPointConv(unittest.TestCase):
         ).to(self.device)
         # Forward pass
         out = conv(pc)  # noqa: F841
+        assert out.voxel_size is not None
+        out.feature_tensor.mean().backward()
+        # assert conv params have grad
+        for _, param in conv.named_parameters():
+            if param.numel() > 0:
+                self.assertTrue(param.grad is not None)
 
     def test_point_conv_unet_block(self):
         pc = self.pc
@@ -138,7 +144,11 @@ class TestPointConv(unittest.TestCase):
         out[0].feature_tensor.mean().backward()
         # print the conv param grads
         for name, param in conv.named_parameters():
-            if param.grad is not None:
+            if param.numel() > 0:
                 print(name, param.grad.shape)
-            else:
-                print(name, "has no grad")
+                self.assertTrue(param.grad is not None)
+
+
+if __name__ == "__main__":
+    wp.init()
+    unittest.main()

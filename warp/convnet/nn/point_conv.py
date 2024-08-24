@@ -140,8 +140,8 @@ class PointConv(BaseModule):
 
     def forward(
         self,
-        in_point_features: PointCollection,
-        query_point_features: Optional[PointCollection] = None,
+        in_pc: PointCollection,
+        query_pc: Optional[PointCollection] = None,
     ) -> PointCollection:
         """
         When out_point_features is None, the output will be generated on the
@@ -149,31 +149,31 @@ class PointConv(BaseModule):
         """
         if self.out_point_feature_type == "provided":
             assert (
-                query_point_features is not None
+                query_pc is not None
             ), "query_point_features must be provided for the provided type"
         elif self.out_point_feature_type == "downsample":
-            assert query_point_features is None
-            query_point_features = in_point_features.voxel_downsample(
+            assert query_pc is None
+            query_pc = in_pc.voxel_downsample(
                 self.pooling_args.downsample_voxel_size,
                 pooling_args=self.pooling_args,
             )
         elif self.out_point_feature_type == "same":
-            assert query_point_features is None
-            query_point_features = in_point_features
+            assert query_pc is None
+            query_pc = in_pc
 
-        in_num_channels = in_point_features.num_channels
-        query_num_channels = query_point_features.num_channels
+        in_num_channels = in_pc.num_channels
+        query_num_channels = query_pc.num_channels
         assert (
             in_num_channels
             + query_num_channels
             + self.use_rel_pos_encode * self.positional_encoding.num_channels * 3
             + (not self.use_rel_pos_encode) * self.use_rel_pos * 3
             == self.edge_transform_mlp.in_channels
-        ), f"input features shape {in_point_features.feature_tensor.shape} and query feature shape {query_point_features.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
+        ), f"input features shape {in_pc.feature_tensor.shape} and query feature shape {query_pc.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
 
         # Get the neighbors
-        neighbors = in_point_features.neighbors(
-            query_coords=query_point_features.batched_coordinates,
+        neighbors = in_pc.neighbors(
+            query_coords=query_pc.batched_coordinates,
             search_args=self.neighbor_search_args,
         )
         neighbors_index = neighbors.neighbors_index.long().view(-1)
@@ -181,17 +181,17 @@ class PointConv(BaseModule):
         num_reps = neighbors_row_splits[1:] - neighbors_row_splits[:-1]
 
         # repeat the self features using num_reps
-        rep_in_features = in_point_features.feature_tensor[neighbors_index]
+        rep_in_features = in_pc.feature_tensor[neighbors_index]
         self_features = torch.repeat_interleave(
-            query_point_features.feature_tensor.view(-1, query_num_channels).contiguous(),
+            query_pc.feature_tensor.view(-1, query_num_channels).contiguous(),
             num_reps,
             dim=0,
         )
         edge_features = [rep_in_features, self_features]
         if self.use_rel_pos or self.use_rel_pos_encode:
-            in_rep_vertices = in_point_features.coordinate_tensor.view(-1, 3)[neighbors_index]
+            in_rep_vertices = in_pc.coordinate_tensor.view(-1, 3)[neighbors_index]
             self_vertices = torch.repeat_interleave(
-                query_point_features.coordinate_tensor.view(-1, 3).contiguous(),
+                query_pc.coordinate_tensor.view(-1, 3).contiguous(),
                 num_reps,
                 dim=0,
             )
@@ -217,13 +217,14 @@ class PointConv(BaseModule):
 
         return PointCollection(
             batched_coordinates=BatchedCoordinates(
-                batched_tensor=query_point_features.coordinate_tensor,
-                offsets=query_point_features.offsets,
+                batched_tensor=query_pc.coordinate_tensor,
+                offsets=query_pc.offsets,
             ),
             batched_features=BatchedFeatures(
                 batched_tensor=out_features,
-                offsets=query_point_features.offsets,
+                offsets=query_pc.offsets,
             ),
+            **query_pc._extra_attributes,
         )
 
 
@@ -301,8 +302,8 @@ class PointConvBlock(BaseModule):
         self.norm2 = PointCollectionTransform(norm_layer2)
         self.relu = PointCollectionTransform(activation)
 
-    def forward(self, in_point_features: PointCollection) -> PointCollection:
-        out1 = self.point_conv1(in_point_features)
+    def forward(self, in_pc: PointCollection) -> PointCollection:
+        out1 = self.point_conv1(in_pc)
         out1 = self.norm1(out1)
         out1 = self.relu(out1)
         out2 = self.point_conv2(out1)
@@ -313,6 +314,7 @@ class PointConvBlock(BaseModule):
         return PointCollection(
             batched_coordinates=out2.batched_coordinates,
             batched_features=out2.batched_features,
+            **out2.extra_attributes,
         )
 
 

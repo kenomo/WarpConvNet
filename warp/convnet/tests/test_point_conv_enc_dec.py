@@ -72,6 +72,11 @@ class TestPointConvEncoder(unittest.TestCase):
         out = first_conv(pc)
         enc_outs = encoder(out)
         dec_outs = decoder(enc_outs[-1], enc_outs)
+        assert out.voxel_size is not None
+        for out in enc_outs:
+            assert out.voxel_size is not None
+        for out in dec_outs:
+            assert out.voxel_size is not None
         # backward
         dec_outs[-1].feature_tensor.mean().backward()
         # print the conv param grads
@@ -113,5 +118,11 @@ class TestPointConvEncoder(unittest.TestCase):
         ).to(self.device)
         print(model)
         out, out_dec, out_enc = model(pc)
+        assert out.voxel_size is not None
         # backward
         out.feature_tensor.mean().backward()
+
+
+if __name__ == "__main__":
+    wp.init()
+    unittest.main()
