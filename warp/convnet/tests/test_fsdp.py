@@ -31,17 +31,17 @@ class TestFSDP(unittest.TestCase):
     def test_fsdp(self):
         device = dist.get_rank()
         print(f"Rank {device} is running test_fsdp")
-        pc = self.pc.to(device=device)
+
         # Create conv layer
         in_channels, out_channels = self.C, 16
         search_arg = NeighborSearchArgs(
             mode=NEIGHBOR_SEARCH_MODE.RADIUS,
-            radius=0.1,
+            radius=0.4,
         )
         pooling_arg = FeaturePoolingArgs(
             pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
             reductions=["mean"],
-            downsample_voxel_size=0.1,
+            downsample_voxel_size=0.2,
         )
         torch.cuda.set_device(device)
         model = nn.Sequential(
@@ -65,8 +65,9 @@ class TestFSDP(unittest.TestCase):
         fsdp_model.train()
         optim = torch.optim.Adam(fsdp_model.parameters(), lr=0.0001)
         for _ in range(100):
+            pc = self.pc.to(device)
+            pc = pc.voxel_downsample(0.1)
             out = fsdp_model(pc)
-            print(out)
             assert out.voxel_size is not None
             loss = out.feature_tensor.mean()
             loss.backward()

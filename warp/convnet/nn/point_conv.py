@@ -224,7 +224,7 @@ class PointConv(BaseModule):
                 batched_tensor=out_features,
                 offsets=query_pc.offsets,
             ),
-            **query_pc._extra_attributes,
+            **query_pc.extra_attributes,
         )
 
 

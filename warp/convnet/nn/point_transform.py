@@ -53,7 +53,7 @@ class PointCollectionTransform(nn.Module):
         return PointCollection(
             batched_coordinates=pc.batched_coordinates,
             batched_features=BatchedFeatures(out_features, pc.batched_features.offsets),
-            **pc._extra_attributes,
+            **pc.extra_attributes,
         )
 
 

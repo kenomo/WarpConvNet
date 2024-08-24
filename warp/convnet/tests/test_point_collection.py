@@ -1,3 +1,4 @@
+import dataclasses
 import unittest
 
 import torch
@@ -41,6 +42,20 @@ class TestPointCollection(unittest.TestCase):
         offsets = torch.IntTensor([0] + Ns_cumsum)
         pc = PointCollection(coords, features, offsets=offsets)
         self.assertTrue(pc.batched_coordinates.batch_size == self.B)
+
+    def test_point_collection_dataclasses(self):
+        """
+        Test dataclass serialization
+        """
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        pc = pc.voxel_downsample(0.1)
+        pc_dict = dataclasses.asdict(pc)
+        self.assertTrue("_extra_attributes" in pc_dict)
+        self.assertTrue(pc_dict["_extra_attributes"]["voxel_size"] == 0.1)
+        pc_replace = dataclasses.replace(pc)
+        print(f"Dataclasses replace: {str(pc_replace)}")
+        self.assertTrue("voxel_size" in pc_replace.extra_attributes)
 
     # Test point collection radius search
     def test_point_collection_radius_search(self):

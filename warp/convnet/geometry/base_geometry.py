@@ -232,7 +232,7 @@ class BatchedSpatialFeatures:
 
     batched_coordinates: BatchedCoordinates
     batched_features: BatchedFeatures
-    _extra_attributes: Dict[str, Any] = field(default_factory=dict, init=False)  # Store extra args
+    _extra_attributes: Dict[str, Any] = field(default_factory=dict, init=True)  # Store extra args
 
     def __init__(
         self,
@@ -249,6 +249,13 @@ class BatchedSpatialFeatures:
         self.batched_coordinates = batched_coordinates
         self.batched_features = batched_features
         # Extra arguments for subclasses
+        # First check _extra_attributes in kwargs. This happens when we use dataclasses.replace
+        if "_extra_attributes" in kwargs:
+            attr = kwargs.pop("_extra_attributes")
+            assert isinstance(attr, dict), f"_extra_attributes must be a dictionary, got {attr}"
+            # Update kwargs
+            for k, v in attr.items():
+                kwargs[k] = v
         self._extra_attributes = kwargs
 
     def __getitem__(self, idx: int) -> "BatchedSpatialFeatures":

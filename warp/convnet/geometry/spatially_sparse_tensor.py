@@ -136,7 +136,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         )  # noqa: F821
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[perm], self.offsets)
         feats = BatchedFeatures(self.feature_tensor[perm], self.offsets)
-        kwargs = self._extra_attributes.copy()
+        kwargs = self.extra_attributes.copy()
         kwargs["ordering"] = ordering
         return self.__class__(coords, feats, **kwargs)
 
@@ -147,7 +147,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         )
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[unique_indices], batch_offsets)
         feats = BatchedFeatures(self.feature_tensor[unique_indices], batch_offsets)
-        return self.__class__(coords, feats, **self._extra_attributes)
+        return self.__class__(coords, feats, **self.extra_attributes)
 
     @property
     def coordinate_hashmap(self) -> VectorHashTable:
@@ -155,8 +155,8 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
     @property
     def voxel_size(self):
-        return self._extra_attributes.get("voxel_size", None)
+        return self.extra_attributes.get("voxel_size", None)
 
     @property
     def ordering(self):
-        return self._extra_attributes.get("ordering", None)
+        return self.extra_attributes.get("ordering", None)
