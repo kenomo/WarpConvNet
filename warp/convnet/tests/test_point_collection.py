@@ -21,6 +21,16 @@ class TestPointCollection(unittest.TestCase):
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
         self.pc = PointCollection(self.coords, self.features)
 
+    # Test indexing
+    def test_point_collection_indexing(self):
+        pc = self.pc
+        Ns = self.Ns
+        for i in range(self.B):
+            self.assertTrue(pc[i].batched_coordinates.batch_size == 1)
+            self.assertTrue(pc[i].batched_coordinates.batched_tensor.shape[0] == Ns[i])
+            self.assertTrue(pc[i].batched_features.batch_size == 1)
+            self.assertTrue(pc[i].batched_features.batched_tensor.shape[0] == Ns[i])
+
     # Test point collection construction
     def test_point_collection_construction(self):
         Ns_cumsum = self.Ns.cumsum(dim=0).tolist()

@@ -58,8 +58,11 @@ class BatchedObject:
             assert offsets is None, "If batched_tensors is a list, offsets must be None."
             batched_tensor, offsets, _ = _list_to_batched_tensor(batched_tensor)
 
+        if isinstance(batched_tensor, torch.Tensor) and offsets is None:
+            offsets = [0, batched_tensor.shape[0]]
+
         if isinstance(offsets, list):
-            offsets = torch.LongTensor(offsets, requires_grad=False)
+            offsets = torch.LongTensor(offsets)
 
         self.offsets = offsets
         self.batched_tensor = batched_tensor
@@ -262,9 +265,8 @@ class BatchedSpatialFeatures:
         coords = self.batched_coordinates[idx]
         features = self.batched_features[idx]
         return self.__class__(
-            batched_coordinates=coords,
-            batched_features=features,
-            offsets=[0, len(coords)],
+            batched_coordinates=self.batched_coordinates.__class__(coords),
+            batched_features=self.batched_features.__class__(features),
             **self._extra_attributes,
         )
 
@@ -382,6 +384,9 @@ class BatchedSpatialFeatures:
                 out_str += ", ".join([f"{k}={v}" for k, v in out_dict.items()])
         out_str += ")"
         return out_str
+
+    def __len__(self) -> int:
+        return len(self.batched_coordinates)
 
     def numel(self):
         return self.batched_features.numel()
