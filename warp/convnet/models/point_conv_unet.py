@@ -4,6 +4,7 @@ import torch.nn as nn
 
 from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchArgs
 from warp.convnet.geometry.ops.point_pool import (
+    FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
     point_collection_pool,
 )
@@ -32,6 +33,7 @@ class PointConvUNet(BaseModel):
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],
+        initial_pooling_mode: FEATURE_POOLING_MODE = FEATURE_POOLING_MODE.RANDOM_SAMPLE,
         initial_downsample_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
@@ -88,8 +90,8 @@ class PointConvUNet(BaseModel):
         self.unet = inner_block
         if initial_downsample_voxel_size is None:
             initial_downsample_voxel_size = downsample_voxel_sizes[0] / 2
-        self.initial_pooling_args = pooling_args.clone(
-            downsample_voxel_size=initial_downsample_voxel_size
+        self.initial_pooling_args = FeaturePoolingArgs(
+            pooling_mode=initial_pooling_mode, downsample_voxel_size=initial_downsample_voxel_size
         )
 
         self.out_map = PointCollectionTransform(
@@ -127,6 +129,7 @@ class PointConvEncoderDecoder(BaseModel):
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],
+        initial_pooling_mode: FEATURE_POOLING_MODE = FEATURE_POOLING_MODE.RANDOM_SAMPLE,
         initial_downsample_voxel_size: Optional[float] = None,
         channel_multiplier: int = 2,
         use_rel_pos: bool = True,
@@ -185,8 +188,8 @@ class PointConvEncoderDecoder(BaseModel):
 
         if initial_downsample_voxel_size is None:
             initial_downsample_voxel_size = downsample_voxel_sizes[0] / 2
-        self.initial_pooling_args = pooling_args.clone(
-            downsample_voxel_size=initial_downsample_voxel_size
+        self.initial_pooling_args = FeaturePoolingArgs(
+            pooling_mode=initial_pooling_mode, downsample_voxel_size=initial_downsample_voxel_size
         )
 
         if decoder_channels[-1] != out_channels:
