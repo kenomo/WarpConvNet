@@ -1,7 +1,7 @@
 from typing import Optional, Tuple
 
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Float, Int, Bool
 from torch import Tensor
 
 import warp as wp
@@ -118,7 +118,7 @@ def voxel_downsample_mapping(
     down_batched_points: Float[Tensor, "M 3"],  # noqa: F821
     down_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     voxel_size: float,
-) -> Tuple[Int[Tensor, "L"], Int[Tensor, "L"]]:  # noqa: F821
+) -> Tuple[Int[Tensor, "L"], Int[Tensor, "L"], Bool[Tensor, "N"]]:  # noqa: F821
     """
     Find the mapping that select points in the up_batched_points that are in the down_batched_points up to voxel_size.
     The mapping is random up to voxel_size. If there is a corresponding point in the down_batched_points, the mapping
@@ -152,4 +152,4 @@ def voxel_downsample_mapping(
     up_map = up_map[valid]
     # Get the index of true values
     down_map = torch.nonzero(valid).squeeze(1)
-    return up_map, down_map
+    return up_map, down_map, valid
