@@ -7,6 +7,7 @@ from warp.convnet.core.hashmap import VectorHashTable
 from warp.convnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.nn.sparse_conv import (
+    SpatiallySparseConv,
     SpatiallySparseConvExplicitGEMMFunction,
     generate_output_coords,
     spatially_sparse_conv,
@@ -134,7 +135,7 @@ class TestSparseConv(unittest.TestCase):
         num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
         weights = torch.randn(num_kernels, C_in, C_out).to(self.st.device)
 
-        B, min_N, max_N, C = 3, 10, 100, 7
+        B, min_N, max_N, C = 3, 10, 20, 7
         Ns = torch.randint(min_N, max_N, (B,))
         voxel_size = 0.01
         coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
@@ -161,6 +162,14 @@ class TestSparseConv(unittest.TestCase):
             atol=1e-3,
             rtol=1e-3,
         )
+
+    def test_sparse_conv_module(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride).to(self.st.device)
+        out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
 
 if __name__ == "__main__":

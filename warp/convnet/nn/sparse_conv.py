@@ -2,7 +2,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
+import torch.nn as nn
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.autograd import Function
@@ -228,7 +230,8 @@ def spatially_sparse_conv(
     stride: Union[int, List[int], Tuple[int, ...]] = 1,
     kernel_dilation: Union[int, List[int], Tuple[int, ...]] = 1,
     bias: Optional[Float[Tensor, "C_out"]] = None,  # noqa: F821
-    kernel_batch: int = 8,
+    kernel_search_batch_size: int = 8,
+    kernel_matmul_batch_size: int = 2,
     generative: bool = False,
     output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
     transposed: bool = False,
@@ -300,7 +303,7 @@ def spatially_sparse_conv(
         in_to_out_stride_ratio,
         kernel_size,
         kernel_dilation,
-        kernel_batch,
+        kernel_search_batch_size,
     )
     num_out_coords = batch_indexed_out_coords.shape[0]
 
@@ -336,3 +339,41 @@ def spatially_sparse_conv(
         ),
         stride=out_tensor_stride,
     )
+
+
+class SpatiallySparseConv(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, ...]],
+        stride: Union[int, Tuple[int, ...]] = 1,
+        dilation: Union[int, Tuple[int, ...]] = 1,
+        bias: bool = True,
+        kernel_search_batch_size: int = 8,
+    ):
+        super(SpatiallySparseConv, self).__init__()
+        kernel_size = ntuple(kernel_size, ndim=3)
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.dilation = dilation
+        self.kernel_search_batch_size = kernel_search_batch_size
+        self.weight = nn.Parameter(torch.randn(np.prod(kernel_size), in_channels, out_channels))
+
+        self.bias = None
+        if bias:
+            self.bias = nn.Parameter(torch.randn(out_channels))
+
+    def forward(
+        self,
+        input_sparse_tensor: SpatiallySparseTensor,
+    ):
+        return spatially_sparse_conv(
+            input_sparse_tensor,
+            self.weight,
+            self.kernel_size,
+            self.stride,
+            self.dilation,
+            self.bias,
+            kernel_search_batch_size=self.kernel_search_batch_size,
+        )
