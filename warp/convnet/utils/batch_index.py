@@ -81,6 +81,9 @@ def batch_index_from_offset(
     assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
     assert backend in ["torch", "warp"], "backend must be either torch or warp"
 
+    # offset to int
+    offsets = offsets.int()
+
     if device is not None:
         offsets = offsets.to(device)
 

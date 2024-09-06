@@ -5,13 +5,13 @@ import torch
 import warp as wp
 import warp.utils
 from warp.convnet.geometry.ops.neighbor_search_discrete import (
+    DiscreteNeighborSearchResult,
     kernel_map_from_offsets,
     kernel_map_from_size,
     kernel_offsets_from_size,
     neighbor_search_hashmap,
     num_neighbors_kernel,
 )
-from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 from warp.convnet.utils.timer import Timer
@@ -20,15 +20,14 @@ from warp.convnet.utils.timer import Timer
 class TestNeighborSearchDiscrete(unittest.TestCase):
     def setUp(self):
         wp.init()
+        device = torch.device("cuda:0")
         self.B, min_N, max_N, self.C = 3, 100000, 1000000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
-
         self.voxel_size = 0.025
         self.st_coords = [torch.floor(coords / self.voxel_size).int() for coords in self.coords]
-        self.st = SpatiallySparseTensor(self.st_coords, self.features)
+        self.st = SpatiallySparseTensor(self.st_coords, self.features, device=device).unique()
 
     # Test point collection sorting
     def test_num_neighbor_kernel(self):
@@ -91,22 +90,30 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         st_hashmap = st.coordinate_hashmap
 
-        in_map, out_map, offsets = kernel_map_from_offsets(
+        kernel_map: DiscreteNeighborSearchResult = kernel_map_from_offsets(
             st_hashmap._hash_struct,
             bcoords,
             kernel_offsets,
         )
 
-        tot_num_maps = offsets[-1].item()
-        self.assertEqual(tot_num_maps, len(in_map))
-        self.assertEqual(tot_num_maps, len(out_map))
+        tot_num_maps = kernel_map.offsets[-1].item()
+        self.assertEqual(tot_num_maps, len(kernel_map.in_maps))
+        self.assertEqual(tot_num_maps, len(kernel_map.out_maps))
 
     # Speed comparison between kernel_map_from_offsets and kernel_map_from_size
     def test_kernel_map_from_size(self):
         device = torch.device("cuda:0")
         st: SpatiallySparseTensor = self.st.to(device)
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        in_map, out_map, offsets = kernel_map_from_size(
+        st_hashmap = st.coordinate_hashmap
+
+        kernel_offsets = kernel_offsets_from_size(
+            (3, 3, 3),
+            (1, 1, 1),
+            (1, 1, 1),
+        ).to(device)
+
+        kernel_map_size = kernel_map_from_size(
             batch_indexed_in_coords=bcoords,
             batch_indexed_out_coords=bcoords,
             in_to_out_stride_ratio=(1, 1, 1),
@@ -114,6 +121,22 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             kernel_dilation=(1, 1, 1),
             kernel_batch=8,
         )
+
+        kernel_map_offset = kernel_map_from_offsets(
+            st_hashmap._hash_struct,
+            bcoords,
+            kernel_offsets,
+        )
+
+        for i, (in_map, out_map) in enumerate(kernel_map_size):
+            # Check sizes
+            in_map_o, out_map_o = kernel_map_offset[i]
+            self.assertEqual(len(in_map), len(in_map_o))
+            self.assertEqual(len(out_map), len(out_map_o))
+
+            # Check unique values
+            self.assertTrue(torch.all(in_map == in_map_o))
+            self.assertTrue(torch.all(out_map == out_map_o))
 
     def test_kernel_map_speed(self):
         device = torch.device("cuda:0")
@@ -136,7 +159,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
 
             for _ in range(4):
                 with backend_times["size"]:
-                    in_map, out_map, offsets = kernel_map_from_size(
+                    _ = kernel_map_from_size(
                         batch_indexed_in_coords=bcoords,
                         batch_indexed_out_coords=bcoords,
                         in_to_out_stride_ratio=in_to_out_stride_ratio,
@@ -145,7 +168,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
                         kernel_batch=8,
                     )
                 with backend_times["offsets"]:
-                    in_map, out_map, offsets = kernel_map_from_offsets(
+                    _ = kernel_map_from_offsets(
                         st_hashmap._hash_struct,
                         bcoords,
                         kernel_offsets,

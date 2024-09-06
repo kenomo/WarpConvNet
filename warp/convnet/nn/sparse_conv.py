@@ -73,19 +73,59 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
     @staticmethod
     def forward(
         ctx,
-        batched_features: Float[Tensor, "N C_in"],
-        batch_offsets: Int[Tensor, "B + 1"],  # noqa: F821
-        weight: Float[Tensor, "K C_out C_in"],
+        in_features: Float[Tensor, "N C_in"],
+        weight: Float[Tensor, "K C_in C_out"],
         kernel_map: DiscreteNeighborSearchResult,
-        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        num_out_coords: int,
     ) -> Float[Tensor, "M C_out"]:
-        pass
+        device = in_features.device
+        # Create output feature tensor
+        output_feature_tensor = torch.zeros(
+            num_out_coords, weight.shape[-1], device=device, dtype=in_features.dtype
+        )
+
+        for i, (in_map, out_map) in enumerate(kernel_map):
+            # Get the input and output maps
+            in_map = in_map.to(device)
+            out_map = out_map.to(device)
+
+            # Get the input and output features
+            curr_in_features = in_features[in_map]
+
+            # matmul. N x C_in @ C_in x C_out -> N x C_out
+            curr_out_features = torch.matmul(curr_in_features, weight[i])
+
+            # Add to output feature tensor
+            output_feature_tensor[out_map] += curr_out_features
+
+        ctx.kernel_map = kernel_map
+        ctx.save_for_backward(in_features, weight)
+
+        return output_feature_tensor
 
     @staticmethod
     def backward(
         ctx, grad_output: Float[Tensor, "M C_out"]
-    ) -> Tuple[Float[Tensor, "N C_in"], None, Float[Tensor, "K C_out C_in"], None, None]:
-        pass
+    ) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+        in_features, weight = ctx.saved_tensors
+        kernel_map = ctx.kernel_map
+
+        # Compute the gradient of the input features
+        grad_in_features = torch.zeros_like(in_features)
+        grad_weight = torch.zeros_like(weight)
+
+        for i, (in_map, out_map) in enumerate(kernel_map):
+            # Get the input and output features
+            curr_in_features = in_features[in_map]
+            curr_out_features = grad_output[out_map]
+
+            # matmul. N x C_out @ C_out x C_in -> N x C_in
+            grad_in_features[in_map] += torch.matmul(curr_out_features, weight[i].T)
+
+            # matmul. M x C_out @ C_out x C_in -> M x C_in
+            grad_weight[i] += torch.matmul(curr_in_features.T, curr_out_features)
+
+        return grad_in_features, grad_weight, None, None
 
 
 @torch.no_grad()
@@ -165,6 +205,8 @@ def generate_output_coords(
     """
     Downsample the coordinates by the stride.
     """
+    assert len(stride) == 3, "Stride must be a tuple of 3 integers"
+    assert batch_indexed_coords.shape[1] == 4, "Batch indexed coordinates must have 4 columns"
     # convert to wp array
     device = batch_indexed_coords.device
     batched_stride = torch.tensor([1, *ntuple(stride, ndim=3)], dtype=torch.int32, device=device)
@@ -183,10 +225,10 @@ def spatially_sparse_conv(
     input_sparse_tensor: SpatiallySparseTensor,
     weight: Float[Tensor, "K C_out C_in"],
     kernel_size: Union[int, List[int], Tuple[int, ...]],
-    bias: Optional[Float[Tensor, "C_out"]] = None,  # noqa: F821
     stride: Union[int, List[int], Tuple[int, ...]] = 1,
-    padding: Union[int, Tuple[int, ...]] = 0,
-    dilation: Union[int, Tuple[int, ...]] = 1,
+    kernel_dilation: Union[int, List[int], Tuple[int, ...]] = 1,
+    bias: Optional[Float[Tensor, "C_out"]] = None,  # noqa: F821
+    kernel_batch: int = 8,
     generative: bool = False,
     output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
     transposed: bool = False,
@@ -202,15 +244,13 @@ def spatially_sparse_conv(
     output coordinate stride.
     """
     kernel_size = ntuple(kernel_size, ndim=3)
+    kernel_dilation = ntuple(kernel_dilation, ndim=3)
     stride = ntuple(stride, ndim=3)
-    padding = ntuple(padding, ndim=3)
-    dilation = ntuple(dilation, ndim=3)
 
     if transposed:
         raise NotImplementedError("Transposed convolution is not supported yet")
 
     # Generate output coordinates
-    stride_is_one = all(s == 1 for s in stride)
     batch_indexed_in_coords = batch_indexed_coordinates(
         input_sparse_tensor.coordinate_tensor,
         input_sparse_tensor.offsets,
@@ -237,8 +277,8 @@ def spatially_sparse_conv(
     else:
         in_to_out_stride_ratio = stride
 
+    stride_is_one = all(s == 1 for s in stride)
     if generative:
-        assert stride_is_one, "Generative with stride not equal to 1 is not supported yet"
         assert all(
             k % 2 == 1 for k in kernel_size
         ), "Kernel size must be odd for generative convolution"
@@ -254,14 +294,13 @@ def spatially_sparse_conv(
         )
 
     # Generate kernel map
-    in_maps, out_maps, kernel_map_offsets = kernel_map_from_size(
+    kernel_map = kernel_map_from_size(
         batch_indexed_in_coords,
         batch_indexed_out_coords,
         in_to_out_stride_ratio,
         kernel_size,
-        stride,
-        padding,
-        dilation,
+        kernel_dilation,
+        kernel_batch,
     )
     num_out_coords = batch_indexed_out_coords.shape[0]
 
@@ -269,11 +308,8 @@ def spatially_sparse_conv(
     if conv_algo == SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM:
         out_feature_tensor = SpatiallySparseConvExplicitGEMMFunction.apply(
             input_sparse_tensor.feature_tensor,
-            input_sparse_tensor.offsets,
             weight,
-            in_maps,
-            out_maps,
-            kernel_map_offsets,
+            kernel_map,
             num_out_coords,
         )
     else:
@@ -285,17 +321,18 @@ def spatially_sparse_conv(
         tensor_stride = ntuple(1, ndim=3)
     out_tensor_stride = tuple(o * s for o, s in zip(in_to_out_stride_ratio, tensor_stride))
 
+    if bias is not None:
+        out_feature_tensor += bias
+
+    out_offsets = out_offsets.cpu().int()
     return SpatiallySparseTensor(
         batched_coordinates=BatchedDiscreteCoordinates(
-            coordinates=batch_indexed_out_coords,
-            offsets=input_sparse_tensor.offsets,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
+            batch_indexed_out_coords[:, 1:],
+            offsets=out_offsets,
         ),
         batched_features=BatchedFeatures(
-            features=out_feature_tensor,
-            offsets=input_sparse_tensor.offsets,
+            out_feature_tensor,
+            offsets=out_offsets,
         ),
         stride=out_tensor_stride,
     )

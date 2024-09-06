@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Optional, Tuple
 
@@ -8,7 +9,6 @@ from torch import Tensor
 import warp as wp
 import warp.utils
 from warp.convnet.core.hashmap import HashStruct, VectorHashTable, search_func
-from warp.convnet.geometry.base_geometry import BatchedIndices
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 from warp.convnet.utils.ntuple import ntuple
 
@@ -47,24 +47,41 @@ class DiscreteNeighborSearchArgs:
             raise ValueError(f"Invalid neighbor search mode: {mode}")
 
 
+@dataclass
 class DiscreteNeighborSearchResult:
     """
     Wrapper for the output of a neighbor search operation.
     """
 
     # The indices of the neighbors
-    indices: BatchedIndices
-    offsets: Int[Tensor, "K 3"]
+    in_maps: Int[Tensor, "L"]  # noqa: F821
+    out_maps: Int[Tensor, "L"]  # noqa: F821
+    offsets: Int[Tensor, "K + 1"]  # noqa: F821
 
-    def __init__(self, indices: BatchedIndices, offsets: Int[Tensor, "K 3"]):
-        self.indices = indices
+    def __init__(
+        self,
+        in_maps: Int[Tensor, "L"],  # noqa: F821
+        out_maps: Int[Tensor, "L"],  # noqa: F821
+        offsets: Int[Tensor, "K + 1"],  # noqa: F821
+    ):
+        assert len(in_maps) == len(out_maps) == offsets[-1].item()
+        self.in_maps = in_maps
+        self.out_maps = out_maps
         self.offsets = offsets
 
-    def __getitem__(self, idx: int):
-        return self.indices[idx]
+    def __getitem__(self, idx: int) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
+        start, end = self.offsets[idx], self.offsets[idx + 1]
+        return self.in_maps[start:end], self.out_maps[start:end]
 
     def __len__(self):
-        return len(self.indices)
+        return len(self.offsets) - 1
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(len={len(self)})"
 
 
 @wp.kernel
@@ -269,9 +286,7 @@ def kernel_map_from_offsets(
     batched_query_coords: Int[Tensor, "M 4"],
     kernel_offsets: Int[Tensor, "K 4"],
     return_type: Literal["indices", "offsets"] = "offsets",
-) -> (
-    Int[Tensor, "K M"] | Tuple[Int[Tensor, "L"], Int[Tensor, "L"], Int[Tensor, "K"]]  # noqa: F821
-):
+) -> Int[Tensor, "K M"] | DiscreteNeighborSearchResult:
     """
     Compute the kernel map (input index, output index) for each kernel offset using cached hashmap
     """
@@ -330,7 +345,7 @@ def kernel_map_from_offsets(
     # prepend 0 to the num_valid_maps
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0).to(str(device_wp))
 
-    return in_maps, out_maps, offsets
+    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
 
 
 @torch.no_grad()
@@ -339,9 +354,9 @@ def kernel_map_from_size(
     batch_indexed_out_coords: Int[Tensor, "M 4"],
     in_to_out_stride_ratio: Tuple[int, ...],
     kernel_size: Tuple[int, ...],
-    kernel_dilation: Tuple[int, ...],
+    kernel_dilation: Tuple[int, ...] = (1, 1, 1),
     kernel_batch: int = 8,
-) -> Tuple[Int[Tensor, "L"], Int[Tensor, "L"], Int[Tensor, "K_out"]]:  # noqa: F821
+) -> DiscreteNeighborSearchResult:
     """
     Generate the kernel map for the spatially sparse convolution.
 
@@ -421,4 +436,4 @@ def kernel_map_from_size(
     # prepend 0 to the num_valid_maps
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32, device=device), offsets], dim=0)
 
-    return in_maps, out_maps, offsets
+    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
