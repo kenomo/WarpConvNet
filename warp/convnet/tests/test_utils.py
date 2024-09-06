@@ -8,6 +8,7 @@ from warp.convnet.utils.argsort import argsort
 from warp.convnet.utils.batch_index import (
     batch_index_from_offset,
     batch_indexed_coordinates,
+    offsets_from_batch_index,
 )
 from warp.convnet.utils.timer import Timer
 
@@ -97,6 +98,25 @@ class TestUtils(unittest.TestCase):
         # Argsort sorting:torch input:warp time: 7.987022399902344e-05
         # Argsort sorting:warp input:torch time: 0.00016641616821289062
         # Argsort sorting:warp input:warp time: 0.00013446807861328125
+
+    def test_offsets_from_batch_index(self):
+        device = "cuda:0"
+        backends = ["torch"]
+        backend_times = {backend: Timer() for backend in backends}
+        offsets = self.pc.offsets.to(device)
+        batch_index = batch_index_from_offset(offsets, backend="torch", device=device)
+
+        for backend in backends:
+            gen_offsets = offsets_from_batch_index(batch_index, backend=backend)
+            self.assertTrue(gen_offsets.equal(offsets))
+
+        for backend in backends:
+            for _ in range(20):
+                with backend_times[backend]:
+                    gen_offsets = offsets_from_batch_index(batch_index, backend=backend)
+
+        for backend in backends:
+            print(f"Offsets from batch index {backend} time: {backend_times[backend].min_elapsed}")
 
 
 if __name__ == "__main__":

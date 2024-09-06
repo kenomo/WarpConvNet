@@ -4,8 +4,8 @@ import torch
 
 import warp as wp
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
-    NEIGHBOR_SEARCH_MODE,
-    NeighborSearchArgs,
+    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
+    ContinuousNeighborSearchArgs,
 )
 from warp.convnet.geometry.ops.point_pool import (
     FEATURE_POOLING_MODE,
@@ -29,8 +29,8 @@ class TestPointConvUNet(unittest.TestCase):
         pc = self.pc
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_args = NeighborSearchArgs(
-            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+        search_args = ContinuousNeighborSearchArgs(
+            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
         )
         pool_args = FeaturePoolingArgs(
             pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,

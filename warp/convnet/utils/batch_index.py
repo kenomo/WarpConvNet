@@ -125,3 +125,30 @@ def batch_indexed_coordinates(
         return wp.from_torch(batched_coords, dtype=wp.vec4i)
     else:
         raise ValueError("return_type must be either torch or warp")
+
+
+def offsets_from_batch_index(
+    batch_index: Int[Tensor, "N"],  # noqa: F821
+    backend: Literal["torch", "warp"] = "torch",
+) -> Int[Tensor, "B + 1"]:  # noqa: F821
+    """
+    Given a list of batch indices [0, 0, 1, 1, 2, 2, 2, 3, 3],
+    return the offsets [0, 2, 4, 7, 9].
+    """
+    if backend == "torch":
+        # Get unique elements
+        _, counts = torch.unique(batch_index, return_counts=True)
+        counts = counts.cpu()
+        # Get the offsets by cumsum
+        offsets = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.int32),
+                counts.cumsum(dim=0),
+            ],
+            dim=0,
+        ).to(batch_index.device)
+        return offsets
+    elif backend == "warp":
+        raise NotImplementedError("warp backend not implemented")
+    else:
+        raise ValueError("backend must be torch")

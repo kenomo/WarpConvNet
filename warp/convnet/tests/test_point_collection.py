@@ -5,8 +5,8 @@ import torch
 
 import warp as wp
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
-    NEIGHBOR_SEARCH_MODE,
-    NeighborSearchArgs,
+    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
+    ContinuousNeighborSearchArgs,
     NeighborSearchResult,
 )
 from warp.convnet.geometry.point_collection import PointCollection
@@ -19,7 +19,7 @@ class TestPointCollection(unittest.TestCase):
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
+        self.pc = PointCollection(self.coords, self.features, device="cuda:0")
 
     # Test indexing
     def test_point_collection_indexing(self):
@@ -57,8 +57,7 @@ class TestPointCollection(unittest.TestCase):
         """
         Test dataclass serialization
         """
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
+        pc = self.pc
         pc = pc.voxel_downsample(0.1)
         pc_dict = dataclasses.asdict(pc)
         self.assertTrue("_extra_attributes" in pc_dict)
@@ -69,11 +68,10 @@ class TestPointCollection(unittest.TestCase):
 
     # Test point collection radius search
     def test_point_collection_radius_search(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
+        pc = self.pc
         radius = 0.1
-        args = NeighborSearchArgs(
-            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+        args = ContinuousNeighborSearchArgs(
+            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
             radius=radius,
         )
         search_result = pc.batched_coordinates.neighbors(args)
@@ -84,11 +82,10 @@ class TestPointCollection(unittest.TestCase):
         )
 
     def test_knn_search(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
+        pc = self.pc
         knn_k = 10
-        args = NeighborSearchArgs(
-            mode=NEIGHBOR_SEARCH_MODE.KNN,
+        args = ContinuousNeighborSearchArgs(
+            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.KNN,
             k=knn_k,
         )
         search_result = pc.batched_coordinates.neighbors(args)
@@ -100,8 +97,7 @@ class TestPointCollection(unittest.TestCase):
         )
 
     def test_voxel_downsample(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
+        pc = self.pc
         voxel_size = 0.1
         downsampled_pc = pc.voxel_downsample(voxel_size)
         self.assertTrue(downsampled_pc.batched_coordinates.batched_tensor.shape[1] == 3)
@@ -111,8 +107,7 @@ class TestPointCollection(unittest.TestCase):
         )
 
     def test_binary_ops(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
+        pc = self.pc
         # Test addition and multiplication
         pc1 = pc + 1
         self.assertTrue(torch.allclose(pc.feature_tensor + 1, pc1.feature_tensor))

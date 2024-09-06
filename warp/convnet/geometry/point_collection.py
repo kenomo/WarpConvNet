@@ -9,7 +9,7 @@ from warp.convnet.geometry.base_geometry import (
     BatchedSpatialFeatures,
 )
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
-    NeighborSearchArgs,
+    ContinuousNeighborSearchArgs,
     NeighborSearchResult,
     neighbor_search,
 )
@@ -51,7 +51,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
 
     def neighbors(
         self,
-        search_args: NeighborSearchArgs,
+        search_args: ContinuousNeighborSearchArgs,
         query_coords: Optional["BatchedCoordinates"] = None,
     ) -> NeighborSearchResult:
         """
@@ -107,6 +107,7 @@ class PointCollection(BatchedSpatialFeatures):
             List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures
         ),  # noqa: F722,F821
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
+        device: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -119,16 +120,16 @@ class PointCollection(BatchedSpatialFeatures):
             assert len(batched_coordinates) == len(batched_features)
             # Assert all elements in coords and features have same length
             assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
-            batched_coordinates = BatchedContinuousCoordinates(batched_coordinates)
-            batched_features = BatchedFeatures(batched_features)
+            batched_coordinates = BatchedContinuousCoordinates(batched_coordinates, device=device)
+            batched_features = BatchedFeatures(batched_features, device=device)
         elif isinstance(batched_coordinates, Tensor):
             assert (
                 isinstance(batched_features, Tensor) and offsets is not None
             ), "If coordinate is a tensor, features must be a tensor and offsets must be provided."
             batched_coordinates = BatchedContinuousCoordinates(
-                batched_coordinates, offsets=offsets
+                batched_coordinates, offsets=offsets, device=device
             )
-            batched_features = BatchedFeatures(batched_features, offsets=offsets)
+            batched_features = BatchedFeatures(batched_features, offsets=offsets, device=device)
 
         BatchedSpatialFeatures.__init__(
             self,
@@ -214,7 +215,7 @@ class PointCollection(BatchedSpatialFeatures):
 
     def neighbors(
         self,
-        search_args: NeighborSearchArgs,
+        search_args: ContinuousNeighborSearchArgs,
         query_coords: Optional["BatchedCoordinates"] = None,
     ) -> NeighborSearchResult:
         """

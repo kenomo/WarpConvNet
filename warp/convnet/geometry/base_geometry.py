@@ -41,8 +41,9 @@ class BatchedObject:
 
     def __init__(
         self,
-        batched_tensor: (List[Float[Tensor, "N C"]] | Float[Tensor, "N C"]),  # noqa: F722,F821
+        batched_tensor: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"],  # noqa: F722,F821
         offsets: Optional[List[int]] = None,
+        device: Optional[str] = None,
     ):
         """
         Initialize a batched object with a list of tensors.
@@ -65,6 +66,8 @@ class BatchedObject:
             offsets = torch.LongTensor(offsets)
 
         self.offsets = offsets
+        if device is not None:
+            batched_tensor = batched_tensor.to(device)
         self.batched_tensor = batched_tensor
 
         self.check()
@@ -209,6 +212,20 @@ class BatchedCoordinates(BatchedObject):
             search_args: Arguments for the search
         """
         raise NotImplementedError
+
+
+class BatchedIndices(BatchedObject):
+    batched_tensor: Int[Tensor, "N"]  # noqa: F722,F821
+    # offsets already defined in BatchedObject
+
+    def half(self):
+        raise ValueError("Cannot convert indices to half")
+
+    def float(self):
+        raise ValueError("Cannot convert indices to float")
+
+    def double(self):
+        raise ValueError("Cannot convert indices to double")
 
 
 class BatchedFeatures(BatchedObject):

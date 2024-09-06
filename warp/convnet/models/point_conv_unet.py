@@ -2,7 +2,9 @@ from typing import List, Optional, Tuple
 
 import torch.nn as nn
 
-from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchArgs
+from warp.convnet.geometry.ops.neighbor_search_continuous import (
+    ContinuousNeighborSearchArgs,
+)
 from warp.convnet.geometry.ops.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
@@ -29,7 +31,7 @@ class PointConvUNet(BaseModel):
         out_channels: int,
         down_channels: List[int],
         up_channels: List[int],
-        neighbor_search_args: NeighborSearchArgs,
+        neighbor_search_args: ContinuousNeighborSearchArgs,
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],
@@ -62,7 +64,7 @@ class PointConvUNet(BaseModel):
         inner_block = None
         # start from the innermost block. This has the largest receptive field, radius, and voxel size
         for i in range(num_levels - 1, -1, -1):
-            curr_neighbor_search_args: NeighborSearchArgs = neighbor_search_args.clone(
+            curr_neighbor_search_args: ContinuousNeighborSearchArgs = neighbor_search_args.clone(
                 radius=neighbor_search_radii[i]
             )
             curr_pooling_args: FeaturePoolingArgs = pooling_args.clone(
@@ -125,7 +127,7 @@ class PointConvEncoderDecoder(BaseModel):
         decoder_channels: List[int],
         num_encoder_blocks_per_level: List[int],
         num_decoder_blocks_per_level: List[int],
-        neighbor_search_args: NeighborSearchArgs,
+        neighbor_search_args: ContinuousNeighborSearchArgs,
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],

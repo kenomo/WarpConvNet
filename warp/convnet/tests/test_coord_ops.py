@@ -5,8 +5,8 @@ import torch
 import warp as wp
 from warp.convnet.geometry.ops.coord_ops import relative_coords
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
-    NEIGHBOR_SEARCH_MODE,
-    NeighborSearchArgs,
+    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
+    ContinuousNeighborSearchArgs,
     NeighborSearchResult,
 )
 from warp.convnet.geometry.point_collection import PointCollection
@@ -26,8 +26,8 @@ class TestPointCollection(unittest.TestCase):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
         radius = 0.1
-        args = NeighborSearchArgs(
-            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+        args = ContinuousNeighborSearchArgs(
+            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
             radius=radius,
         )
         search_result = pc.batched_coordinates.neighbors(args)

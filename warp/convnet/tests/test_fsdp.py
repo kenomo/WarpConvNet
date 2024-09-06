@@ -7,8 +7,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import warp as wp
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
-    NEIGHBOR_SEARCH_MODE,
-    NeighborSearchArgs,
+    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
+    ContinuousNeighborSearchArgs,
 )
 from warp.convnet.geometry.ops.point_pool import (
     FEATURE_POOLING_MODE,
@@ -34,8 +34,8 @@ class TestFSDP(unittest.TestCase):
 
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_arg = NeighborSearchArgs(
-            mode=NEIGHBOR_SEARCH_MODE.RADIUS,
+        search_arg = ContinuousNeighborSearchArgs(
+            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
             radius=0.4,
         )
         pooling_arg = FeaturePoolingArgs(

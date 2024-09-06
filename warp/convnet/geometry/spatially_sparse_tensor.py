@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 from jaxtyping import Float, Int
@@ -14,19 +14,23 @@ from warp.convnet.geometry.base_geometry import (
 from warp.convnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warp.convnet.utils.ntuple import ntuple
 
 
 class BatchedDiscreteCoordinates(BatchedCoordinates):
     voxel_size: float
-    voxel_origin: Float[Tensor, "3"]
+    voxel_origin: Float[Tensor, "D"]  # noqa: F821
+    tensor_stride: Union[int, Tuple[int, ...]]
     _hashmap: Optional[VectorHashTable]
 
     def __init__(
         self,
-        batched_tensor: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"],  # noqa: F722,F821
+        batched_tensor: List[Float[Tensor, "N D"]] | Float[Tensor, "N D"],  # noqa: F722,F821
         offsets: Optional[List[int]] = None,
         voxel_size: Optional[float] = None,
-        voxel_origin: Optional[Float[Tensor, "3"]] = None,
+        voxel_origin: Optional[Float[Tensor, "D"]] = None,  # noqa: F821
+        tensor_stride: Optional[Union[int, Tuple[int, ...]]] = None,
+        device: Optional[str] = None,
     ):
         """
 
@@ -35,6 +39,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
             offsets: provides the offsets for each batch
             voxel_size: provides the size of the voxel for converting the coordinates to points
             voxel_origin: provides the origin of the voxel for converting the coordinates to points
+            tensor_stride: provides the stride of the tensor for converting the coordinates to points
         """
         if isinstance(batched_tensor, list):
             assert offsets is None, "If batched_tensors is a list, offsets must be None."
@@ -43,10 +48,18 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets, requires_grad=False)
 
+        if device is not None:
+            batched_tensor = batched_tensor.to(device)
+
         self.offsets = offsets
         self.batched_tensor = batched_tensor
         self.voxel_size = voxel_size
         self.voxel_origin = voxel_origin
+        # Conver the tensor stride to ntuple
+        if tensor_stride is not None:
+            self.tensor_stride = ntuple(tensor_stride, ndim=3)
+        else:
+            self.tensor_stride = None
 
         self.check()
 
@@ -56,6 +69,8 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
             torch.int32,
             torch.int64,
         ], "Discrete coordinates must be integers"
+        if self.tensor_stride is not None:
+            assert isinstance(self.tensor_stride, (int, tuple))
 
     def sort(
         self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER
@@ -65,9 +80,9 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
 
     def neighbors(
         self,
-        search_args: "NeighborSearchArgs",  # noqa: F821
+        search_args: "DiscreteNeighborSearchArgs",  # noqa: F821
         query_coords: Optional["BatchedDiscreteCoordinates"] = None,
-    ) -> "NeighborSearchResult":  # noqa: F821
+    ) -> "DiscreteNeighborSearchResult":  # noqa: F821
         """
         Returns CSR format neighbor indices
         """
@@ -100,11 +115,12 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
     def __init__(
         self,
-        batched_coordinates: List[Float[Tensor, "N 3"]]
-        | Float[Tensor, "N 3"]
-        | BatchedDiscreteCoordinates,
+        batched_coordinates: (
+            List[Float[Tensor, "N 3"]] | Float[Tensor, "N 3"] | BatchedDiscreteCoordinates
+        ),
         batched_features: List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures,
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
+        device: Optional[str] = None,
         **kwargs,
     ):
         if isinstance(batched_coordinates, list):
@@ -114,16 +130,16 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             assert len(batched_coordinates) == len(batched_features)
             # Assert all elements in coords and features have same length
             assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
-            batched_coordinates = BatchedDiscreteCoordinates(batched_coordinates)
-            batched_features = BatchedFeatures(batched_features)
+            batched_coordinates = BatchedDiscreteCoordinates(batched_coordinates, device=device)
+            batched_features = BatchedFeatures(batched_features, device=device)
         elif isinstance(batched_coordinates, Tensor):
             assert (
                 isinstance(batched_features, Tensor) and offsets is not None
             ), "If coordinate is a tensor, features must be a tensor and offsets must be provided."
             batched_coordinates = BatchedDiscreteCoordinates(
-                tensors=batched_coordinates, offsets=offsets
+                tensors=batched_coordinates, offsets=offsets, device=device
             )
-            batched_features = BatchedFeatures(batched_features, offsets=offsets)
+            batched_features = BatchedFeatures(batched_features, offsets=offsets, device=device)
 
         BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, **kwargs)
 
@@ -160,3 +176,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
     @property
     def ordering(self):
         return self.extra_attributes.get("ordering", None)
+
+    @property
+    def stride(self):
+        return self.extra_attributes.get("stride", None)

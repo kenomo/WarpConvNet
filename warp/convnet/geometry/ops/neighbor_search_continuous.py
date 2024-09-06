@@ -8,19 +8,19 @@ from torch import Tensor
 import warp as wp
 
 
-class NEIGHBOR_SEARCH_MODE(Enum):
+class CONTINUOUS_NEIGHBOR_SEARCH_MODE(Enum):
     RADIUS = "radius"
     KNN = "knn"
     SAME_VOXEL = "same_voxel"
 
 
-class NeighborSearchArgs:
+class ContinuousNeighborSearchArgs:
     """
     Wrapper for the input of a neighbor search operation.
     """
 
     # The mode of the neighbor search
-    _mode: NEIGHBOR_SEARCH_MODE
+    _mode: CONTINUOUS_NEIGHBOR_SEARCH_MODE
     # The radius for radius search
     _radius: Optional[float]
     # The number of neighbors for knn search
@@ -30,13 +30,13 @@ class NeighborSearchArgs:
 
     def __init__(
         self,
-        mode: NEIGHBOR_SEARCH_MODE,
+        mode: CONTINUOUS_NEIGHBOR_SEARCH_MODE,
         radius: Optional[float] = None,
         k: Optional[int] = None,
         grid_dim: Optional[int | Tuple[int, int, int]] = None,
     ):
         if isinstance(mode, str):
-            mode = NEIGHBOR_SEARCH_MODE(mode)
+            mode = CONTINUOUS_NEIGHBOR_SEARCH_MODE(mode)
 
         self._mode = mode
         self._radius = radius
@@ -60,22 +60,22 @@ class NeighborSearchArgs:
         return self._grid_dim
 
     def __repr__(self):
-        if self._mode == NEIGHBOR_SEARCH_MODE.RADIUS:
+        if self._mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS:
             out_str = f"{self._mode.name}({self._radius})"
-        elif self._mode == NEIGHBOR_SEARCH_MODE.KNN:
+        elif self._mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.KNN:
             out_str = f"{self._mode._name}({self._k})"
-        elif self._mode == NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
+        elif self._mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
             out_str = f"VOXEL({self._grid_dim})"
         return out_str
 
     def clone(
         self,
-        mode: Optional[NEIGHBOR_SEARCH_MODE] = None,
+        mode: Optional[CONTINUOUS_NEIGHBOR_SEARCH_MODE] = None,
         radius: Optional[float] = None,
         k: Optional[int] = None,
         grid_dim: Optional[int | Tuple[int, int, int]] = None,
     ):
-        return NeighborSearchArgs(
+        return ContinuousNeighborSearchArgs(
             mode=mode if mode is not None else self._mode,
             radius=radius if radius is not None else self._radius,
             k=k if k is not None else self._k,
@@ -477,7 +477,7 @@ def neighbor_search(
     ref_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     query_positions: Float[Tensor, "M 3"],  # noqa: F821
     query_offsets: Int[Tensor, "B + 1"],  # noqa: F821
-    search_args: NeighborSearchArgs,
+    search_args: ContinuousNeighborSearchArgs,
 ) -> NeighborSearchResult:
     """
     Args:
@@ -489,7 +489,7 @@ def neighbor_search(
     Returns:
         NeighborSearchReturn
     """
-    if search_args.mode == NEIGHBOR_SEARCH_MODE.RADIUS:
+    if search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS:
         assert search_args.radius is not None, "Radius must be provided for radius search"
         neighbor_index, neighbor_distance, neighbor_split = batched_radius_search(
             ref_positions=ref_positions,
@@ -504,7 +504,7 @@ def neighbor_search(
             neighbor_split,
         )
 
-    elif search_args.mode == NEIGHBOR_SEARCH_MODE.KNN:
+    elif search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.KNN:
         assert search_args.k is not None, "knn_k must be provided for knn search"
         # M x K
         neighbor_index = batched_knn_search(
@@ -516,5 +516,5 @@ def neighbor_search(
         )
         return NeighborSearchResult(neighbor_index)
 
-    elif search_args.mode == NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
+    elif search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.SAME_VOXEL:
         raise NotImplementedError("Grid search not implemented yet")
