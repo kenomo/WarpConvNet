@@ -1,0 +1,138 @@
+import unittest
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch import Tensor
+from torch.optim.lr_scheduler import StepLR
+from torchvision import datasets, transforms
+
+import warp as wp
+import warp.convnet.nn.functional.transforms as T
+from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warp.convnet.nn.functional.sparse_pool import sparse_max_pool
+from warp.convnet.nn.sparse_conv import SparseConv2d
+
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = SparseConv2d(1, 32, kernel_size=3, stride=1, kernel_search_batch_size=9)
+        self.conv2 = SparseConv2d(32, 64, kernel_size=3, stride=1, kernel_search_batch_size=9)
+        self.fc1 = nn.Linear(14 * 14 * 64, 128)
+        self.fc2 = nn.Linear(128, 10)
+        self.dropout1 = nn.Dropout2d(0.25)
+        self.dropout2 = nn.Dropout2d(0.5)
+
+    def forward(self, x: Tensor):
+        x = SpatiallySparseTensor.from_dense(x)
+        x = self.conv1(x)
+        x = T.relu(x)
+        x = self.conv2(x)
+        x = T.relu(x)
+        x = sparse_max_pool(x, kernel_size=(2, 2), stride=(2, 2))
+        x = x.to_dense(channel_dim=1, spatial_shape=(14, 14))
+        x = torch.flatten(x, 1)
+        x = self.dropout1(x)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
+        x = self.fc2(x)
+        output = F.log_softmax(x, dim=1)
+        return output
+
+
+def train(model, device, train_loader, optimizer, epoch):
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
+        if batch_idx % 100 == 0:
+            print(
+                f"Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} "
+                f"({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}"
+            )
+
+
+def test(model, device, test_loader):
+    model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            test_loss += F.nll_loss(output, target, reduction="sum").item()
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+    accuracy = 100.0 * correct / len(test_loader.dataset)
+    print(
+        f"\nTest set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.2f}%)\n"
+    )
+    return accuracy
+
+
+class TestMNIST(unittest.TestCase):
+    def setUp(self):
+        wp.init()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.batch_size = 64
+        self.test_batch_size = 1000
+        self.epochs = 3
+        self.lr = 1.0
+        self.gamma = 0.7
+
+    def test_mnist_training(self):
+        torch.manual_seed(1)
+
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                "../data",
+                train=True,
+                download=True,
+                transform=transforms.Compose(
+                    [
+                        transforms.ToTensor(),
+                    ]
+                ),
+            ),
+            batch_size=self.batch_size,
+            shuffle=True,
+        )
+
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(
+                "../data",
+                train=False,
+                transform=transforms.Compose(
+                    [
+                        transforms.ToTensor(),
+                    ]
+                ),
+            ),
+            batch_size=self.test_batch_size,
+            shuffle=True,
+        )
+
+        model = Net().to(self.device)
+        optimizer = optim.Adadelta(model.parameters(), lr=self.lr)
+        scheduler = StepLR(optimizer, step_size=1, gamma=self.gamma)
+
+        for epoch in range(1, self.epochs + 1):
+            train(model, self.device, train_loader, optimizer, epoch)
+            accuracy = test(model, self.device, test_loader)
+            scheduler.step()
+
+        # Assert that the final accuracy is above a certain threshold
+        self.assertGreater(accuracy, 90.0, "Final accuracy should be above 90%")
+
+
+if __name__ == "__main__":
+    unittest.main()

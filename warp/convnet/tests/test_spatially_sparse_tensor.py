@@ -88,6 +88,10 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         st = SpatiallySparseTensor.from_dense(dense_tensor, channel_dim=1)
         self.assertTrue(st.batch_size == 16)
 
+        # test to_dense
+        dense_tensor2 = st.to_dense(channel_dim=1)
+        self.assertTrue((dense_tensor2 == dense_tensor).all())
+
 
 if __name__ == "__main__":
     unittest.main()

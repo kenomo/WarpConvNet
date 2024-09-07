@@ -76,10 +76,16 @@ def _batch_index(
 def batch_index_from_offset(
     offsets: Int[Tensor, "B+1"],  # noqa: F821
     device: Optional[str] = None,
-    backend: Literal["torch", "warp"] = "warp",
+    backend: Literal["auto", "torch", "warp"] = "auto",
 ) -> Int[Tensor, "N"]:  # noqa: F821
     assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
-    assert backend in ["torch", "warp"], "backend must be either torch or warp"
+    assert backend in ["auto", "torch", "warp"], "backend must be either torch or warp"
+
+    if backend == "auto":
+        if device is None or "cpu" in device:
+            backend = "torch"
+        else:
+            backend = "warp"
 
     # offset to int
     offsets = offsets.int()
@@ -116,7 +122,7 @@ def batch_index_from_offset(
 def batch_indexed_coordinates(
     batched_coords: Float[Tensor, "N 3"],  # noqa: F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F821
-    backend: Literal["torch", "warp"] = "warp",
+    backend: Literal["auto", "torch", "warp"] = "auto",
     return_type: Literal["torch", "warp"] = "torch",
 ) -> Float[Tensor, "N 4"]:  # noqa: F821
     device = str(batched_coords.device)
@@ -149,7 +155,7 @@ def offsets_from_batch_index(
                 counts.cumsum(dim=0),
             ],
             dim=0,
-        ).to(batch_index.device)
+        )
         return offsets
     elif backend == "warp":
         raise NotImplementedError("warp backend not implemented")

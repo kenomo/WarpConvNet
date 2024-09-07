@@ -16,5 +16,10 @@ def ravel_multi_index(
         dims: The source shape.
     """
     assert multi_index.shape[-1] == len(dims)
-    strides = torch.tensor([np.prod(dims[i + 1 :]) for i in range(len(dims))], dtype=torch.int32)
+    # Convert dims to a list of tuples
+    if isinstance(dims, torch.Tensor):
+        dims = dims.cpu().tolist()
+    strides = torch.tensor(
+        [np.prod(dims[i + 1 :]) for i in range(len(dims))], dtype=torch.int32
+    ).to(multi_index.device)
     return (multi_index * strides).sum(dim=-1)

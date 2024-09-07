@@ -20,9 +20,10 @@ class SpatiallySparseConv(nn.Module):
         bias: bool = True,
         transposed: bool = False,
         kernel_search_batch_size: int = 8,
+        num_spatial_dims: Optional[int] = 3,
     ):
         super(SpatiallySparseConv, self).__init__()
-        kernel_size = ntuple(kernel_size, ndim=3)
+        kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
         self.kernel_size = kernel_size
         self.stride = stride
         self.dilation = dilation
@@ -49,4 +50,54 @@ class SpatiallySparseConv(nn.Module):
             kernel_search_batch_size=self.kernel_search_batch_size,
             output_spatially_sparse_tensor=output_spatially_sparse_tensor,
             transposed=self.transposed,
+        )
+
+
+class SparseConv2d(SpatiallySparseConv):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        dilation=1,
+        bias=True,
+        transposed=False,
+        kernel_search_batch_size=8,
+    ):
+        super(SparseConv2d, self).__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            dilation,
+            bias,
+            transposed,
+            kernel_search_batch_size,
+            num_spatial_dims=2,
+        )
+
+
+class SparseConv3d(SpatiallySparseConv):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        dilation=1,
+        bias=True,
+        transposed=False,
+        kernel_search_batch_size=8,
+    ):
+        super(SparseConv3d, self).__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            dilation,
+            bias,
+            transposed,
+            kernel_search_batch_size,
+            num_spatial_dims=3,
         )

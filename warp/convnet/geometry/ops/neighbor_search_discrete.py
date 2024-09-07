@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Optional, Tuple
 
+import numpy as np
 import torch
 from jaxtyping import Int
 from torch import Tensor
@@ -293,32 +294,33 @@ def kernel_offsets_from_size(
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     center_offset: Optional[Tuple[int, ...]] = None,
-) -> Int[Tensor, "K 4"]:
+) -> Int[Tensor, "K D+1"]:
     """
     Generate the kernel offsets for the spatially sparse convolution.
+    Supports arbitrary number of spatial dimensions.
     """
     assert len(kernel_size) == len(kernel_dilation)
-    i, j, k = torch.meshgrid(
-        torch.arange(kernel_size[0], dtype=torch.int32),
-        torch.arange(kernel_size[1], dtype=torch.int32),
-        torch.arange(kernel_size[2], dtype=torch.int32),
-        indexing="ij",
-    )
-    i, j, k = i.flatten(), j.flatten(), k.flatten()
+    num_spatial_dims = len(kernel_size)
+
+    # Create meshgrid for arbitrary dimensions
+    ranges = [torch.arange(size, dtype=torch.int32) for size in kernel_size]
+    grids = torch.meshgrid(*ranges, indexing="ij")
+    flattened_grids = [grid.flatten() for grid in grids]
 
     if center_offset is None:
         # center odd-sized kernels and 0 for even-sized kernels
         center_offset = [(s - 1) // 2 if s % 2 == 1 else 0 for s in kernel_size]
-    assert len(center_offset) == len(kernel_size)
-    return torch.stack(
-        [
-            torch.zeros_like(i),
-            (i - center_offset[0]) * kernel_dilation[0],
-            (j - center_offset[1]) * kernel_dilation[1],
-            (k - center_offset[2]) * kernel_dilation[2],
-        ],
-        dim=1,
-    )
+    assert len(center_offset) == num_spatial_dims
+
+    # Create offsets for each dimension
+    offsets = [
+        (grid - center_offset[i]) * kernel_dilation[i] for i, grid in enumerate(flattened_grids)
+    ]
+
+    # Add batch dimension (zeros)
+    offsets = [torch.zeros_like(offsets[0])] + offsets
+
+    return torch.stack(offsets, dim=1)
 
 
 @torch.no_grad()
@@ -395,7 +397,7 @@ def kernel_map_from_size(
     batch_indexed_out_coords: Int[Tensor, "M 4"],
     in_to_out_stride_ratio: Tuple[int, ...],
     kernel_size: Tuple[int, ...],
-    kernel_dilation: Tuple[int, ...] = (1, 1, 1),
+    kernel_dilation: Optional[Tuple[int, ...]] = None,
     kernel_search_batch_size: int = 8,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
 ) -> DiscreteNeighborSearchResult:
@@ -404,19 +406,25 @@ def kernel_map_from_size(
 
     in_to_out_stride_ratio: the ratio of the input stride to the output stride. This will be multipled to output coordinates to find matching input coordinates.
     """
+    num_spatial_dims = batch_indexed_in_coords.shape[1] - 1
+    if kernel_dilation is None:
+        kernel_dilation = (1,) * num_spatial_dims
+
     # convert to wp array
     device = batch_indexed_in_coords.device
     batch_indexed_in_coords_wp = wp.from_torch(batch_indexed_in_coords)
     # multiply output coordinates by in_to_out_stride_ratio
     batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
-        [1, *ntuple(in_to_out_stride_ratio, ndim=3)], dtype=torch.int32, device=device
+        [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
+        dtype=torch.int32,
+        device=device,
     )
     N_out = batch_indexed_out_coords.shape[0]
 
     # Create a vector hashtable for the batched coordinates
     hashtable = VectorHashTable.from_keys(batch_indexed_in_coords_wp)
 
-    num_total_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    num_total_kernels = np.prod(kernel_size)
 
     # Found indices and offsets for each kernel offset
     in_maps = []
@@ -440,11 +448,11 @@ def kernel_map_from_size(
         curr_offsets = offsets[batch_start:batch_end]
 
         # Apply offsets in batch and query output + offsets. Add the offsets in the expanded dimension
-        # KN4 + K14 -> KN4
+        # KND + K1D -> KND
         new_batch_indexed_out_coords = batch_indexed_out_coords.unsqueeze(
             0
         ) + curr_offsets.unsqueeze(1)
-        new_batch_indexed_out_coords = new_batch_indexed_out_coords.view(-1, 4)
+        new_batch_indexed_out_coords = new_batch_indexed_out_coords.view(-1, num_spatial_dims + 1)
         new_batch_indexed_out_coords_wp = wp.from_torch(new_batch_indexed_out_coords)
 
         # Query the hashtable for all new coordinates at once

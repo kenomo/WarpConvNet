@@ -199,6 +199,10 @@ class BatchedObject:
 
 
 class BatchedCoordinates(BatchedObject):
+    @property
+    def num_spatial_dims(self):
+        return self.batched_tensor.shape[1]  # tensor does not have batch index
+
     def neighbors(
         self,
         query_coords: "BatchedCoordinates",

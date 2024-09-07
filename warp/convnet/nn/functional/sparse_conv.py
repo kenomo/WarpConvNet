@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -143,7 +144,7 @@ def expand_coords(
     # Initialize the unique coordinates with the batched coordinates
     unique_coords = batch_indexed_coords
 
-    num_total_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    num_total_kernels = np.prod(kernel_size)
     # Create grids for i, j, k
     i, j, k = torch.meshgrid(
         torch.arange(kernel_size[0], dtype=torch.int32),
@@ -218,9 +219,10 @@ def spatially_sparse_conv(
     For transposed convolution, the output coordinates should be provided along with the
     output coordinate stride.
     """
-    kernel_size = ntuple(kernel_size, ndim=3)
-    kernel_dilation = ntuple(kernel_dilation, ndim=3)
-    stride = ntuple(stride, ndim=3)
+    num_spatial_dims = input_sparse_tensor.num_spatial_dims
+    kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
+    kernel_dilation = ntuple(kernel_dilation, ndim=num_spatial_dims)
+    stride = ntuple(stride, ndim=num_spatial_dims)
 
     if transposed and not generative:
         assert (
@@ -302,7 +304,7 @@ def spatially_sparse_conv(
     tensor_stride = input_sparse_tensor.stride
     # if tensor stride is none, set to 1
     if tensor_stride is None:
-        tensor_stride = ntuple(1, ndim=3)
+        tensor_stride = ntuple(1, ndim=num_spatial_dims)
     out_tensor_stride = tuple(o * s for o, s in zip(in_to_out_stride_ratio, tensor_stride))
 
     if bias is not None:

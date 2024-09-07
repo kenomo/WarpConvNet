@@ -20,17 +20,22 @@ from warp.convnet.utils.ntuple import ntuple
 
 @torch.no_grad()
 def generate_output_coords(
-    batch_indexed_coords: Int[Tensor, "N 4"],
+    batch_indexed_coords: Int[Tensor, "N D+1"],
     stride: Tuple[int, ...],
-) -> Tuple[Int[Tensor, "M 4"], Int[Tensor, "B + 1"]]:  # noqa: F821
+) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Downsample the coordinates by the stride.
     """
-    assert len(stride) == 3, "Stride must be a tuple of 3 integers"
-    assert batch_indexed_coords.shape[1] == 4, "Batch indexed coordinates must have 4 columns"
+    num_spatial_dims = batch_indexed_coords.shape[1] - 1
+    assert (
+        len(stride) == num_spatial_dims
+    ), f"Stride must match the number of spatial dimensions. Got {len(stride)} spatial dimensions for but coordinates with {num_spatial_dims} spatial dimensions."
+
     # convert to wp array
     device = batch_indexed_coords.device
-    batched_stride = torch.tensor([1, *ntuple(stride, ndim=3)], dtype=torch.int32, device=device)
+    batched_stride = torch.tensor(
+        [1, *ntuple(stride, ndim=num_spatial_dims)], dtype=torch.int32, device=device
+    )
     # discretize the coordinates by floor division
     discretized_coords = torch.floor(batch_indexed_coords / batched_stride).int()
     # Get unique coordinates
@@ -51,7 +56,8 @@ def sparse_downsample_reduce(
     """
     Downsample the spatially sparse tensor by random indices.
     """
-    stride = ntuple(stride, ndim=3)
+    num_spatial_dims = spatially_sparse_tensor.num_spatial_dims
+    stride = ntuple(stride, ndim=num_spatial_dims)
     batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
     batch_indexed_out_coords, output_offsets = generate_output_coords(
         batch_indexed_in_coords, stride
@@ -62,9 +68,9 @@ def sparse_downsample_reduce(
         batch_indexed_out_coords,
         in_to_out_stride_ratio=stride,
         kernel_size=stride,
-        kernel_dilation=ntuple(1, ndim=3),
+        kernel_dilation=ntuple(1, ndim=num_spatial_dims),
         kernel_search_batch_size=kernel_search_batch_size,
-        kernel_center_offset=ntuple(0, ndim=3),
+        kernel_center_offset=ntuple(0, ndim=num_spatial_dims),
     )
     in_maps, unique_out_maps, offsets = kernel_map.to_csr()
     in_features = spatially_sparse_tensor.feature_tensor
@@ -108,7 +114,8 @@ def sparse_downsample_first(
     """
     Downsample the spatially sparse tensor by random indices.
     """
-    stride = ntuple(stride, ndim=3)
+    num_spatial_dims = spatially_sparse_tensor.num_spatial_dims
+    stride = ntuple(stride, ndim=num_spatial_dims)
     batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
     batch_indexed_out_coords, output_offsets = generate_output_coords(
         batch_indexed_in_coords, stride
@@ -119,9 +126,9 @@ def sparse_downsample_first(
         batch_indexed_out_coords,
         in_to_out_stride_ratio=stride,
         kernel_size=stride,
-        kernel_dilation=ntuple(1, ndim=3),
+        kernel_dilation=ntuple(1, ndim=num_spatial_dims),
         kernel_search_batch_size=kernel_search_batch_size,
-        kernel_center_offset=ntuple(0, ndim=3),
+        kernel_center_offset=ntuple(0, ndim=num_spatial_dims),
     )
     in_maps, unique_out_maps, offsets = kernel_map.to_csr()
     # Get the first features defined by offsets
