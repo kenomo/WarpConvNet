@@ -1,4 +1,5 @@
 import enum
+from typing import Union
 
 import numpy as np
 import torch
@@ -28,10 +29,10 @@ def atomicCAS(address: wp.array(dtype=int), slot: int, compare: int, val: int) -
 
 # Hash function to convert vec4i to int32
 @wp.func
-def hash_fnv1a(key: wp.vec4i, capacity: int) -> int:
+def hash_fnv1a(key: wp.array(dtype=int), capacity: int) -> int:
     # Simple hash function for demonstration
     hash_val = int(2166136261)
-    for i in range(4):
+    for i in range(key.shape[0]):
         hash_val ^= key[i]
         hash_val *= 16777619
     # Make sure the hash value is positive
@@ -47,11 +48,11 @@ def murmur_32_scramble(k: int) -> int:
 
 
 @wp.func
-def hash_murmur(key: wp.vec4i, capacity: int) -> int:
-    h = 0x9747B28C
+def hash_murmur(key: wp.array(dtype=int), capacity: int) -> int:
+    h = int(0x9747B28C)
 
-    # Process each of the 4 integers in the vec4i key
-    for i in range(4):
+    # Process each of the integers in the key
+    for i in range(key.shape[0]):
         k = key[i]
         h ^= murmur_32_scramble(k)
         h = (h << 13) | (h >> 19)
@@ -70,9 +71,9 @@ def hash_murmur(key: wp.vec4i, capacity: int) -> int:
 
 
 @wp.func
-def hash_city(key: wp.vec4i, capacity: int) -> int:
-    hash_val = 0
-    for i in range(4):
+def hash_city(key: wp.array(dtype=int), capacity: int) -> int:
+    hash_val = int(0)
+    for i in range(key.shape[0]):
         hash_val += key[i] * 0x9E3779B9
         hash_val ^= hash_val >> 16
         hash_val *= 0x85EBCA6B
@@ -84,7 +85,7 @@ def hash_city(key: wp.vec4i, capacity: int) -> int:
 
 
 @wp.func
-def hash_selection(hash_method: int, key: wp.vec4i, capacity: int) -> int:
+def hash_selection(hash_method: int, key: wp.array(dtype=int), capacity: int) -> int:
     if hash_method == 0:
         return hash_fnv1a(key, capacity)
     elif hash_method == 1:
@@ -96,8 +97,8 @@ def hash_selection(hash_method: int, key: wp.vec4i, capacity: int) -> int:
 
 
 @wp.func
-def vec_equal(a: wp.vec4i, b: wp.vec4i) -> bool:
-    for i in range(4):
+def vec_equal(a: wp.array(dtype=int), b: wp.array(dtype=int)) -> bool:
+    for i in range(a.shape[0]):
         if a[i] != b[i]:
             return False
     return True
@@ -106,11 +107,11 @@ def vec_equal(a: wp.vec4i, b: wp.vec4i) -> bool:
 @wp.struct
 class HashStruct:
     table_kvs: wp.array(dtype=int)
-    vector_keys: wp.array(dtype=wp.vec4i)
+    vector_keys: wp.array2d(dtype=int)
     capacity: int
     hash_method: int
 
-    def insert(self, vec_keys: wp.array(dtype=wp.vec4i)):
+    def insert(self, vec_keys: wp.array2d(dtype=int)):
         assert self.capacity > 0
         assert self.hash_method in [0, 1, 2]
         assert (
@@ -134,7 +135,7 @@ class HashStruct:
             device=device,
         )
 
-    def search(self, search_keys: wp.array(dtype=wp.vec4i)) -> wp.array(dtype=int):
+    def search(self, search_keys: wp.array2d(dtype=int)) -> wp.array(dtype=int):
         device = search_keys.device
         results = wp.empty(len(search_keys), dtype=int, device=device)
         wp.launch(
@@ -167,7 +168,7 @@ class HashStruct:
 @wp.kernel
 def insert_kernel(
     table_kvs: wp.array(dtype=int),
-    vec_keys: wp.array(dtype=wp.vec4i),
+    vec_keys: wp.array2d(dtype=int),
     table_capacity: int,
     hash_method: int,
 ):
@@ -190,8 +191,8 @@ def insert_kernel(
 @wp.func
 def search_func(
     table_kvs: wp.array(dtype=int),
-    vec_keys: wp.array(dtype=wp.vec4i),
-    query_key: wp.vec4i,
+    vec_keys: wp.array2d(dtype=int),
+    query_key: wp.array(dtype=int),
     table_capacity: int,
     hash_method: int,
 ) -> int:
@@ -214,7 +215,7 @@ def search_func(
 @wp.kernel
 def search_kernel(
     hash_struct: HashStruct,
-    search_keys: wp.array(dtype=wp.vec4i),
+    search_keys: wp.array2d(dtype=int),
     search_results: wp.array(dtype=int),
 ):
     idx = wp.tid()
@@ -258,18 +259,18 @@ class VectorHashTable:
     def device(self):
         return self._hash_struct.table_kvs.device
 
-    def insert(self, vec_keys: wp.array(dtype=wp.vec4i)):
+    def insert(self, vec_keys: wp.array2d):
         self._hash_struct.insert(vec_keys)
 
     @classmethod
-    def from_keys(cls, vec_keys: wp.array(dtype=wp.vec4i)):
+    def from_keys(cls, vec_keys: Union[wp.array2d, Tensor]):
         if isinstance(vec_keys, torch.Tensor):
-            vec_keys = wp.from_torch(vec_keys, dtype=wp.vec4i)
+            vec_keys = wp.from_torch(vec_keys, dtype=int)
         obj = cls(2 * len(vec_keys))
         obj.insert(vec_keys)
         return obj
 
-    def search(self, search_keys: wp.array(dtype=wp.vec4i)) -> wp.array(dtype=int):
+    def search(self, search_keys: wp.array2d) -> wp.array:
         return self._hash_struct.search(search_keys)
 
     def unique_index(self) -> Int[Tensor, "N"]:  # noqa: F821
@@ -302,7 +303,7 @@ def test():
     # Create example keys
     N = 48
     table_vec_keys = wp.array(
-        np.random.randint(0, 100, size=(N, 4), dtype=int), dtype=wp.vec4i, device=device
+        np.random.randint(0, 100, size=(N, 3), dtype=int), dtype=int, device=device
     )
 
     # Launch the kernel
