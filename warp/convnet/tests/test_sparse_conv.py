@@ -6,12 +6,13 @@ import warp as wp
 from warp.convnet.core.hashmap import VectorHashTable
 from warp.convnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.sparse_conv import (
-    SpatiallySparseConv,
+from warp.convnet.nn.functional.sparse_conv import (
     SpatiallySparseConvExplicitGEMMFunction,
     generate_output_coords,
     spatially_sparse_conv,
 )
+from warp.convnet.nn.functional.sparse_ops import sparse_downsample_reduce
+from warp.convnet.nn.sparse_conv import SpatiallySparseConv
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
@@ -83,9 +84,9 @@ class TestSparseConv(unittest.TestCase):
         kernel_offsets = torch.stack(
             [
                 torch.zeros_like(i),
-                (i - kernel_size[0] // 2) * kernel_dilation[0] * in_to_out_stride_ratio[0],
-                (j - kernel_size[1] // 2) * kernel_dilation[1] * in_to_out_stride_ratio[1],
-                (k - kernel_size[2] // 2) * kernel_dilation[2] * in_to_out_stride_ratio[2],
+                (i - kernel_size[0] // 2) * kernel_dilation[0],
+                (j - kernel_size[1] // 2) * kernel_dilation[1],
+                (k - kernel_size[2] // 2) * kernel_dilation[2],
             ],
             dim=1,
         ).to(device)
@@ -169,6 +170,18 @@ class TestSparseConv(unittest.TestCase):
         stride = (2, 2, 2)
         conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride).to(self.st.device)
         out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+
+    def test_sparse_conv_module_transposed(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, transposed=True).to(
+            self.st.device
+        )
+        st: SpatiallySparseTensor = self.st
+        st_downsampled = sparse_downsample_reduce(st, (2, 2, 2))
+        out = conv(st_downsampled, st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
 

@@ -65,7 +65,7 @@ class BatchedObject:
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets)
 
-        self.offsets = offsets
+        self.offsets = offsets.cpu()
         if device is not None:
             batched_tensor = batched_tensor.to(device)
         self.batched_tensor = batched_tensor
@@ -80,7 +80,7 @@ class BatchedObject:
         # offset check
         assert isinstance(
             self.offsets, (torch.IntTensor, torch.LongTensor)
-        ), f"Offsets must be a cpu IntTensor, LongTensor, got {self.offsets}"
+        ), f"Offsets must be a cpu IntTensor or cpu LongTensor, got {self.offsets}"
         assert self.offsets.requires_grad is False, "Offsets must not require grad"
         assert (
             len(self.offsets) == self.batch_size + 1

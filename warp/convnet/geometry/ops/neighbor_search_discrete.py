@@ -83,6 +83,34 @@ class DiscreteNeighborSearchResult:
     def __repr__(self):
         return f"{self.__class__.__name__}(len={len(self)})"
 
+    def to_csr(
+        self,
+    ) -> Tuple[Int[Tensor, "L"], Int[Tensor, "K"], Int[Tensor, "K + 1"]]:  # noqa: F821
+        """
+        Convert the neighbor search result to a CSR format.
+
+        in_maps to row indices
+        out_maps to sort and use for columns
+        ignore offsets
+        """
+        in_maps = self.in_maps
+        out_maps = self.out_maps
+
+        # Sort the out_maps and get the indices
+        out_maps_sorted, out_maps_indices = torch.sort(out_maps)
+        # cchoy: Could skip the sorting by implementing a custom warp kernel
+        unique_out_maps_sorted, num_unique = torch.unique(
+            out_maps_sorted, return_counts=True, sorted=True
+        )
+
+        # Get the in_maps from the indices
+        in_maps_sorted = in_maps[out_maps_indices]
+
+        # convert to offsets
+        offsets = torch.cumsum(num_unique.cpu(), dim=0)
+        offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
+        return in_maps_sorted, unique_out_maps_sorted, offsets
+
 
 @wp.kernel
 def conv_kernel_map(
@@ -256,11 +284,12 @@ def neighbor_search(
 def kernel_offsets_from_size(
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
-    in_to_out_stride_ratio: Tuple[int, ...],
+    center_offset: Optional[Tuple[int, ...]] = None,
 ) -> Int[Tensor, "K 4"]:
     """
     Generate the kernel offsets for the spatially sparse convolution.
     """
+    assert len(kernel_size) == len(kernel_dilation)
     i, j, k = torch.meshgrid(
         torch.arange(kernel_size[0], dtype=torch.int32),
         torch.arange(kernel_size[1], dtype=torch.int32),
@@ -269,12 +298,16 @@ def kernel_offsets_from_size(
     )
     i, j, k = i.flatten(), j.flatten(), k.flatten()
 
+    if center_offset is None:
+        # center odd-sized kernels and 0 for even-sized kernels
+        center_offset = [(s - 1) // 2 if s % 2 == 1 else 0 for s in kernel_size]
+    assert len(center_offset) == len(kernel_size)
     return torch.stack(
         [
             torch.zeros_like(i),
-            (i - kernel_size[0] // 2) * kernel_dilation[0] * in_to_out_stride_ratio[0],
-            (j - kernel_size[1] // 2) * kernel_dilation[1] * in_to_out_stride_ratio[1],
-            (k - kernel_size[2] // 2) * kernel_dilation[2] * in_to_out_stride_ratio[2],
+            (i - center_offset[0]) * kernel_dilation[0],
+            (j - center_offset[1]) * kernel_dilation[1],
+            (k - center_offset[2]) * kernel_dilation[2],
         ],
         dim=1,
     )
@@ -355,7 +388,8 @@ def kernel_map_from_size(
     in_to_out_stride_ratio: Tuple[int, ...],
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...] = (1, 1, 1),
-    kernel_batch: int = 8,
+    kernel_search_batch_size: int = 8,
+    kernel_center_offset: Optional[Tuple[int, ...]] = None,
 ) -> DiscreteNeighborSearchResult:
     """
     Generate the kernel map for the spatially sparse convolution.
@@ -382,16 +416,18 @@ def kernel_map_from_size(
     num_valid_maps = []
 
     # Query the hashtable for all kernel offsets
-    all_out_indices = torch.arange(N_out, device=device).repeat(kernel_batch, 1).view(-1)
-
-    # Gerenate kernel offsets
-    offsets = kernel_offsets_from_size(kernel_size, kernel_dilation, in_to_out_stride_ratio).to(
-        device
+    all_out_indices = (
+        torch.arange(N_out, device=device).repeat(kernel_search_batch_size, 1).view(-1)
     )
 
+    # Gerenate kernel offsets
+    offsets = kernel_offsets_from_size(
+        kernel_size, kernel_dilation, center_offset=kernel_center_offset
+    ).to(device)
+
     # TODO(cchoy): replace the inner loop with the kernel_map_from_offsets
-    for batch_start in range(0, num_total_kernels, kernel_batch):
-        batch_end = min(batch_start + kernel_batch, num_total_kernels)
+    for batch_start in range(0, num_total_kernels, kernel_search_batch_size):
+        batch_end = min(batch_start + kernel_search_batch_size, num_total_kernels)
         num_kernels_in_batch = batch_end - batch_start
         curr_offsets = offsets[batch_start:batch_end]
 
@@ -416,7 +452,7 @@ def kernel_map_from_size(
         num_valid_in_indices = valid_in_indices_bool.view(num_kernels_in_batch, -1).sum(dim=1)
         # Compress indices to the valid indices
         valid_in_indices_int = in_indices[valid_in_indices_bool]
-        if num_kernels_in_batch < kernel_batch:
+        if num_kernels_in_batch < kernel_search_batch_size:
             valid_out_indices_int = all_out_indices[: len(valid_in_indices_bool)][
                 valid_in_indices_bool
             ]

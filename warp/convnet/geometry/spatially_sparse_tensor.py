@@ -108,6 +108,10 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
             self._hashmap = VectorHashTable.from_keys(bcoords)
         return self._hashmap
 
+    @property
+    def batch_indexed_coordinates(self) -> Tensor:
+        return batch_indexed_coordinates(self.batched_tensor, self.offsets)
+
 
 class SpatiallySparseTensor(BatchedSpatialFeatures):
     batched_coordinates: BatchedDiscreteCoordinates
@@ -180,3 +184,22 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
     @property
     def stride(self):
         return self.extra_attributes.get("stride", None)
+
+    @property
+    def batch_indexed_coordinates(self) -> Tensor:
+        return self.batched_coordinates.batch_indexed_coordinates
+
+    def replace(
+        self,
+        batched_coordinates: Optional[BatchedDiscreteCoordinates] = None,
+        batched_features: Optional[BatchedFeatures] = None,
+        **kwargs,
+    ) -> "SpatiallySparseTensor":
+        # copy the _extra_attributes
+        extra_attributes = self.extra_attributes.copy()
+        extra_attributes.update(kwargs)
+        return self.__class__(
+            batched_coordinates or self.batched_coordinates,
+            batched_features or self.batched_features,
+            **extra_attributes,
+        )

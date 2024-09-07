@@ -110,7 +110,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         kernel_offsets = kernel_offsets_from_size(
             (3, 3, 3),
             (1, 1, 1),
-            (1, 1, 1),
         ).to(device)
 
         kernel_map_size = kernel_map_from_size(
@@ -119,7 +118,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             in_to_out_stride_ratio=(1, 1, 1),
             kernel_size=(3, 3, 3),
             kernel_dilation=(1, 1, 1),
-            kernel_batch=8,
+            kernel_search_batch_size=8,
         )
 
         kernel_map_offset = kernel_map_from_offsets(
@@ -152,7 +151,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             kernel_offsets = kernel_offsets_from_size(
                 kernel_size,
                 kernel_dilation,
-                in_to_out_stride_ratio,
             ).to(device)
 
             backend_times = {backend: Timer() for backend in ["size", "offsets"]}
@@ -165,7 +163,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
                         in_to_out_stride_ratio=in_to_out_stride_ratio,
                         kernel_size=kernel_size,
                         kernel_dilation=kernel_dilation,
-                        kernel_batch=8,
+                        kernel_search_batch_size=8,
                     )
                 with backend_times["offsets"]:
                     _ = kernel_map_from_offsets(
