@@ -13,8 +13,12 @@ from warp.convnet.geometry.base_geometry import (
 )
 from warp.convnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
 from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warp.convnet.utils.batch_index import (
+    batch_indexed_coordinates,
+    offsets_from_batch_index,
+)
 from warp.convnet.utils.ntuple import ntuple
+from warp.convnet.utils.ravel import ravel_multi_index
 
 
 class BatchedDiscreteCoordinates(BatchedCoordinates):
@@ -147,6 +151,37 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
         BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, **kwargs)
 
+    @classmethod
+    def from_dense(
+        cls,
+        dense_tensor: Float[Tensor, "B C H W"] | Float[Tensor, "B C H W D"],
+        channel_dim: int = 1,
+        **kwargs,
+    ):
+        # Move channel dimension to the end
+        dense_tensor = dense_tensor.transpose(channel_dim, -1)
+        spatial_shape = dense_tensor.shape[:-1]
+        # abs sum all elements in the tensor
+        abs_sum = torch.abs(dense_tensor).sum(dim=-1, keepdim=False)
+        # Find all non-zero elements. Expected to be sorted.
+        non_zero_inds = torch.nonzero(abs_sum)
+
+        # Flatten the spatial dimensions
+        flattened_tensor = dense_tensor.flatten(0, -2)
+
+        # Convert multi-dimensional indices to flattened indices
+        flattened_indices = ravel_multi_index(non_zero_inds, spatial_shape)
+
+        # Use index_select to get the features
+        non_zero_feats = torch.index_select(flattened_tensor, 0, flattened_indices)
+
+        offsets = offsets_from_batch_index(non_zero_inds[:, 0])
+        return cls(
+            batched_coordinates=BatchedDiscreteCoordinates(non_zero_inds[:, 1:], offsets=offsets),
+            batched_features=BatchedFeatures(non_zero_feats, offsets=offsets),
+            **kwargs,
+        )
+
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "SpatiallySparseTensor":
         if ordering == self.ordering:
             return self
@@ -188,6 +223,10 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
     @property
     def batch_indexed_coordinates(self) -> Tensor:
         return self.batched_coordinates.batch_indexed_coordinates
+
+    @property
+    def batch_size(self):
+        return self.batched_coordinates.batch_size
 
     def replace(
         self,

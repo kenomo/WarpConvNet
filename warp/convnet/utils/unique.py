@@ -73,5 +73,5 @@ def unique_hashmap(
         bcoords.device
     ), f"Batched coordinates must be on cuda device, got {bcoords.device}"
     table = VectorHashTable(2 * len(bcoords), hash_method)
-    table.insert(wp.from_torch(bcoords, dtype=wp.vec4i))
+    table.insert(wp.from_torch(bcoords))
     return table.unique_index(), table  # this is a torch tensor

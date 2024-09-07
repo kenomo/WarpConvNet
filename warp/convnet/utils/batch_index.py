@@ -125,7 +125,7 @@ def batch_indexed_coordinates(
     if return_type == "torch":
         return batched_coords
     elif return_type == "warp":
-        return wp.from_torch(batched_coords, dtype=wp.vec4i)
+        return wp.from_torch(batched_coords)
     else:
         raise ValueError("return_type must be either torch or warp")
 

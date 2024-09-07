@@ -137,7 +137,7 @@ def expand_coords(
     Expand the coordinates by the kernel size
     """
     # coords to batched coordinates
-    batch_indexed_coords_wp = wp.from_torch(batch_indexed_coords, dtype=wp.vec4i)
+    batch_indexed_coords_wp = wp.from_torch(batch_indexed_coords)
     # Create a vector hashtable for the batched coordinates
     hashtable = VectorHashTable.from_keys(batch_indexed_coords_wp)
     # Initialize the unique coordinates with the batched coordinates
@@ -174,7 +174,7 @@ def expand_coords(
         # Apply offsets in batch
         new_batched_coords = batch_indexed_coords.unsqueeze(0) + curr_offsets.unsqueeze(1)
         new_batched_coords = new_batched_coords.view(-1, 4)
-        new_batched_coords_wp = wp.from_torch(new_batched_coords, dtype=wp.vec4i)
+        new_batched_coords_wp = wp.from_torch(new_batched_coords)
 
         # Query the hashtable for all new coordinates at once
         indices_wp = hashtable.search(new_batched_coords_wp)
@@ -186,7 +186,7 @@ def expand_coords(
             # Add unique coordinates
             unique_coords = torch.cat([unique_coords, new_batched_coords[not_in_hashtable]], dim=0)
             # Update hashtable with new unique coordinates
-            hashtable = VectorHashTable.from_keys(wp.from_torch(unique_coords, dtype=wp.vec4i))
+            hashtable = VectorHashTable.from_keys(wp.from_torch(unique_coords))
 
     # sort the coordinates and return the coordinate and offset
     out_coords = torch.sort(unique_coords, dim=0)[0]

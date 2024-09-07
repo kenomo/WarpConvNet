@@ -71,9 +71,7 @@ class TestSparseConv(unittest.TestCase):
             self.assertTrue(in_map.shape[0] == out_map.shape[0])
 
         # Manually check the kernel map
-        in_hashmap = VectorHashTable.from_keys(
-            wp.from_torch(batch_indexed_in_coords, dtype=wp.vec4i)
-        )
+        in_hashmap = VectorHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
         i, j, k = torch.meshgrid(
             torch.arange(kernel_size[0], dtype=torch.int32),
             torch.arange(kernel_size[1], dtype=torch.int32),
@@ -99,7 +97,7 @@ class TestSparseConv(unittest.TestCase):
         N_out = batch_indexed_output_coords.shape[0]
         for i, (in_map, out_map) in enumerate(kernel_map):
             offseted_out_coords = batch_indexed_output_coords + kernel_offsets[i]
-            indices = in_hashmap.search(wp.from_torch(offseted_out_coords, dtype=wp.vec4i))
+            indices = in_hashmap.search(wp.from_torch(offseted_out_coords))
             indices = wp.to_torch(indices)
             valid_bool = (indices > 0).to(device)
             num_valid = valid_bool.sum().item()

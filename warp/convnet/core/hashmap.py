@@ -23,11 +23,11 @@ return atomicCAS(&address[slot], compare, val);
 
 # Register the atomicCAS function
 @wp.func_native(atomic_cas_snippet)
-def atomicCAS(address: wp.array(dtype=int), slot: int, compare: int, val: int) -> int:
+def atomicCAS(address: wp.array2d(dtype=int), slot: int, compare: int, val: int) -> int:
     ...
 
 
-# Hash function to convert vec4i to int32
+# Hash function to convert an array of int32 to int32
 @wp.func
 def hash_fnv1a(key: wp.array(dtype=int), capacity: int) -> int:
     # Simple hash function for demonstration
@@ -106,7 +106,7 @@ def vec_equal(a: wp.array(dtype=int), b: wp.array(dtype=int)) -> bool:
 
 @wp.struct
 class HashStruct:
-    table_kvs: wp.array(dtype=int)
+    table_kvs: wp.array2d(dtype=int)
     vector_keys: wp.array2d(dtype=int)
     capacity: int
     hash_method: int
@@ -119,7 +119,7 @@ class HashStruct:
         ), f"Number of keys {len(vec_keys)} exceeds capacity {self.capacity}"
 
         device = vec_keys.device
-        self.table_kvs = wp.empty(2 * self.capacity, dtype=int, device=device)
+        self.table_kvs = wp.zeros((self.capacity, 2), dtype=int, device=device)
         wp.launch(
             kernel=prepare_key_value_pairs,
             dim=self.capacity,
@@ -151,23 +151,27 @@ class HashStruct:
         return results
 
     def to_dict(self):
-        table_kv_np = self.table_kvs.numpy().reshape(-1, 2)
+        table_kv_np = self.table_kvs.numpy()
         vec_keys_np = self.vector_keys.numpy()
         return {
             "table_kvs": table_kv_np,
             "vec_keys": vec_keys_np,
+            "hash_method": self.hash_method,
+            "capacity": self.capacity,
         }
 
     def from_dict(self, data: dict, device: str):
-        self.table_kv = wp.array(data["table_kvs"], dtype=wp.vec2i, device=device)
-        self.vector_keys = wp.array(data["vec_keys"], dtype=wp.vec4i, device=device)
+        self.table_kvs = wp.array(data["table_kvs"], dtype=int, device=device)
+        self.vector_keys = wp.array(data["vec_keys"], dtype=int, device=device)
+        self.capacity = data["capacity"]
+        self.hash_method = data["hash_method"]
         return self
 
 
 # Warp kernel for inserting into the hashmap
 @wp.kernel
 def insert_kernel(
-    table_kvs: wp.array(dtype=int),
+    table_kvs: wp.array2d(dtype=int),
     vec_keys: wp.array2d(dtype=int),
     table_capacity: int,
     hash_method: int,
@@ -176,10 +180,10 @@ def insert_kernel(
     slot = hash_selection(hash_method, vec_keys[idx], table_capacity)
     initial_slot = slot
     while True:
-        prev = atomicCAS(table_kvs, 2 * slot, -1, slot)
+        prev = atomicCAS(table_kvs, 2 * slot + 0, -1, slot)
         # Insertion successful.
         if prev == -1:
-            table_kvs[2 * slot + 1] = idx
+            table_kvs[slot, 1] = idx
             return
         slot = (slot + 1) % table_capacity
 
@@ -190,7 +194,7 @@ def insert_kernel(
 
 @wp.func
 def search_func(
-    table_kvs: wp.array(dtype=int),
+    table_kvs: wp.array2d(dtype=int),
     vec_keys: wp.array2d(dtype=int),
     query_key: wp.array(dtype=int),
     table_capacity: int,
@@ -199,11 +203,11 @@ def search_func(
     slot = hash_selection(hash_method, query_key, table_capacity)
     initial_slot = slot
     while True:
-        current_key = table_kvs[2 * slot + 0]
+        current_key = table_kvs[slot, 0]  # Updated indexing
         if current_key == -1:
             return -1
         else:
-            vec_val = table_kvs[2 * slot + 1]
+            vec_val = table_kvs[slot, 1]  # Updated indexing
             if vec_equal(vec_keys[vec_val], query_key):
                 return vec_val
         slot = (slot + 1) % table_capacity
@@ -232,10 +236,10 @@ def search_kernel(
 
 # Warp kernel for preparing key-value pairs
 @wp.kernel
-def prepare_key_value_pairs(table_kv: wp.array(dtype=int)):
+def prepare_key_value_pairs(table_kv: wp.array2d(dtype=int)):
     tid = wp.tid()
-    table_kv[2 * tid + 0] = -1
-    table_kv[2 * tid + 1] = -1
+    table_kv[tid, 0] = -1
+    table_kv[tid, 1] = -1
 
 
 class VectorHashTable:
@@ -265,7 +269,7 @@ class VectorHashTable:
     @classmethod
     def from_keys(cls, vec_keys: Union[wp.array2d, Tensor]):
         if isinstance(vec_keys, torch.Tensor):
-            vec_keys = wp.from_torch(vec_keys, dtype=int)
+            vec_keys = wp.from_torch(vec_keys)
         obj = cls(2 * len(vec_keys))
         obj.insert(vec_keys)
         return obj
@@ -291,7 +295,7 @@ def test():
 
     # Define hashmap size and create arrays
     capacity = 128
-    table_kvs = wp.empty(2 * capacity, dtype=int, device=device)
+    table_kvs = wp.zeros((capacity, 2), dtype=int, device=device)
 
     wp.launch(
         kernel=prepare_key_value_pairs,
@@ -316,7 +320,7 @@ def test():
 
     # Output results
     print("Keys:", table_vec_keys.numpy())
-    table_kvs_np = table_kvs.numpy().reshape(-1, 2)
+    table_kvs_np = table_kvs.numpy()
     print("Table Keys:", table_kvs_np[:, 0])
     print("Table Values:", table_kvs_np[:, 1])
 
@@ -332,10 +336,17 @@ def test():
     print("Search Keys:", search_keys.numpy())
     print("Search Results:", search_results.numpy())
 
+    # Test save and load to numpy
+    data = hash_struct.to_dict()
+    print("Data:", data.keys())
+    # Load on a new hashmap
+    loaded_hash_struct = HashStruct()
+    loaded_hash_struct.from_dict(data, device)
+
+    search_results = loaded_hash_struct.search(table_vec_keys)
+    print("Search Results:", search_results.numpy())
+
 
 if __name__ == "__main__":
-    __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"
-    __loader__ = None
-
     wp.init()
     test()

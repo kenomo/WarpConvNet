@@ -81,8 +81,12 @@ class TestSpatiallySparseTensor(unittest.TestCase):
             torch.unique(bcoords, dim=0).shape[0] == len(unique_st.batched_coordinates)
         )
 
-    def test_neighbor(self):
-        pass
+    def test_from_dense(self):
+        dense_tensor = torch.rand(16, 3, 128, 128)
+        # Empty out 80% of the elements
+        dense_tensor[dense_tensor < 0.8] = 0
+        st = SpatiallySparseTensor.from_dense(dense_tensor, channel_dim=1)
+        self.assertTrue(st.batch_size == 16)
 
 
 if __name__ == "__main__":

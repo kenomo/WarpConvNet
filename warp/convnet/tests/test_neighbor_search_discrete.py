@@ -40,7 +40,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
 
         # Use the st.coordinate_tensor as the query_coords
         batch_query_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batch_query_coords = wp.from_torch(batch_query_coords, dtype=wp.vec4i)
+        batch_query_coords = wp.from_torch(batch_query_coords)
 
         # Create the num_neighbors tensor
         num_neighbors = wp.zeros(len(st.coordinate_tensor), dtype=int, device=str(device))
@@ -66,7 +66,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         device = torch.device("cuda:0")
         st: SpatiallySparseTensor = self.st.to(device)
         batched_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batched_coords_wp = wp.from_torch(batched_coords, dtype=wp.vec4i)
+        batched_coords_wp = wp.from_torch(batched_coords)
 
         # Define the neighbor distance threshold
         neighbor_distance_threshold = 3
