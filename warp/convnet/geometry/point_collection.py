@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -28,6 +28,7 @@ from warp.convnet.geometry.ops.warp_sort import (
     sort_point_collection,
     sorting_permutation,
 )
+from warp.convnet.nn.functional.encodings import sinusoidal_encoding
 
 __all__ = ["BatchedContinuousCoordinates", "PointCollection"]
 
@@ -243,3 +244,32 @@ class PointCollection(BatchedSpatialFeatures):
     @property
     def ordering(self):
         return self._extra_attributes.get("ordering", None)
+
+    @classmethod
+    def from_list_of_coordinates(
+        cls,
+        coordinates: List[Float[Tensor, "N 3"]],
+        features: Optional[List[Float[Tensor, "N C"]]] = None,
+        encoding_channels: Optional[int] = None,
+        encoding_range: Optional[Tuple[float, float]] = None,
+        encoding_dim: Optional[int] = -1,
+    ):
+        """
+        Create a point collection from a list of coordinates.
+        """
+        # Features
+        if features is None:
+            assert (
+                encoding_range is not None
+            ), "Encoding range must be provided if encoding channels are provided"
+            features = [
+                sinusoidal_encoding(coordinates, encoding_channels, encoding_range, encoding_dim)
+                for coordinates in coordinates
+            ]
+
+        # Create BatchedContinuousCoordinates
+        batched_coordinates = BatchedContinuousCoordinates(coordinates)
+        # Create BatchedFeatures
+        batched_features = BatchedFeatures(features)
+
+        return cls(batched_coordinates, batched_features)

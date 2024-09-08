@@ -134,6 +134,15 @@ class TestPointCollection(unittest.TestCase):
             == pc.batched_features.batched_tensor.shape[0]
         )
 
+    def test_from_coordinates(self):
+        B, N, D = 7, 100000, 3
+        coords = [torch.rand(N, D) for _ in range(B)]
+        pc = PointCollection.from_list_of_coordinates(
+            coords, encoding_channels=10, encoding_range=1
+        )
+        self.assertTrue(pc.batched_coordinates.batched_tensor.shape == (B * N, D))
+        self.assertTrue(pc.batched_features.batched_tensor.shape == (B * N, 10 * D))
+
 
 if __name__ == "__main__":
     wp.init()
