@@ -198,8 +198,9 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         # If min_coords and max_coords are provided, assert that spatial_shape matches
         if spatial_shape is None and min_coords is None:
             # Get the min max coordinates
-            min_coords = batch_indexed_coords.min(dim=0).values
-            max_coords = batch_indexed_coords.max(dim=0).values
+            coords = batch_indexed_coords[:, 1:]
+            min_coords = coords.min(dim=0).values
+            max_coords = coords.max(dim=0).values
             spatial_shape = max_coords - min_coords + 1
             # Shift the coordinates to the min_coords
             batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords.to(device)

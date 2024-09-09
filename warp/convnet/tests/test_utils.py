@@ -107,8 +107,8 @@ class TestUtils(unittest.TestCase):
         batch_index = batch_index_from_offset(offsets, backend="torch", device=device)
 
         for backend in backends:
-            gen_offsets = offsets_from_batch_index(batch_index, backend=backend)
-            self.assertTrue(gen_offsets.equal(offsets))
+            gen_offsets = offsets_from_batch_index(batch_index, backend=backend).cpu()
+            self.assertTrue(gen_offsets.equal(offsets.cpu()))
 
         for backend in backends:
             for _ in range(20):

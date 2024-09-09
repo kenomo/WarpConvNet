@@ -35,7 +35,7 @@ class PointConvUNet(BaseModel):
         neighbor_search_radii: List[float],
         pooling_args: FeaturePoolingArgs,
         downsample_voxel_sizes: List[float],
-        initial_pooling_mode: FEATURE_POOLING_MODE = FEATURE_POOLING_MODE.RANDOM_SAMPLE,
+        initial_pooling_mode: FEATURE_POOLING_MODE = FEATURE_POOLING_MODE.REDUCTIONS,
         initial_downsample_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
@@ -112,7 +112,7 @@ class PointConvUNet(BaseModel):
         # forward pass through the UNet
         out = self.unet(out)
 
-        # upsample
+        assert nsearch is not None, "Neighbor search result is None"
         unpooled_pc = point_collection_unpool(out[0], in_pc, nsearch, concat_unpooled_pc=True)
         unpooled_pc = self.out_map(unpooled_pc)
         return unpooled_pc, *out

@@ -31,7 +31,7 @@ class TestVoxelOps(unittest.TestCase):
         downsampled_pc = pc.voxel_downsample(self.voxel_size)
 
         # Find the mapping
-        up_map, down_map = voxel_downsample_mapping(
+        up_map, down_map, valid = voxel_downsample_mapping(
             pc.coordinate_tensor,
             pc.offsets,
             downsampled_pc.coordinate_tensor,

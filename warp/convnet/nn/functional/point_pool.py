@@ -188,8 +188,6 @@ def point_collection_pool(
     )
 
     voxel_size = pooling_args.downsample_voxel_size
-    extra_attributes = pc.extra_attributes.copy()
-    extra_attributes["voxel_size"] = voxel_size
 
     if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
         perm, down_offsets = voxel_downsample_random_indices(
@@ -206,6 +204,7 @@ def point_collection_pool(
                     batched_features=pc.batched_features.__class__(
                         batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
                     ),
+                    voxel_size=voxel_size,
                 ),
                 None,
             )
@@ -248,7 +247,7 @@ def point_collection_pool(
                 batched_features=pc.batched_features.__class__(
                     batched_tensor=down_features, offsets=down_offsets
                 ),
-                **extra_attributes,
+                voxel_size=voxel_size,
             ),
             neighbors,
         )
@@ -263,6 +262,7 @@ def point_collection_pool(
                     batched_tensor=down_features, offsets=down_offsets
                 ),
                 offsets=down_offsets,
+                voxel_size=voxel_size,
             ),
             neighbors,
         )
