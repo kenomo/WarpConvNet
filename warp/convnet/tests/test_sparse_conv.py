@@ -185,7 +185,7 @@ class TestSparseConv(unittest.TestCase):
     def test_sparse_conv_generative(self):
         C_in, C_out = self.C, 13
         kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
+        stride = (1, 1, 1)
         conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, generative=True).to(
             self.st.device
         )

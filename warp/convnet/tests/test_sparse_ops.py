@@ -4,8 +4,8 @@ import torch
 
 import warp as wp
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_conv import generate_output_coords
 from warp.convnet.nn.functional.sparse_ops import (
+    generate_output_coords,
     sparse_downsample_first,
     sparse_downsample_reduce,
 )
