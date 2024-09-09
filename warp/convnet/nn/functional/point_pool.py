@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import torch
 from jaxtyping import Float, Int
@@ -179,28 +179,50 @@ def _pool_encoded_coords(
 def point_collection_pool(
     pc: "PointCollection",  # noqa: F821
     pooling_args: FeaturePoolingArgs,
+    return_type: Literal["point_collection", "sparse_tensor"] = "point_collection",
 ) -> Tuple["PointCollection", NeighborSearchResult]:  # noqa: F821
+    from warp.convnet.geometry.spatially_sparse_tensor import (
+        BatchedDiscreteCoordinates,
+        BatchedFeatures,
+        SpatiallySparseTensor,
+    )
+
     voxel_size = pooling_args.downsample_voxel_size
     extra_attributes = pc.extra_attributes.copy()
     extra_attributes["voxel_size"] = voxel_size
+
     if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
         perm, down_offsets = voxel_downsample_random_indices(
             batched_points=pc.coordinate_tensor,
             offsets=pc.offsets,
             voxel_size=voxel_size,
         )
-        return (
-            pc.__class__(
-                batched_coordinates=pc.batched_coordinates.__class__(
-                    batched_tensor=pc.coordinate_tensor[perm], offsets=down_offsets
+        if return_type == "point_collection":
+            return (
+                pc.replace(
+                    batched_coordinates=pc.batched_coordinates.__class__(
+                        batched_tensor=pc.coordinate_tensor[perm], offsets=down_offsets
+                    ),
+                    batched_features=pc.batched_features.__class__(
+                        batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
+                    ),
                 ),
-                batched_features=pc.batched_features.__class__(
-                    batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
+                None,
+            )
+        else:
+            discrete_coords = torch.floor(pc.coordinate_tensor[perm] / voxel_size).int()
+            return (
+                SpatiallySparseTensor(
+                    batched_coordinates=BatchedDiscreteCoordinates(
+                        batched_tensor=discrete_coords, offsets=down_offsets
+                    ),
+                    batched_features=BatchedFeatures(
+                        batched_tensor=pc.feature_tensor[perm], offsets=down_offsets
+                    ),
+                    voxel_size=voxel_size,
                 ),
-                **extra_attributes,
-            ),
-            None,
-        )
+                None,
+            )
 
     perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
         batched_points=pc.coordinate_tensor,
@@ -217,15 +239,30 @@ def point_collection_pool(
         pooling_args=pooling_args,
     )
 
-    return (
-        pc.__class__(
-            batched_coordinates=pc.batched_coordinates.__class__(
-                batched_tensor=down_coords, offsets=down_offsets
+    if return_type == "point_collection":
+        return (
+            pc.replace(
+                batched_coordinates=pc.batched_coordinates.__class__(
+                    batched_tensor=down_coords, offsets=down_offsets
+                ),
+                batched_features=pc.batched_features.__class__(
+                    batched_tensor=down_features, offsets=down_offsets
+                ),
+                **extra_attributes,
             ),
-            batched_features=pc.batched_features.__class__(
-                batched_tensor=down_features, offsets=down_offsets
+            neighbors,
+        )
+    else:
+        discrete_coords = torch.floor(pc.coordinate_tensor[perm] / voxel_size).int()
+        return (
+            SpatiallySparseTensor(
+                batched_coordinates=BatchedDiscreteCoordinates(
+                    batched_tensor=discrete_coords, offsets=down_offsets
+                ),
+                batched_features=BatchedFeatures(
+                    batched_tensor=down_features, offsets=down_offsets
+                ),
+                offsets=down_offsets,
             ),
-            **extra_attributes,
-        ),
-        neighbors,
-    )
+            neighbors,
+        )

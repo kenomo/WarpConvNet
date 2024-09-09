@@ -3,17 +3,17 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.point_pool import (
+from warp.convnet.geometry.point_collection import PointCollection
+from warp.convnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     REDUCTIONS,
     FeaturePoolingArgs,
     point_collection_pool,
 )
-from warp.convnet.geometry.ops.point_unpool import (
+from warp.convnet.nn.functional.point_unpool import (
     FEATURE_UNPOOLING_MODE,
     point_collection_unpool,
 )
-from warp.convnet.geometry.point_collection import PointCollection
 
 
 class TestPointPool(unittest.TestCase):
@@ -62,6 +62,26 @@ class TestPointPool(unittest.TestCase):
             unpooling_mode=unpooling_mode,
         )
         self.assertTrue(unpooled_pc.feature_shape == (N_tot, 3 * self.C))
+
+    def test_point_collection_to_sparse(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        # Create pooling args
+        pooling_args = FeaturePoolingArgs(
+            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+            reductions=[REDUCTIONS.MEAN, REDUCTIONS.MAX],
+            downsample_voxel_size=0.1,
+        )
+        # Pool features
+        pooled_pc, neighbor_search_result = point_collection_pool(pc, pooling_args)
+        self.assertTrue(pooled_pc.batched_features.batch_size == self.B)
+        self.assertTrue(pooled_pc.batched_features.batched_tensor.shape[1] == 2 * self.C)
+
+        # Convert to sparse tensor
+        sparse_tensor = pc.to_sparse(pooling_args.downsample_voxel_size, pooling_args)
+        self.assertTrue(sparse_tensor.batched_features.batch_size == self.B)
+        self.assertTrue(sparse_tensor.batched_features.batched_tensor.shape[1] == 2 * self.C)
+        # Pool features
 
 
 if __name__ == "__main__":

@@ -278,6 +278,9 @@ class VectorHashTable:
         return self._hash_struct.search(search_keys)
 
     def unique_index(self) -> Int[Tensor, "N"]:  # noqa: F821
+        """
+        Returns sorted unique indices.
+        """
         # table_values = wp.to_torch(self.table_values)
         indices = self.search(self._hash_struct.vector_keys)
         return torch.unique(wp.to_torch(indices))

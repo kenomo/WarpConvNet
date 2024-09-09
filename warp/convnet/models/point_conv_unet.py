@@ -5,14 +5,14 @@ import torch.nn as nn
 from warp.convnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
 )
-from warp.convnet.geometry.ops.point_pool import (
+from warp.convnet.geometry.point_collection import PointCollection
+from warp.convnet.nn.base_module import BaseModel
+from warp.convnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
     point_collection_pool,
 )
-from warp.convnet.geometry.ops.point_unpool import point_collection_unpool
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.base_module import BaseModel
+from warp.convnet.nn.functional.point_unpool import point_collection_unpool
 from warp.convnet.nn.point_conv import (
     PointConvDecoder,
     PointConvEncoder,

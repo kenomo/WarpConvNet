@@ -13,12 +13,6 @@ from warp.convnet.geometry.ops.neighbor_search_continuous import (
     NeighborSearchResult,
     neighbor_search,
 )
-from warp.convnet.geometry.ops.point_pool import (
-    DEFAULT_FEATURE_POOLING_ARGS,
-    FEATURE_POOLING_MODE,
-    FeaturePoolingArgs,
-    pool_features,
-)
 from warp.convnet.geometry.ops.voxel_ops import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
@@ -29,6 +23,13 @@ from warp.convnet.geometry.ops.warp_sort import (
     sorting_permutation,
 )
 from warp.convnet.nn.functional.encodings import sinusoidal_encoding
+from warp.convnet.nn.functional.point_pool import (
+    DEFAULT_FEATURE_POOLING_ARGS,
+    FEATURE_POOLING_MODE,
+    FeaturePoolingArgs,
+    point_collection_pool,
+    pool_features,
+)
 
 __all__ = ["BatchedContinuousCoordinates", "PointCollection"]
 
@@ -257,7 +258,10 @@ class PointCollection(BatchedSpatialFeatures):
         """
         Create a point collection from a list of coordinates.
         """
-        # Features
+        # if the input is a tensor, expand it to a list of tensors
+        if isinstance(coordinates, Tensor):
+            coordinates = list(coordinates)  # this expands the tensor to a list of tensors
+
         if features is None:
             assert (
                 encoding_range is not None
@@ -273,3 +277,13 @@ class PointCollection(BatchedSpatialFeatures):
         batched_features = BatchedFeatures(features)
 
         return cls(batched_coordinates, batched_features)
+
+    def to_sparse(
+        self, voxel_size: float, pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS
+    ):
+        """
+        Convert the point collection to a spatially sparse tensor.
+        """
+        pooling_args.downsample_voxel_size = voxel_size
+        st, _ = point_collection_pool(self, pooling_args, return_type="sparse_tensor")
+        return st

@@ -182,6 +182,18 @@ class TestSparseConv(unittest.TestCase):
         out = conv(st_downsampled, st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
+    def test_sparse_conv_generative(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, generative=True).to(
+            self.st.device
+        )
+        out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+        # Check that the output is larger than the input
+        self.assertTrue(out.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0])
+
 
 if __name__ == "__main__":
     unittest.main()

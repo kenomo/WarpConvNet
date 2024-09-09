@@ -65,7 +65,7 @@ def unique_hashmap(
         hash_method: Hash method.
 
     Returns:
-        perm: Permutation to sort x to unique. x[perm] will be unique.
+        unique_indices: Sorted unique indices.
         hash_table: Hash table.
     """
     # Append batch index to the coordinates

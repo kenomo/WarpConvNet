@@ -14,6 +14,7 @@ from warp.convnet.geometry.base_geometry import BatchedFeatures
 from warp.convnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     kernel_map_from_size,
+    kernel_offsets_from_size,
 )
 from warp.convnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
@@ -145,27 +146,9 @@ def expand_coords(
     unique_coords = batch_indexed_coords
 
     num_total_kernels = np.prod(kernel_size)
-    # Create grids for i, j, k
-    i, j, k = torch.meshgrid(
-        torch.arange(kernel_size[0], dtype=torch.int32),
-        torch.arange(kernel_size[1], dtype=torch.int32),
-        torch.arange(kernel_size[2], dtype=torch.int32),
-        indexing="ij",
+    offsets = kernel_offsets_from_size(kernel_size, kernel_dilation).to(
+        batch_indexed_coords.device
     )
-
-    # Flatten the grids and select the batch range
-    i, j, k = i.flatten(), j.flatten(), k.flatten()
-
-    # Calculate offsets
-    offsets = torch.stack(
-        [
-            torch.zeros_like(i),
-            (i - kernel_size[0] // 2) * kernel_dilation[0],
-            (j - kernel_size[1] // 2) * kernel_dilation[1],
-            (k - kernel_size[2] // 2) * kernel_dilation[2],
-        ],
-        dim=1,
-    ).to(batch_indexed_coords.device)
 
     for batch_start in range(0, num_total_kernels, kernel_batch):
         batch_end = min(batch_start + kernel_batch, num_total_kernels)
@@ -203,7 +186,7 @@ def spatially_sparse_conv(
     stride: Union[int, List[int], Tuple[int, ...]] = 1,
     kernel_dilation: Union[int, List[int], Tuple[int, ...]] = 1,
     bias: Optional[Float[Tensor, "C_out"]] = None,  # noqa: F821
-    kernel_search_batch_size: int = 8,
+    kernel_search_batch_size: Optional[int] = None,
     kernel_matmul_batch_size: int = 2,
     generative: bool = False,
     output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
@@ -223,6 +206,10 @@ def spatially_sparse_conv(
     kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
     kernel_dilation = ntuple(kernel_dilation, ndim=num_spatial_dims)
     stride = ntuple(stride, ndim=num_spatial_dims)
+
+    num_total_kernels = np.prod(kernel_size)
+    if kernel_search_batch_size is None:
+        kernel_search_batch_size = max(num_total_kernels // kernel_size, 8)
 
     if transposed and not generative:
         assert (
@@ -244,9 +231,14 @@ def spatially_sparse_conv(
         assert all(
             k % 2 == 1 for k in kernel_size
         ), "Kernel size must be odd for generative convolution"
+        # Assert stride is 1
+        assert all(s == 1 for s in stride), "Stride must be 1 for generative convolution"
         if not transposed:
             batch_indexed_out_coords, out_offsets = expand_coords(
-                batch_indexed_in_coords, kernel_size
+                batch_indexed_in_coords,
+                kernel_size=kernel_size,
+                kernel_dilation=kernel_dilation,
+                kernel_batch=kernel_search_batch_size,
             )
         else:
             # Transposed and generative

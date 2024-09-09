@@ -1,7 +1,7 @@
 from typing import Optional, Tuple
 
 import torch
-from jaxtyping import Float, Int, Bool
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 import warp as wp
@@ -82,7 +82,7 @@ def voxel_downsample_random_indices(
         voxel_size: Optional[float] - voxel size. Will quantize the points if voxel_size is provided.
 
     Returns:
-        unique_indices: bcoords[unique_indices] will be unique.
+        unique_indices: sorted indices of unique voxels.
         batch_offsets: Batch offsets.
     """
 
@@ -100,6 +100,7 @@ def voxel_downsample_random_indices(
     voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
     unique_indices, hash_table = unique_hashmap(voxel_coords)
+    # unique_indices is sorted
 
     if B == 1:
         batch_offsets = torch.IntTensor([0, len(unique_indices)])

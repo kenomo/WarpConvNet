@@ -7,11 +7,11 @@ from warp.convnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
 )
-from warp.convnet.geometry.ops.point_pool import (
+from warp.convnet.geometry.point_collection import PointCollection
+from warp.convnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
 )
-from warp.convnet.geometry.point_collection import PointCollection
 from warp.convnet.nn.point_conv import PointConv, PointConvBlock, PointConvUNetBlock
 
 

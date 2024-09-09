@@ -25,6 +25,8 @@ class SpatiallySparseConv(nn.Module):
     ):
         super(SpatiallySparseConv, self).__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
         self.dilation = dilation
@@ -37,18 +39,32 @@ class SpatiallySparseConv(nn.Module):
         if bias:
             self.bias = nn.Parameter(torch.randn(out_channels))
 
+    def __repr__(self):
+        # return class name and parameters that are not default
+        out_str = f"{self.__class__.__name__}(in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}"
+        if self.stride != 1:
+            out_str += f", stride={self.stride}"
+        if self.dilation != 1:
+            out_str += f", dilation={self.dilation}"
+        if self.transposed:
+            out_str += f", transposed={self.transposed}"
+        if self.generative:
+            out_str += f", generative={self.generative}"
+        out_str += ")"
+        return out_str
+
     def forward(
         self,
         input_sparse_tensor: SpatiallySparseTensor,
         output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
     ):
         return spatially_sparse_conv(
-            input_sparse_tensor,
-            self.weight,
-            self.kernel_size,
-            self.stride,
-            self.dilation,
-            self.bias,
+            input_sparse_tensor=input_sparse_tensor,
+            weight=self.weight,
+            kernel_size=self.kernel_size,
+            stride=self.stride,
+            kernel_dilation=self.dilation,
+            bias=self.bias,
             kernel_search_batch_size=self.kernel_search_batch_size,
             output_spatially_sparse_tensor=output_spatially_sparse_tensor,
             transposed=self.transposed,

@@ -184,19 +184,44 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         )
 
     def to_dense(
-        self, channel_dim: int = 1, spatial_shape: Optional[Tuple[int, ...]] = None
+        self,
+        channel_dim: int = 1,
+        spatial_shape: Optional[Tuple[int, ...]] = None,
+        min_coords: Optional[Tuple[int, ...]] = None,
+        max_coords: Optional[Tuple[int, ...]] = None,
     ) -> Float[Tensor, "B C H W D"] | Float[Tensor, "B C H W"]:
         batch_indexed_coords = self.batched_coordinates.batch_indexed_coordinates
 
+        device = self.batched_coordinates.device
+
         # Get the spatial shape.
-        if spatial_shape is None:
+        # If min_coords and max_coords are provided, assert that spatial_shape matches
+        if spatial_shape is None and min_coords is None:
             # Get the min max coordinates
             min_coords = batch_indexed_coords.min(dim=0).values
             max_coords = batch_indexed_coords.max(dim=0).values
             spatial_shape = max_coords - min_coords + 1
+            # Shift the coordinates to the min_coords
+            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords.to(device)
+        elif min_coords is not None:
+            # Assert either max_coords or spatial_shape is provided
+            assert max_coords is not None or spatial_shape is not None
+            # Convert min_coords to tensor
+            min_coords = torch.tensor(min_coords, dtype=torch.int32)
+            if max_coords is None:
+                # convert spatial_shape to tensor
+                spatial_shape = torch.tensor(spatial_shape, dtype=torch.int32)
+                max_coords = min_coords + spatial_shape - 1
+            else:  # both min_coords and max_coords are provided
+                # Convert max_coords to tensor
+                max_coords = torch.tensor(max_coords, dtype=torch.int32)
+                assert len(min_coords) == len(max_coords) == self.num_spatial_dims
+                spatial_shape = max_coords - min_coords + 1
+            # Shift the coordinates to the min_coords
+            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords.to(device)
         elif spatial_shape is not None and len(spatial_shape) == self.coordinate_tensor.shape[1]:
             # prepend a batch dimension
-            spatial_shape = (self.batch_size, *spatial_shape)
+            pass
         else:
             raise ValueError(
                 f"Provided spatial shape {spatial_shape} must be same length as the number of spatial dimensions {self.num_spatial_dims}."
@@ -204,13 +229,15 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
         # Create a dense tensor
         dense_tensor = torch.zeros(
-            (*spatial_shape, self.num_channels),
+            (self.batch_size, *spatial_shape, self.num_channels),
             dtype=self.batched_features.dtype,
             device=self.batched_features.device,
         )
 
         # Flatten view and scatter add
-        flattened_indices = ravel_multi_index(batch_indexed_coords, spatial_shape)
+        flattened_indices = ravel_multi_index(
+            batch_indexed_coords, (self.batch_size, *spatial_shape)
+        )
         dense_tensor.flatten(0, -2)[flattened_indices] = self.batched_features.batched_tensor
         # Put the channel dimension in the specified position and move the rest of the dimensions contiguous
         dense_tensor = dense_tensor.moveaxis(-1, channel_dim)

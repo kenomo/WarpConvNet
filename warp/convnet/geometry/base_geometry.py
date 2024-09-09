@@ -415,3 +415,24 @@ class BatchedSpatialFeatures:
     @property
     def extra_attributes(self):
         return self._extra_attributes.copy()
+
+    def replace(
+        self,
+        batched_coordinates: Optional[BatchedCoordinates] = None,
+        batched_features: Optional[BatchedFeatures] = None,
+        **kwargs,
+    ):
+        """
+        Replace the coordinates or features of the point collection.
+        """
+        # Combine extra attributes and kwargs
+        if "_extra_attributes" in kwargs:  # flatten extra attributes
+            _extra_attributes = kwargs.pop("_extra_attributes")
+            kwargs = {**_extra_attributes, **kwargs}
+
+        kwargs = {**self.extra_attributes, **kwargs}
+        return self.__class__(
+            batched_coordinates=batched_coordinates or self.batched_coordinates,
+            batched_features=batched_features or self.batched_features,
+            **kwargs,
+        )
