@@ -190,9 +190,11 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         min_coords: Optional[Tuple[int, ...]] = None,
         max_coords: Optional[Tuple[int, ...]] = None,
     ) -> Float[Tensor, "B C H W D"] | Float[Tensor, "B C H W"]:
-        batch_indexed_coords = self.batched_coordinates.batch_indexed_coordinates
-
         device = self.batched_coordinates.device
+
+        # Get the batch indexed coordinates and features
+        batch_indexed_coords = self.batched_coordinates.batch_indexed_coordinates
+        features = self.batched_features.batched_tensor
 
         # Get the spatial shape.
         # If min_coords and max_coords are provided, assert that spatial_shape matches
@@ -219,10 +221,14 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
                 assert len(min_coords) == len(max_coords) == self.num_spatial_dims
                 spatial_shape = max_coords - min_coords + 1
             # Shift the coordinates to the min_coords and clip to the spatial_shape
+            # Create a mask to identify coordinates within the spatial range
+            mask = torch.ones(batch_indexed_coords.shape[0], dtype=torch.bool, device=device)
             for d in range(1, batch_indexed_coords.shape[1]):
-                batch_indexed_coords[:, d] = (
-                    batch_indexed_coords[:, d] - min_coords[d - 1].item()
-                ).clip(min=0, max=spatial_shape[d - 1] - 1)
+                mask &= (batch_indexed_coords[:, d] >= min_coords[d - 1].item()) & (
+                    batch_indexed_coords[:, d] < min_coords[d - 1].item() + spatial_shape[d - 1]
+                )
+            batch_indexed_coords = batch_indexed_coords[mask]
+            features = features[mask]
         elif spatial_shape is not None and len(spatial_shape) == self.coordinate_tensor.shape[1]:
             # prepend a batch dimension
             pass
@@ -242,7 +248,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         flattened_indices = ravel_multi_index(
             batch_indexed_coords, (self.batch_size, *spatial_shape)
         )
-        dense_tensor.flatten(0, -2)[flattened_indices] = self.batched_features.batched_tensor
+        dense_tensor.flatten(0, -2)[flattened_indices] = features
         # Put the channel dimension in the specified position and move the rest of the dimensions contiguous
         dense_tensor = dense_tensor.moveaxis(-1, channel_dim)
         return dense_tensor
