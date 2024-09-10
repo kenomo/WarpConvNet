@@ -218,8 +218,11 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
                 max_coords = torch.tensor(max_coords, dtype=torch.int32)
                 assert len(min_coords) == len(max_coords) == self.num_spatial_dims
                 spatial_shape = max_coords - min_coords + 1
-            # Shift the coordinates to the min_coords
-            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords.to(device)
+            # Shift the coordinates to the min_coords and clip to the spatial_shape
+            for d in range(1, batch_indexed_coords.shape[1]):
+                batch_indexed_coords[:, d] = (
+                    batch_indexed_coords[:, d] - min_coords[d - 1].item()
+                ).clip(min=0, max=spatial_shape[d - 1] - 1)
         elif spatial_shape is not None and len(spatial_shape) == self.coordinate_tensor.shape[1]:
             # prepend a batch dimension
             pass

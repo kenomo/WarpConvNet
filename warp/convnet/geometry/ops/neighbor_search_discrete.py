@@ -421,12 +421,15 @@ def kernel_map_from_size(
     # convert to wp array
     device = batch_indexed_in_coords.device
     batch_indexed_in_coords_wp = wp.from_torch(batch_indexed_in_coords)
-    # multiply output coordinates by in_to_out_stride_ratio
-    batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
-        [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
-        dtype=torch.int32,
-        device=device,
-    )
+    # multiply output coordinates by in_to_out_stride_ratio if it is not all ones
+    if not all(s == 1 for s in in_to_out_stride_ratio):
+        batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
+            [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
+            dtype=torch.int32,
+            device=device,
+        )
+    else:
+        batch_indexed_out_coords = batch_indexed_out_coords
     N_out = batch_indexed_out_coords.shape[0]
 
     # Create a vector hashtable for the batched coordinates
