@@ -17,7 +17,10 @@ from warp.convnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
     SpatiallySparseTensor,
 )
-from warp.convnet.nn.functional.sparse_ops import expand_coords, generate_output_coords
+from warp.convnet.nn.functional.sparse_coords_ops import (
+    expand_coords,
+    generate_output_coords,
+)
 from warp.convnet.utils.ntuple import ntuple
 
 
@@ -154,7 +157,7 @@ def spatially_sparse_conv(
 
     num_total_kernels = np.prod(kernel_size)
     if kernel_search_batch_size is None:
-        kernel_search_batch_size = max(num_total_kernels // kernel_size, 8)
+        kernel_search_batch_size = max(num_total_kernels // kernel_size[0], 8)
 
     if transposed and not generative:
         assert (

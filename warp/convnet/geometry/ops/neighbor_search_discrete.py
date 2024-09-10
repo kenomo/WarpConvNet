@@ -398,7 +398,7 @@ def kernel_map_from_size(
     in_to_out_stride_ratio: Tuple[int, ...],
     kernel_size: Tuple[int, ...],
     kernel_dilation: Optional[Tuple[int, ...]] = None,
-    kernel_search_batch_size: int = 8,
+    kernel_search_batch_size: Optional[int] = None,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
 ) -> DiscreteNeighborSearchResult:
     """
@@ -409,6 +409,14 @@ def kernel_map_from_size(
     num_spatial_dims = batch_indexed_in_coords.shape[1] - 1
     if kernel_dilation is None:
         kernel_dilation = (1,) * num_spatial_dims
+
+    assert len(kernel_size) == num_spatial_dims
+    assert len(kernel_dilation) == num_spatial_dims
+    assert len(in_to_out_stride_ratio) == num_spatial_dims
+
+    num_total_kernels = np.prod(kernel_size)
+    if kernel_search_batch_size is None:
+        kernel_search_batch_size = num_total_kernels // kernel_size[0]
 
     # convert to wp array
     device = batch_indexed_in_coords.device

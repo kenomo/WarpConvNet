@@ -2,20 +2,18 @@ import warnings
 from typing import Literal, Optional, Tuple, Union
 
 import torch
+from torch_scatter import segment_csr
 
 from warp.convnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
+    kernel_map_from_size,
 )
 from warp.convnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
     BatchedFeatures,
     SpatiallySparseTensor,
 )
-from warp.convnet.nn.functional.sparse_ops import (
-    generate_output_coords,
-    kernel_map_from_size,
-    segment_csr,
-)
+from warp.convnet.nn.functional.sparse_coords_ops import generate_output_coords
 from warp.convnet.utils.ntuple import ntuple
 
 
@@ -23,8 +21,8 @@ def sparse_reduce(
     spatially_sparse_tensor: SpatiallySparseTensor,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
-    reduce: Literal["max", "min", "mean", "sum"] = "max",
-    kernel_search_batch_size: int = 8,
+    reduce: Literal["max", "min", "mean", "sum", "random"] = "max",
+    kernel_search_batch_size: Optional[int] = None,
 ) -> SpatiallySparseTensor:
     """
     Max pooling for spatially sparse tensors.
@@ -50,6 +48,17 @@ def sparse_reduce(
     )
     in_maps, unique_out_maps, offsets = kernel_map.to_csr()
     in_features = spatially_sparse_tensor.feature_tensor
+
+    if reduce == "random":
+        first_in_maps = in_maps[offsets[:-1]]
+        out_features = spatially_sparse_tensor.feature_tensor[first_in_maps]
+        return spatially_sparse_tensor.replace(
+            batched_coordinates=BatchedDiscreteCoordinates(
+                batch_indexed_out_coords[:, 1:],
+                output_offsets,
+            ),
+            batched_features=BatchedFeatures(out_features, output_offsets),
+        )
 
     out_features = segment_csr(
         in_features[in_maps],

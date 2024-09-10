@@ -11,7 +11,7 @@ from warp.convnet.nn.functional.sparse_conv import (
     generate_output_coords,
     spatially_sparse_conv,
 )
-from warp.convnet.nn.functional.sparse_ops import sparse_downsample_reduce
+from warp.convnet.nn.functional.sparse_pool import sparse_max_pool
 from warp.convnet.nn.sparse_conv import SpatiallySparseConv
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
@@ -178,7 +178,7 @@ class TestSparseConv(unittest.TestCase):
             self.st.device
         )
         st: SpatiallySparseTensor = self.st
-        st_downsampled = sparse_downsample_reduce(st, (2, 2, 2))
+        st_downsampled = sparse_max_pool(st, (2, 2, 2), (2, 2, 2))
         out = conv(st_downsampled, st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
 

@@ -4,15 +4,12 @@ import torch
 
 import warp as wp
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_ops import (
-    generate_output_coords,
-    sparse_downsample_first,
-    sparse_downsample_reduce,
-)
+from warp.convnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warp.convnet.nn.functional.sparse_pool import sparse_reduce
 from warp.convnet.utils.batch_index import batch_indexed_coordinates
 
 
-class TestSparseOps(unittest.TestCase):
+class TestSparsePool(unittest.TestCase):
     def setUp(self) -> None:
         wp.init()
         # Set random seed
@@ -36,17 +33,17 @@ class TestSparseOps(unittest.TestCase):
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
-        st_downsampled = sparse_downsample_reduce(self.st, (2, 2, 2))
+        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="max")
         self.assertTrue(
             st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
 
-        st_downsampled = sparse_downsample_reduce(self.st, (2, 2, 2), reduce="max")
+        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="max")
         self.assertTrue(
             st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
 
-        st_downsampled_first = sparse_downsample_first(self.st, (2, 2, 2))
+        st_downsampled_first = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="random")
         self.assertTrue(
             st_downsampled_first.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )

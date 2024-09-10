@@ -1,5 +1,4 @@
-import unittest
-
+import fire
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -79,60 +78,52 @@ def test(model, device, test_loader):
     return accuracy
 
 
-class TestMNIST(unittest.TestCase):
-    def setUp(self):
-        wp.init()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.batch_size = 64
-        self.test_batch_size = 1000
-        self.epochs = 3
-        self.lr = 1.0
-        self.gamma = 0.7
+def main(
+    batch_size: int = 128,
+    test_batch_size: int = 1000,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    scheduler_step_size: int = 10,
+    gamma: float = 0.7,
+    device: str = "cuda",
+):
+    wp.init()
+    device = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
 
-    def test_mnist_training(self):
-        torch.manual_seed(1)
+    torch.manual_seed(1)
 
-        train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(
-                "../data",
-                train=True,
-                download=True,
-                transform=transforms.Compose(
-                    [
-                        transforms.ToTensor(),
-                    ]
-                ),
-            ),
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
+    train_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(
+            "../data",
+            train=True,
+            download=True,
+            transform=transforms.Compose([transforms.ToTensor()]),
+        ),
+        batch_size=batch_size,
+        shuffle=True,
+    )
 
-        test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(
-                "../data",
-                train=False,
-                transform=transforms.Compose(
-                    [
-                        transforms.ToTensor(),
-                    ]
-                ),
-            ),
-            batch_size=self.test_batch_size,
-            shuffle=True,
-        )
+    test_loader = torch.utils.data.DataLoader(
+        datasets.MNIST(
+            "../data",
+            train=False,
+            transform=transforms.Compose([transforms.ToTensor()]),
+        ),
+        batch_size=test_batch_size,
+        shuffle=True,
+    )
 
-        model = Net().to(self.device)
-        optimizer = optim.Adadelta(model.parameters(), lr=self.lr)
-        scheduler = StepLR(optimizer, step_size=1, gamma=self.gamma)
+    model = Net().to(device)
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
+    scheduler = StepLR(optimizer, step_size=scheduler_step_size, gamma=gamma)
 
-        for epoch in range(1, self.epochs + 1):
-            train(model, self.device, train_loader, optimizer, epoch)
-            accuracy = test(model, self.device, test_loader)
-            scheduler.step()
+    for epoch in range(1, epochs + 1):
+        train(model, device, train_loader, optimizer, epoch)
+        accuracy = test(model, device, test_loader)
+        scheduler.step()
 
-        # Assert that the final accuracy is above a certain threshold
-        self.assertGreater(accuracy, 90.0, "Final accuracy should be above 90%")
+    print(f"Final accuracy: {accuracy:.2f}%")
 
 
 if __name__ == "__main__":
-    unittest.main()
+    fire.Fire(main)

@@ -214,10 +214,11 @@ def test(model, device, test_loader):
 
 def main(
     root_dir: str = "./modelnet40_data",
-    batch_size: int = 32,
+    batch_size: int = 128,
     test_batch_size: int = 100,
-    epochs: int = 10,
-    lr: float = 0.01,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    scheduler_step_size: int = 10,
     gamma: float = 0.7,
     device: str = "cuda",
 ):
@@ -234,8 +235,8 @@ def main(
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
 
     model = Net().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
+    scheduler = StepLR(optimizer, step_size=scheduler_step_size, gamma=gamma)
 
     for epoch in range(1, epochs + 1):
         train(model, device, train_loader, optimizer, epoch)
