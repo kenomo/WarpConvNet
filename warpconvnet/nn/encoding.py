@@ -10,7 +10,8 @@ from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchR
 
 
 def sinusoidal_encode(
-    x: Float[Tensor, "N D"], freqs: Float[Tensor, "F"]  # noqa: F821
+    x: Float[Tensor, "N D"],
+    freqs: Float[Tensor, "F"],  # noqa: F821
 ) -> Float[Tensor, "N 2*F*D"]:
     """
     Encode the input tensor with sinusoidal encoding.

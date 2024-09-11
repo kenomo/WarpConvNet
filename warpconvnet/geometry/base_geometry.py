@@ -16,7 +16,7 @@ __all__ = [
 
 
 def _list_to_batched_tensor(
-    tensor_list: List[Float[Tensor, "N C"]]  # noqa: F821
+    tensor_list: List[Float[Tensor, "N C"]],  # noqa: F821
 ) -> Tuple[Float[Tensor, "M C"], Int[Tensor, "B+1"], int]:  # noqa: F821
     """
     Convert a list of tensors to a batched tensor.

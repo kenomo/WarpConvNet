@@ -6,7 +6,8 @@ from jaxtyping import Int
 
 
 def ravel_multi_index(
-    multi_index: Int[torch.Tensor, "* D"], dims: Tuple[int, ...]  # noqa: F821
+    multi_index: Int[torch.Tensor, "* D"],  # noqa: F821
+    dims: Tuple[int, ...],  # noqa: F821
 ) -> Int[torch.Tensor, "*"]:
     """
     Converts a tuple of index arrays into an array of flat indices.

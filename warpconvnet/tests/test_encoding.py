@@ -1,13 +1,12 @@
 import unittest
-import warp as wp
 
 import torch
 
+import warp as wp
 from warp.convnet.nn.encoding import SinusoidalEncoding
 
 
 class TestSinusoidalEncoding(unittest.TestCase):
-
     def test_encoding(self):
         num_channels = 16
         data_range = 1.0

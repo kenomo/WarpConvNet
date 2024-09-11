@@ -1,0 +1,61 @@
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto code formatting
+  autofix_prs: false
+  autoupdate_branch: ""
+  autoupdate_commit_msg: "[pre-commit.ci] pre-commit autoupdate"
+  autoupdate_schedule: quarterly
+  skip: []
+  submodules: false
+
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/psf/black
+    rev: 23.1.0
+    hooks:
+      - id: black
+        args: [--line-length, "99"]
+        # process all python files recursively inside convnet/
+        files: convnet/.*\.py$
+
+  # python import sorting
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args: ["--profile", "black", "--filter-files"]
+
+  # python check (PEP8), programming errors and code complexity
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        args:
+          [
+            "--extend-ignore",
+            "E203,E402,E501,F401,F722,F841,RST2,RST301",
+            "--exclude",
+            "logs/*,data/*",
+          ]
+        additional_dependencies: [flake8-rst-docstrings==0.3.0]
+
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   # Ruff version.
+  #   rev: v0.5.0
+  #   hooks:
+  #     # Run the linter.
+  #     - id: ruff
+  #       args:
+  #         [
+  #           "--fix", # Apply fixes to resolve lint violations.
+  #           "--ignore", # Ignore specific lint rules.
+  #           "F722",
+  #         ]
+  #     # Run the formatter.
+  #     - id: ruff-format
+  #       args:
+  #         [
+  #           "--exclude",
+  #           "*/convnet/*"
+  #         ]
