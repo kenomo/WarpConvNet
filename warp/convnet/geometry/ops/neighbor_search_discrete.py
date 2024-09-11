@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import torch
@@ -73,6 +73,31 @@ class DiscreteNeighborSearchResult:
     def __getitem__(self, idx: int) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
         start, end = self.offsets[idx], self.offsets[idx + 1]
         return self.in_maps[start:end], self.out_maps[start:end]
+
+    def get_batch(
+        self, start_idx: int, end_idx: int, out_format: Literal["list", "tensor"] = "list"
+    ) -> Tuple[List[Int[Tensor, "N"]], List[Int[Tensor, "N"]]]:  # noqa: F821
+        in_maps = []
+        out_maps = []
+        for i in range(start_idx, end_idx):
+            in_maps.append(self.in_maps[self.offsets[i] : self.offsets[i + 1]])
+            out_maps.append(self.out_maps[self.offsets[i] : self.offsets[i + 1]])
+        if out_format == "list":
+            return in_maps, out_maps
+        elif out_format == "tensor":
+            max_num_maps = max(len(in_map) for in_map in in_maps)
+            in_maps_tensor = -1 * torch.ones(
+                len(in_maps), max_num_maps, device=self.in_maps.device, dtype=torch.int64
+            )
+            out_maps_tensor = -1 * torch.ones(
+                len(out_maps), max_num_maps, device=self.out_maps.device, dtype=torch.int64
+            )
+            for i, (in_map, out_map) in enumerate(zip(in_maps, out_maps)):
+                in_maps_tensor[i, : len(in_map)] = in_map
+                out_maps_tensor[i, : len(out_map)] = out_map
+            return in_maps_tensor, out_maps_tensor
+        else:
+            raise ValueError(f"Invalid output format: {out_format}")
 
     def __len__(self):
         return len(self.offsets) - 1

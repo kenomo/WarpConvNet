@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.nn.functional.sparse_conv import (
+    SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,
     spatially_sparse_conv,
 )
@@ -24,7 +25,9 @@ class SpatiallySparseConv(nn.Module):
         transposed: bool = False,
         generative: bool = False,
         kernel_search_batch_size: int = 8,
+        kernel_matmul_batch_size: int = 2,
         num_spatial_dims: Optional[int] = 3,
+        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     ):
         super(SpatiallySparseConv, self).__init__()
@@ -37,6 +40,8 @@ class SpatiallySparseConv(nn.Module):
         self.transposed = transposed
         self.generative = generative
         self.kernel_search_batch_size = kernel_search_batch_size
+        self.kernel_matmul_batch_size = kernel_matmul_batch_size
+        self.conv_algo = conv_algo
         self.weight = nn.Parameter(torch.randn(np.prod(kernel_size), in_channels, out_channels))
 
         self.bias = None
@@ -72,9 +77,11 @@ class SpatiallySparseConv(nn.Module):
             kernel_dilation=self.dilation,
             bias=self.bias,
             kernel_search_batch_size=self.kernel_search_batch_size,
+            kernel_matmul_batch_size=self.kernel_matmul_batch_size,
             output_spatially_sparse_tensor=output_spatially_sparse_tensor,
             transposed=self.transposed,
             generative=self.generative,
+            conv_algo=self.conv_algo,
             stride_mode=self.stride_mode,
         )
 
@@ -92,6 +99,8 @@ class SparseConv2d(SpatiallySparseConv):
         generative: bool = False,
         kernel_search_batch_size=8,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
+        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        kernel_matmul_batch_size: int = 2,
     ):
         super(SparseConv2d, self).__init__(
             in_channels=in_channels,
@@ -105,6 +114,8 @@ class SparseConv2d(SpatiallySparseConv):
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=2,
             stride_mode=stride_mode,
+            conv_algo=conv_algo,
+            kernel_matmul_batch_size=kernel_matmul_batch_size,
         )
 
 
@@ -121,6 +132,8 @@ class SparseConv3d(SpatiallySparseConv):
         generative: bool = False,
         kernel_search_batch_size=8,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
+        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        kernel_matmul_batch_size: int = 2,
     ):
         super(SparseConv3d, self).__init__(
             in_channels=in_channels,
@@ -134,4 +147,6 @@ class SparseConv3d(SpatiallySparseConv):
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=3,
             stride_mode=stride_mode,
+            conv_algo=conv_algo,
+            kernel_matmul_batch_size=kernel_matmul_batch_size,
         )

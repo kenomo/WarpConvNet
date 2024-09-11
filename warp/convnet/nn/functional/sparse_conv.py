@@ -32,6 +32,7 @@ class STRIDED_CONV_MODE(Enum):
 
 class SPATIALLY_SPARSE_CONV_ALGO_MODE(Enum):
     EXPLICIT_GEMM = "explicit_gemm"
+    EXPLICIT_GEMM_BATCHED = "explicit_gemm_batched"
     IMPLICIT_GEMM = "implicit_gemm"
 
 
@@ -98,6 +99,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
             curr_in_features = in_features[in_map]
 
             # matmul. N x C_in @ C_in x C_out -> N x C_out
+            # bmm. B x N x C_in @ B x C_in x C_out -> B x N x C_out
             curr_out_features = torch.matmul(curr_in_features, weight[i])
 
             # Add to output feature tensor
@@ -131,6 +133,85 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
             grad_weight[i] += torch.matmul(curr_in_features.T, curr_out_features)
 
         return grad_in_features, grad_weight, None, None
+
+
+class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
+    @staticmethod
+    def forward(
+        ctx,
+        in_features: Float[Tensor, "N C_in"],
+        weight: Float[Tensor, "K C_in C_out"],
+        kernel_map: DiscreteNeighborSearchResult,
+        num_out_coords: int,
+        matmul_batch_size: int,
+    ) -> Float[Tensor, "M C_out"]:
+        device = in_features.device
+        # Create output feature tensor with a dummy row
+        output_feature_tensor = torch.zeros(
+            num_out_coords + 1, weight.shape[-1], device=device, dtype=in_features.dtype
+        )
+
+        for i_start in range(0, len(kernel_map), matmul_batch_size):
+            i_end = min(i_start + matmul_batch_size, len(kernel_map))
+            # Get the input and output maps of shape B x N
+            in_maps, out_maps = kernel_map.get_batch(i_start, i_end, out_format="tensor")
+            # Get the input and output features
+            curr_in_features = in_features[in_maps.clip(min=0)]
+
+            # bmm. B x (N + 1) x C_in @ B x C_in x C_out -> B x (N + 1) x C_out
+            curr_out_features_batch = torch.bmm(curr_in_features, weight[i_start:i_end])
+
+            # Add to output feature tensor. all negative indices will map to the dummy row
+            output_feature_tensor[out_maps + 1] += curr_out_features_batch
+
+        ctx.kernel_map = kernel_map
+        ctx.matmul_batch_size = matmul_batch_size
+        ctx.save_for_backward(in_features, weight)
+
+        return output_feature_tensor[1:].clone()
+
+    @staticmethod
+    def backward(
+        ctx, grad_output: Float[Tensor, "M C_out"]
+    ) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+        in_features, weight = ctx.saved_tensors
+        kernel_map = ctx.kernel_map
+        matmul_batch_size = ctx.matmul_batch_size
+
+        # Add a dummy row to the beginning of the in_maps tensor
+        grad_in_features = torch.zeros(
+            in_features.shape[0] + 1,
+            in_features.shape[1],
+            device=in_features.device,
+            dtype=in_features.dtype,
+        )
+        grad_weight = torch.zeros_like(weight)
+
+        for i_start in range(0, len(kernel_map), matmul_batch_size):
+            i_end = min(i_start + matmul_batch_size, len(kernel_map))
+            # Get the input and output maps of shape B x N
+            in_maps, out_maps = kernel_map.get_batch(i_start, i_end, out_format="tensor")
+
+            # Get the input and output features
+            invalid_mask = in_maps < -1
+            curr_in_features = in_features[in_maps.clip(min=0)]  # B x N x C_in
+            curr_out_features = grad_output[out_maps.clip(min=0)]  # B x N x C_out
+
+            # zero out invalid rows
+            curr_in_features[invalid_mask] = 0
+            curr_out_features[invalid_mask] = 0
+
+            # matmul. B x N x C_out @ B x C_out x C_in -> B x N x C_in
+            grad_in_features[in_maps + 1] += torch.bmm(
+                curr_out_features, weight[i_start:i_end].transpose(1, 2)
+            )
+
+            # matmul. B x C_in x (N + 1) @ B x (N + 1) x C_out -> B x C_in x C_out
+            grad_weight[i_start:i_end] += torch.bmm(
+                curr_in_features.transpose(1, 2), curr_out_features
+            )
+
+        return grad_in_features[1:].clone(), grad_weight, None, None, None
 
 
 def spatially_sparse_conv(
@@ -209,6 +290,14 @@ def spatially_sparse_conv(
             weight,
             kernel_map,
             num_out_coords,
+        )
+    elif conv_algo == SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM_BATCHED:
+        out_feature_tensor = SpatiallySparseConvBatchedExplicitGEMMFunction.apply(
+            input_sparse_tensor.feature_tensor,
+            weight,
+            kernel_map,
+            num_out_coords,
+            kernel_matmul_batch_size,
         )
     else:
         raise ValueError(f"Unsupported convolution algorithm: {conv_algo}")
