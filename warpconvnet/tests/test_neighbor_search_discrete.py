@@ -1,9 +1,9 @@
 import unittest
 
 import torch
-
 import warp as wp
 import warp.utils
+
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     kernel_map_from_offsets,
@@ -41,6 +41,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         # Use the st.coordinate_tensor as the query_coords
         batch_query_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         batch_query_coords = wp.from_torch(batch_query_coords)
+        scratch_coords = wp.empty_like(batch_query_coords)
 
         # Create the num_neighbors tensor
         num_neighbors = wp.zeros(len(st.coordinate_tensor), dtype=int, device=str(device))
@@ -53,6 +54,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             inputs=[
                 hashmap._hash_struct,
                 batch_query_coords,
+                scratch_coords,
                 neighbor_distance_threshold,
                 num_neighbors,
             ],
@@ -108,8 +110,8 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         st_hashmap = st.coordinate_hashmap
 
         kernel_offsets = kernel_offsets_from_size(
-            (3, 3, 3),
-            (1, 1, 1),
+            kernel_size=(3, 3, 3),
+            kernel_dilation=(1, 1, 1),
         ).to(device)
 
         kernel_map_size = kernel_map_from_size(
@@ -126,6 +128,9 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             bcoords,
             kernel_offsets,
         )
+
+        print("kernelmap size:", kernel_map_size.offsets)
+        print("kernelmap offset:", kernel_map_offset.offsets)
 
         for i, (in_map, out_map) in enumerate(kernel_map_size):
             # Check sizes

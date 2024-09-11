@@ -4,11 +4,11 @@ from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import torch
+import warp as wp
+import warp.utils
 from jaxtyping import Int
 from torch import Tensor
 
-import warp as wp
-import warp.utils
 from warpconvnet.core.hashmap import HashStruct, VectorHashTable, search_func
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.ntuple import ntuple
@@ -142,9 +142,8 @@ class DiscreteNeighborSearchResult:
 def conv_kernel_map(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
-    N_query_coords: int,
+    scratch_coords: wp.array2d(dtype=int),
     kernel_offsets: wp.array2d(dtype=int),
-    N_kernel_offsets: int,
     found_in_coord_index: wp.array(dtype=int),
 ):
     """
@@ -153,10 +152,13 @@ def conv_kernel_map(
     For definitions, please refer to Sec. 4.2. of https://arxiv.org/pdf/1904.08755
     """
     idx = wp.tid()
-    for k in range(N_kernel_offsets):
-        query_coord = query_coords[idx]
-        for dim in range(query_coord.shape[0]):
-            query_coord[dim] += kernel_offsets[k][dim]
+    N_query_coords = query_coords.shape[0]
+    for k in range(kernel_offsets.shape[0]):
+        # TODO(cchoy): Change this to shared memory operation.
+        # Copy the query coordinate to the scratch coordinate.
+        query_coord = scratch_coords[idx]
+        for dim in range(kernel_offsets.shape[1]):
+            query_coord[dim] = query_coords[idx][dim] + kernel_offsets[k][dim]
         index = search_func(
             in_hashmap.table_kvs,
             in_hashmap.vector_keys,
@@ -171,6 +173,7 @@ def conv_kernel_map(
 def num_neighbors_kernel(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
+    scratch_coords: wp.array2d(dtype=int),
     neighbor_distance_threshold: int,
     num_neighbors: wp.array(dtype=int),
 ):
@@ -183,10 +186,11 @@ def num_neighbors_kernel(
         for j in range(neighbor_distance_threshold):
             for k in range(neighbor_distance_threshold):
                 # Compute query coord
-                query_coord = query_coords[idx]
-                query_coord[1] += i - center
-                query_coord[2] += j - center
-                query_coord[3] += k - center
+                query_coord = scratch_coords[idx]
+                query_coord[0] = query_coords[idx][0]
+                query_coord[1] = query_coords[idx][1] + i - center
+                query_coord[2] = query_coords[idx][2] + j - center
+                query_coord[3] = query_coords[idx][3] + k - center
                 index = search_func(
                     in_hashmap.table_kvs,
                     in_hashmap.vector_keys,
@@ -204,6 +208,7 @@ def num_neighbors_kernel(
 def fill_neighbors_kernel(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
+    scratch_coords: wp.array2d(dtype=int),
     neighbor_distance_threshold: int,
     neighbor_offset_inclusive: wp.array(dtype=int),
     in_coords_index: wp.array(dtype=int),
@@ -221,10 +226,11 @@ def fill_neighbors_kernel(
         for j in range(neighbor_distance_threshold):
             for k in range(neighbor_distance_threshold):
                 # Compute query coord
-                query_coord = query_coords[idx]
-                query_coord[1] += i - center
-                query_coord[2] += j - center
-                query_coord[3] += k - center
+                query_coord = scratch_coords[idx]
+                query_coord[0] = query_coords[idx][0]
+                query_coord[1] = query_coords[idx][1] + i - center
+                query_coord[2] = query_coords[idx][2] + j - center
+                query_coord[3] = query_coords[idx][3] + k - center
                 index = search_func(
                     in_hashmap.table_kvs,
                     in_hashmap.vector_keys,
@@ -249,6 +255,7 @@ def neighbor_search_hashmap(
 
     # Compute the number of neighbors for each query point
     num_neighbors = wp.empty(len(batched_query_coords), dtype=int, device=device)
+    scratch_coords = wp.empty_like(batched_query_coords)
 
     # Launch num neighbor kernel
     wp.launch(
@@ -257,6 +264,7 @@ def neighbor_search_hashmap(
         inputs=[
             in_hashmap,
             batched_query_coords,
+            scratch_coords,
             neighbor_distance_threshold,
             num_neighbors,
         ],
@@ -272,6 +280,7 @@ def neighbor_search_hashmap(
     # Allocate ouput
     in_coords_index = wp.empty(tot, dtype=int, device=device)
     query_coords_index = wp.empty(tot, dtype=int, device=device)
+    scratch_coords = wp.empty_like(batched_query_coords)
 
     # Launch the kernel
     wp.launch(
@@ -280,35 +289,13 @@ def neighbor_search_hashmap(
         inputs=[
             in_hashmap,
             batched_query_coords,
+            scratch_coords,
             neighbor_distance_threshold,
             num_neighbors_scan_inclusive,
             in_coords_index,
             query_coords_index,
         ],
         device=device,
-    )
-
-    return in_coords_index, query_coords_index
-
-
-def neighbor_search(
-    in_coords: torch.Tensor,
-    in_coords_offsets: torch.Tensor,
-    query_coords: torch.Tensor,
-    query_coords_offsets: torch.Tensor,
-    neighbor_distance_threshold: int,
-):
-    # Convert the coordinates to batched coordinates
-    in_bcoords = batch_indexed_coordinates(in_coords, in_coords_offsets)
-    query_bcoords = batch_indexed_coordinates(query_coords, query_coords_offsets)
-    query_bcoords = wp.from_torch(query_bcoords)
-
-    # Create the hashmap for in_coords
-    in_coords_hashmap = VectorHashTable.from_keys(in_bcoords)
-
-    # Launch the kernel
-    in_coords_index, query_coords_index = neighbor_search_hashmap(
-        in_coords_hashmap, query_bcoords, neighbor_distance_threshold
     )
 
     return in_coords_index, query_coords_index
@@ -363,6 +350,7 @@ def kernel_map_from_offsets(
         batched_query_coords.device
     ), f"{device_wp} != {str(batched_query_coords.device)}"
     assert device_wp == str(kernel_offsets.device), f"{device_wp} != {kernel_offsets.device}"
+    assert batched_query_coords.shape[1] == kernel_offsets.shape[1]
 
     # Allocate output
     found_in_coord_index_wp = wp.empty(
@@ -370,6 +358,9 @@ def kernel_map_from_offsets(
         dtype=wp.int32,
         device=device_wp,
     )
+    batched_query_coords_wp = wp.from_torch(batched_query_coords)
+    kernel_offsets_wp = wp.from_torch(kernel_offsets)
+    scratch_coords_wp = wp.empty_like(batched_query_coords_wp)
 
     # Launch the kernel
     wp.launch(
@@ -377,10 +368,9 @@ def kernel_map_from_offsets(
         dim=len(batched_query_coords),
         inputs=[
             in_hashmap,
-            wp.from_torch(batched_query_coords),
-            len(batched_query_coords),
-            wp.from_torch(kernel_offsets),
-            len(kernel_offsets),
+            batched_query_coords_wp,
+            scratch_coords_wp,
+            kernel_offsets_wp,
             found_in_coord_index_wp,
         ],
         device=device_wp,
