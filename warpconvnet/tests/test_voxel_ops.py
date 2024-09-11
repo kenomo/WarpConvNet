@@ -3,8 +3,8 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.voxel_ops import voxel_downsample_mapping
-from warp.convnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_mapping
+from warpconvnet.geometry.point_collection import PointCollection
 
 
 class TestVoxelOps(unittest.TestCase):

@@ -3,14 +3,14 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.functional.point_pool import (
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     REDUCTIONS,
     FeaturePoolingArgs,
     point_collection_pool,
 )
-from warp.convnet.nn.functional.point_unpool import (
+from warpconvnet.nn.functional.point_unpool import (
     FEATURE_UNPOOLING_MODE,
     point_collection_unpool,
 )

@@ -2,12 +2,12 @@ import unittest
 
 import torch
 
-from warp.convnet.core.hashmap import HashMethod
-from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
-from warp.convnet.utils.timer import Timer
-from warp.convnet.utils.unique import unique_hashmap, unique_torch
+from warpconvnet.core.hashmap import HashMethod
+from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.utils.timer import Timer
+from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
 
 class TestSpatiallySparseTensor(unittest.TestCase):

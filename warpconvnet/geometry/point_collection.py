@@ -3,27 +3,27 @@ from typing import List, Optional, Tuple
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warp.convnet.geometry.base_geometry import (
+from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
     BatchedFeatures,
     BatchedSpatialFeatures,
 )
-from warp.convnet.geometry.ops.neighbor_search_continuous import (
+from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
     NeighborSearchResult,
     neighbor_search,
 )
-from warp.convnet.geometry.ops.voxel_ops import (
+from warpconvnet.geometry.ops.voxel_ops import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
 )
-from warp.convnet.geometry.ops.warp_sort import (
+from warpconvnet.geometry.ops.warp_sort import (
     POINT_ORDERING,
     sort_point_collection,
     sorting_permutation,
 )
-from warp.convnet.nn.functional.encodings import sinusoidal_encoding
-from warp.convnet.nn.functional.point_pool import (
+from warpconvnet.nn.functional.encodings import sinusoidal_encoding
+from warpconvnet.nn.functional.point_pool import (
     DEFAULT_FEATURE_POOLING_ARGS,
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,

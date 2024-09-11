@@ -4,7 +4,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 
 __all__ = [
     "relative_coords",

@@ -8,10 +8,10 @@ from torch.optim.lr_scheduler import StepLR
 from torchvision import datasets, transforms
 
 import warp as wp
-import warp.convnet.nn.functional.transforms as T
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_pool import sparse_max_pool
-from warp.convnet.nn.sparse_conv import SparseConv2d
+import warpconvnet.nn.functional.transforms as T
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
+from warpconvnet.nn.sparse_conv import SparseConv2d
 
 
 class Net(nn.Module):

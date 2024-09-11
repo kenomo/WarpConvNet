@@ -3,10 +3,10 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.core.hashmap import VectorHashTable
-from warp.convnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_conv import (
+from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,
     SpatiallySparseConvBatchedExplicitGEMMFunction,
@@ -14,9 +14,9 @@ from warp.convnet.nn.functional.sparse_conv import (
     generate_output_coords,
     spatially_sparse_conv,
 )
-from warp.convnet.nn.functional.sparse_pool import sparse_max_pool
-from warp.convnet.nn.sparse_conv import SpatiallySparseConv
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
+from warpconvnet.nn.sparse_conv import SpatiallySparseConv
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
 class TestSparseConv(unittest.TestCase):

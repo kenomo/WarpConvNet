@@ -3,13 +3,13 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.coord_ops import relative_coords
-from warp.convnet.geometry.ops.neighbor_search_continuous import (
+from warpconvnet.geometry.ops.coord_ops import relative_coords
+from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
     NeighborSearchResult,
 )
-from warp.convnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.point_collection import PointCollection
 
 
 class TestPointCollection(unittest.TestCase):

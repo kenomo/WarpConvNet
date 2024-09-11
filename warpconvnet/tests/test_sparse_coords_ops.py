@@ -3,12 +3,12 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_coords_ops import (
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
     generate_output_coords,
 )
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
 class TestSparseOps(unittest.TestCase):

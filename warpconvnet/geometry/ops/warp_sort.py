@@ -5,8 +5,8 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 import warp as wp
-from warp.convnet.utils.argsort import argsort
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.utils.argsort import argsort
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
 class POINT_ORDERING(Enum):

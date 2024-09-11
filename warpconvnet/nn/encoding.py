@@ -5,8 +5,8 @@ import torch
 from jaxtyping import Float
 from torch import Tensor, nn
 
-from warp.convnet.geometry.ops.coord_ops import relative_coords
-from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.geometry.ops.coord_ops import relative_coords
+from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 
 
 def sinusoidal_encode(

@@ -5,14 +5,14 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warp.convnet.geometry.ops.coord_ops import relative_coords
-from warp.convnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
-from warp.convnet.geometry.ops.voxel_ops import (
+from warpconvnet.geometry.ops.coord_ops import relative_coords
+from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.geometry.ops.voxel_ops import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
 )
-from warp.convnet.nn.encoding import sinusoidal_encode
-from warp.convnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
+from warpconvnet.nn.encoding import sinusoidal_encode
+from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = [
     "FeaturePoolingArgs",
@@ -181,7 +181,7 @@ def point_collection_pool(
     pooling_args: FeaturePoolingArgs,
     return_type: Literal["point_collection", "sparse_tensor"] = "point_collection",
 ) -> Tuple["PointCollection", NeighborSearchResult]:  # noqa: F821
-    from warp.convnet.geometry.spatially_sparse_tensor import (
+    from warpconvnet.geometry.spatially_sparse_tensor import (
         BatchedDiscreteCoordinates,
         BatchedFeatures,
         SpatiallySparseTensor,

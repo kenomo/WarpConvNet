@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61", "build", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "warpconvnet"
+requires-python = ">=3.9"
+authors = [{ name = "Chris Choy", email = "cchoy@nvidia.com" }]
+description = "3D Point Cloud and Spatially Sparse Convolutional Networks Framework"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+]
+dependencies = ["numpy", "torch", "warp-lang", "torch-scatter"]
+dynamic = ["version"]
+
+[project.urls]
+GitLab = "https://gitlab.nvidia.com/3dmmllm/warpconvnet"
+
+[project.optional-dependencies]
+dev = ["pre-commit", "coverage[toml]"]
+convnet = [
+    "jaxtyping>=0.2.0",
+    "torch_scatter>=2.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["warpconvnet*"]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION.md"] }
+readme = { file = ["README.md"], content-type = "text/markdown" }
+
+[tool.coverage.run]
+source = ["warpconvnet"]
+disable_warnings = [
+    "module-not-measured",
+    "module-not-imported",
+    "no-data-collected",
+    "couldnt-parse",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "@wp",
+    "@warp",
+    "if 0:",
+    "if __name__ == .__main__.:",
+]
+omit = [
+    "*/warpconvnet/examples/*",
+    "*/warpconvnet/tests/*",
+]

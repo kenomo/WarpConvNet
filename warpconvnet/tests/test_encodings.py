@@ -2,8 +2,8 @@ import unittest
 
 import torch
 
-from warp.convnet.nn.encodings import SinusoidalEncoding
-from warp.convnet.nn.functional.encodings import sinusoidal_encoding
+from warpconvnet.nn.encodings import SinusoidalEncoding
+from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 
 
 class TestSinusoidalEncoding(unittest.TestCase):

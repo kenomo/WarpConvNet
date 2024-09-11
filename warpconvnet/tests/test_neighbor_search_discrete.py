@@ -4,7 +4,7 @@ import torch
 
 import warp as wp
 import warp.utils
-from warp.convnet.geometry.ops.neighbor_search_discrete import (
+from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     kernel_map_from_offsets,
     kernel_map_from_size,
@@ -12,9 +12,9 @@ from warp.convnet.geometry.ops.neighbor_search_discrete import (
     neighbor_search_hashmap,
     num_neighbors_kernel,
 )
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
-from warp.convnet.utils.timer import Timer
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.utils.timer import Timer
 
 
 class TestNeighborSearchDiscrete(unittest.TestCase):

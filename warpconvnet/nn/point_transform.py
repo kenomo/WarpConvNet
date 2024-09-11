@@ -3,9 +3,9 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
-from warp.convnet.geometry.base_geometry import BatchedFeatures
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.mlp import MLPBlock
+from warpconvnet.geometry.base_geometry import BatchedFeatures
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.mlp import MLPBlock
 
 __all__ = [
     "PointCollectionTransform",
@@ -27,7 +27,7 @@ class PointCollectionTransform(nn.Module):
 
             model:
             feature_transform:
-                _target_: warp.convnet.nn.point_transform.PointCollectionTransform
+                _target_: warpconvnet.nn.point_transform.PointCollectionTransform
                 feature_transform_fn: _target_: torch.nn.ReLU
     """
 

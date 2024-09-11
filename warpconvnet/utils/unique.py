@@ -5,7 +5,7 @@ from jaxtyping import Int
 from torch import Tensor
 
 import warp as wp
-from warp.convnet.core.hashmap import HashMethod, VectorHashTable
+from warpconvnet.core.hashmap import HashMethod, VectorHashTable
 
 
 def unique_torch(

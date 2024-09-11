@@ -1,27 +1,27 @@
 import unittest
 
 # Layers
-from warp.convnet.tests.test_encoding import TestSinusoidalEncoding
-from warp.convnet.tests.test_neighbor_search_discrete import TestNeighborSearchDiscrete
+from warpconvnet.tests.test_encoding import TestSinusoidalEncoding
+from warpconvnet.tests.test_neighbor_search_discrete import TestNeighborSearchDiscrete
 
 # Points
-from warp.convnet.tests.test_point_collection import TestPointCollection
-from warp.convnet.tests.test_point_conv import TestPointConv
+from warpconvnet.tests.test_point_collection import TestPointCollection
+from warpconvnet.tests.test_point_conv import TestPointConv
 
 # Network
-from warp.convnet.tests.test_point_conv_enc_dec import TestPointConvEncoder
-from warp.convnet.tests.test_point_conv_unet import TestPointConvUNet
-from warp.convnet.tests.test_point_pool import TestPointPool
-from warp.convnet.tests.test_sort import TestSorting
+from warpconvnet.tests.test_point_conv_enc_dec import TestPointConvEncoder
+from warpconvnet.tests.test_point_conv_unet import TestPointConvUNet
+from warpconvnet.tests.test_point_pool import TestPointPool
+from warpconvnet.tests.test_sort import TestSorting
 
 # Sparse Tensors
-from warp.convnet.tests.test_spatially_sparse_tensor import TestSpatiallySparseTensor
+from warpconvnet.tests.test_spatially_sparse_tensor import TestSpatiallySparseTensor
 
 # All utility
-from warp.convnet.tests.test_utils import TestUtils
+from warpconvnet.tests.test_utils import TestUtils
 
 # Low-level ops
-from warp.convnet.tests.test_voxel_ops import TestVoxelOps
+from warpconvnet.tests.test_voxel_ops import TestVoxelOps
 
 
 def test_suite():

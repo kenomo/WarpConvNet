@@ -5,12 +5,12 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 import warp as wp
-from warp.convnet.core.hashmap import VectorHashTable
-from warp.convnet.utils.batch_index import (
+from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.utils.batch_index import (
     batch_index_from_offset,
     batch_indexed_coordinates,
 )
-from warp.convnet.utils.unique import unique_hashmap, unique_torch
+from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
 __all__ = [
     "voxel_downsample_csr_mapping",

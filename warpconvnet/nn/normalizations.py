@@ -2,9 +2,9 @@ from typing import List
 
 from torch import nn
 
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.transforms import apply_feature_transform
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.transforms import apply_feature_transform
 
 
 class NormalizationBase(nn.Module):

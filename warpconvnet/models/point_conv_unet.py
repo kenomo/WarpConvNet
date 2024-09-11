@@ -2,24 +2,24 @@ from typing import List, Optional, Tuple
 
 import torch.nn as nn
 
-from warp.convnet.geometry.ops.neighbor_search_continuous import (
+from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
 )
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.base_module import BaseModel
-from warp.convnet.nn.functional.point_pool import (
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.base_module import BaseModel
+from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
     point_collection_pool,
 )
-from warp.convnet.nn.functional.point_unpool import point_collection_unpool
-from warp.convnet.nn.point_conv import (
+from warpconvnet.nn.functional.point_unpool import point_collection_unpool
+from warpconvnet.nn.point_conv import (
     PointConvDecoder,
     PointConvEncoder,
     PointConvUNetBlock,
 )
-from warp.convnet.nn.point_transform import PointCollectionTransform
-from warp.convnet.ops.reductions import REDUCTION_TYPES_STR
+from warpconvnet.nn.point_transform import PointCollectionTransform
+from warpconvnet.ops.reductions import REDUCTION_TYPES_STR
 
 __all__ = ["PointConvUNet", "PointConvEncoderDecoder"]
 

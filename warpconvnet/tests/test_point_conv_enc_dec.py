@@ -3,17 +3,17 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.ops.neighbor_search_continuous import (
+from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
 )
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.models.point_conv_unet import PointConvEncoderDecoder
-from warp.convnet.nn.functional.point_pool import (
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.models.point_conv_unet import PointConvEncoderDecoder
+from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
 )
-from warp.convnet.nn.point_conv import PointConv, PointConvDecoder, PointConvEncoder
+from warpconvnet.nn.point_conv import PointConv, PointConvDecoder, PointConvEncoder
 
 
 class TestPointConvEncoder(unittest.TestCase):

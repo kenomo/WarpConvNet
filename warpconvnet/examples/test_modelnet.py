@@ -15,10 +15,10 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, Dataset
 
 import warp as wp
-import warp.convnet.nn.functional.transforms as T
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.nn.normalizations import LayerNorm
-from warp.convnet.nn.sparse_conv import SparseConv3d
+import warpconvnet.nn.functional.transforms as T
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.normalizations import LayerNorm
+from warpconvnet.nn.sparse_conv import SparseConv3d
 
 ssl._create_default_https_context = ssl._create_unverified_context
 

@@ -2,7 +2,7 @@ from typing import Optional
 
 import torch.nn as nn
 
-from warp.convnet.nn.functional.encodings import sinusoidal_encoding
+from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 
 
 class SinusoidalEncoding(nn.Module):

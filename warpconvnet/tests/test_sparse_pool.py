@@ -3,10 +3,10 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_coords_ops import generate_output_coords
-from warp.convnet.nn.functional.sparse_pool import sparse_reduce
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warpconvnet.nn.functional.sparse_pool import sparse_reduce
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
 class TestSparsePool(unittest.TestCase):

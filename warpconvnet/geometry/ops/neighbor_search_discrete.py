@@ -9,9 +9,9 @@ from torch import Tensor
 
 import warp as wp
 import warp.utils
-from warp.convnet.core.hashmap import HashStruct, VectorHashTable, search_func
-from warp.convnet.utils.batch_index import batch_indexed_coordinates
-from warp.convnet.utils.ntuple import ntuple
+from warpconvnet.core.hashmap import HashStruct, VectorHashTable, search_func
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.utils.ntuple import ntuple
 
 
 class DISCRETE_NEIGHBOR_SEARCH_MODE(Enum):

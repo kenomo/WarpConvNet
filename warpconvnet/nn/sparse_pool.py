@@ -2,8 +2,8 @@ from typing import Literal
 
 import torch.nn as nn
 
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_pool import sparse_reduce
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 
 
 class SparsePool(nn.Module):

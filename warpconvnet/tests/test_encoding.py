@@ -3,7 +3,7 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.nn.encoding import SinusoidalEncoding
+from warpconvnet.nn.encoding import SinusoidalEncoding
 
 
 class TestSinusoidalEncoding(unittest.TestCase):

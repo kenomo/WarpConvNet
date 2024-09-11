@@ -3,14 +3,14 @@ import unittest
 import torch
 
 import warp as wp
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.utils.argsort import argsort
-from warp.convnet.utils.batch_index import (
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.utils.argsort import argsort
+from warpconvnet.utils.batch_index import (
     batch_index_from_offset,
     batch_indexed_coordinates,
     offsets_from_batch_index,
 )
-from warp.convnet.utils.timer import Timer
+from warpconvnet.utils.timer import Timer
 
 
 class TestUtils(unittest.TestCase):

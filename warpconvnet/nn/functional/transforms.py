@@ -2,9 +2,9 @@ from typing import Callable
 
 import torch.nn.functional as F
 
-from warp.convnet.geometry.base_geometry import BatchedFeatures
-from warp.convnet.geometry.point_collection import PointCollection
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.base_geometry import BatchedFeatures
+from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
 
 def apply_feature_transform(

@@ -6,10 +6,10 @@ from jaxtyping import Int
 from torch import Tensor
 
 import warp as wp
-from warp.convnet.core.hashmap import VectorHashTable
-from warp.convnet.geometry.ops.neighbor_search_discrete import kernel_offsets_from_size
-from warp.convnet.utils.batch_index import offsets_from_batch_index
-from warp.convnet.utils.ntuple import ntuple
+from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_offsets_from_size
+from warpconvnet.utils.batch_index import offsets_from_batch_index
+from warpconvnet.utils.ntuple import ntuple
 
 
 @torch.no_grad()

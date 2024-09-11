@@ -4,17 +4,17 @@ from typing import Literal, Optional, Tuple, Union
 import torch
 from torch_scatter import segment_csr
 
-from warp.convnet.geometry.ops.neighbor_search_discrete import (
+from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     kernel_map_from_size,
 )
-from warp.convnet.geometry.spatially_sparse_tensor import (
+from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
     BatchedFeatures,
     SpatiallySparseTensor,
 )
-from warp.convnet.nn.functional.sparse_coords_ops import generate_output_coords
-from warp.convnet.utils.ntuple import ntuple
+from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warpconvnet.utils.ntuple import ntuple
 
 
 def sparse_reduce(

@@ -3,7 +3,7 @@
 ## Running single GPU tests
 
 ```bash
-python -m unittest warp.convnet.tests.test_all_single_gpu
+python -m unittest warpconvnet.tests.test_all_single_gpu
 ```
 
 ## Running FSDP

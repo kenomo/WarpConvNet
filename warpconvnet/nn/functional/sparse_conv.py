@@ -8,21 +8,21 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.autograd import Function
 
-from warp.convnet.geometry.base_geometry import BatchedFeatures
-from warp.convnet.geometry.ops.neighbor_search_discrete import (
+from warpconvnet.geometry.base_geometry import BatchedFeatures
+from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     kernel_map_from_size,
 )
-from warp.convnet.geometry.spatially_sparse_tensor import (
+from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
     SpatiallySparseTensor,
 )
-from warp.convnet.nn.functional.sparse_coords_ops import (
+from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
     generate_output_coords,
 )
-from warp.convnet.nn.functional.sparse_pool import sparse_reduce
-from warp.convnet.utils.ntuple import ntuple
+from warpconvnet.nn.functional.sparse_pool import sparse_reduce
+from warpconvnet.utils.ntuple import ntuple
 
 
 class STRIDED_CONV_MODE(Enum):

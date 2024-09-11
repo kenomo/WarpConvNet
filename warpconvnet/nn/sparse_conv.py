@@ -4,13 +4,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_conv import (
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,
     spatially_sparse_conv,
 )
-from warp.convnet.utils.ntuple import ntuple
+from warpconvnet.utils.ntuple import ntuple
 
 
 class SpatiallySparseConv(nn.Module):

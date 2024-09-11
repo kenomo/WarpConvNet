@@ -4,21 +4,21 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warp.convnet.core.hashmap import VectorHashTable
-from warp.convnet.geometry.base_geometry import (
+from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
     BatchedFeatures,
     BatchedSpatialFeatures,
     _list_to_batched_tensor,
 )
-from warp.convnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
-from warp.convnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
-from warp.convnet.utils.batch_index import (
+from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
+from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
+from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
     offsets_from_batch_index,
 )
-from warp.convnet.utils.ntuple import ntuple
-from warp.convnet.utils.ravel import ravel_multi_index
+from warpconvnet.utils.ntuple import ntuple
+from warpconvnet.utils.ravel import ravel_multi_index
 
 
 class BatchedDiscreteCoordinates(BatchedCoordinates):
