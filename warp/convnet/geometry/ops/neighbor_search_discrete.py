@@ -470,9 +470,9 @@ def kernel_map_from_size(
         in_indices_wp = hashtable.search(new_batch_indexed_out_coords_wp)
         in_indices = wp.to_torch(in_indices_wp)
 
-        # Get the valid indices and offsets
-        # indices are all > 0 and offsets [0, N1, N1+N2, N1+N2+N3, ..., N1+...+N_kernel_batch] for N1, N2, N3 being the number of valid indices for each kernel offset
-        valid_in_indices_bool = in_indices > 0
+        # Get the valid indices and offsets.
+        # valid indices are all >= 0 and offsets [0, N1, N1+N2, N1+N2+N3, ..., N1+...+N_kernel_batch] for N1, N2, N3 being the number of valid indices for each kernel offset
+        valid_in_indices_bool = in_indices >= 0
         # Reshape valid indices to [kernel_batch, N_out] to get the number of valid indices for each kernel offset
         num_valid_in_indices = valid_in_indices_bool.view(num_kernels_in_batch, -1).sum(dim=1)
         # Compress indices to the valid indices

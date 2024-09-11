@@ -146,7 +146,7 @@ def spatially_sparse_conv(
     output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
     transposed: bool = False,
     conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
-    stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.REDUCE_AND_STRIDE,
+    stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     stride_reduce: str = "max",
 ) -> SpatiallySparseTensor:
     """
@@ -181,19 +181,26 @@ def spatially_sparse_conv(
 
     # Generate output coordinates and kernel map
     batch_indexed_out_coords, out_offsets, kernel_map = generate_output_coords_and_kernel_map(
-        input_sparse_tensor,
-        kernel_size,
-        kernel_dilation,
-        stride,
-        generative,
-        transposed,
-        output_spatially_sparse_tensor,
-        kernel_search_batch_size,
-        stride_mode,
-        stride_reduce,
+        input_sparse_tensor=input_sparse_tensor,
+        kernel_size=kernel_size,
+        kernel_dilation=kernel_dilation,
+        stride=stride,
+        generative=generative,
+        transposed=transposed,
+        output_spatially_sparse_tensor=output_spatially_sparse_tensor,
+        kernel_search_batch_size=kernel_search_batch_size,
+        stride_mode=stride_mode,
     )
 
     num_out_coords = batch_indexed_out_coords.shape[0]
+
+    if stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE:
+        input_sparse_tensor = sparse_reduce(
+            input_sparse_tensor,
+            kernel_size=stride,  # reduce by stride
+            stride=stride,
+            reduce=stride_reduce,
+        )
 
     # Call explicit gemm
     if conv_algo == SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM:
@@ -224,18 +231,16 @@ def spatially_sparse_conv(
 
 
 def generate_output_coords_and_kernel_map(
-    input_sparse_tensor,
-    kernel_size,
-    kernel_dilation,
-    stride,
-    generative,
-    transposed,
-    output_spatially_sparse_tensor,
-    kernel_search_batch_size,
-    stride_mode,
-    stride_reduce,
+    input_sparse_tensor: SpatiallySparseTensor,
+    kernel_size: Tuple[int, ...],
+    kernel_dilation: Tuple[int, ...],
+    stride: Tuple[int, ...],
+    generative: bool,
+    transposed: bool,
+    output_spatially_sparse_tensor: Optional[SpatiallySparseTensor],
+    kernel_search_batch_size: int,
+    stride_mode: STRIDED_CONV_MODE,
 ):
-    num_spatial_dims = input_sparse_tensor.num_spatial_dims
     batch_indexed_in_coords = input_sparse_tensor.batch_indexed_coordinates
     in_to_out_stride_ratio = stride
 
@@ -257,17 +262,26 @@ def generate_output_coords_and_kernel_map(
             kernel_dilation=kernel_dilation,
             kernel_batch=kernel_search_batch_size,
         )
-    elif generative and not all(s == 1 for s in stride):
-        # The output coordinates will be generated in the kernel map generation
-        pass
+    elif any(s != 1 for s in stride):
+        batch_indexed_out_coords, out_offsets = generate_output_coords(
+            batch_indexed_in_coords, stride
+        )
+        # if generative, we need to expand the coordinates in addition
+        if generative:
+            batch_indexed_out_coords, out_offsets = expand_coords(
+                batch_indexed_out_coords,
+                kernel_size=kernel_size,
+                kernel_dilation=kernel_dilation,
+                kernel_batch=kernel_search_batch_size,
+            )
     elif all(s == 1 for s in stride):
         batch_indexed_out_coords, out_offsets = (
             batch_indexed_in_coords,
             input_sparse_tensor.offsets,
         )
     else:
-        batch_indexed_out_coords, out_offsets = generate_output_coords(
-            batch_indexed_in_coords, stride
+        raise ValueError(
+            f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"
         )
 
     # Kernel map generation
@@ -287,13 +301,6 @@ def generate_output_coords_and_kernel_map(
             offsets=kernel_map.offsets,
         )
     elif stride_mode == STRIDED_CONV_MODE.STRIDE_ONLY:
-        if generative:
-            batch_indexed_out_coords, out_offsets = expand_coords(
-                batch_indexed_in_coords,
-                kernel_size=kernel_size,
-                kernel_dilation=kernel_dilation,
-                kernel_batch=kernel_search_batch_size,
-            )
         kernel_map = kernel_map_from_size(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
@@ -303,25 +310,15 @@ def generate_output_coords_and_kernel_map(
             kernel_search_batch_size,
         )
     elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE:
-        reduced_sparse_tensor = sparse_reduce(
-            input_sparse_tensor, stride, stride, reduce=stride_reduce
-        )
-        if generative:
-            batch_indexed_out_coords, out_offsets = expand_coords(
-                reduced_sparse_tensor.batch_indexed_coordinates,
-                kernel_size=kernel_size,
-                kernel_dilation=kernel_dilation,
-                kernel_batch=kernel_search_batch_size,
-            )
+        # Compute mapping from output to output since it will be reduced
         kernel_map = kernel_map_from_size(
-            reduced_sparse_tensor.batch_indexed_coordinates,
             batch_indexed_out_coords,
-            ntuple(1, ndim=num_spatial_dims),
+            batch_indexed_out_coords,
+            ntuple(1, ndim=input_sparse_tensor.num_spatial_dims),
             kernel_size,
             kernel_dilation,
             kernel_search_batch_size,
         )
-        input_sparse_tensor = reduced_sparse_tensor
     else:
         raise ValueError(
             f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"
