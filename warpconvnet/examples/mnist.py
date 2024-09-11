@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import warp as wp
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torchvision import datasets, transforms
 
-import warp as wp
 import warpconvnet.nn.functional.transforms as T
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool

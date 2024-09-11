@@ -9,12 +9,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import warp as wp
 from jaxtyping import Float
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, Dataset
 
-import warp as wp
 import warpconvnet.nn.functional.transforms as T
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.normalizations import LayerNorm
@@ -225,11 +225,11 @@ def main(
     wp.init()
     device = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
 
-    print(f"Dataset root directory: {root_dir}")
-    print(f"Files in root directory: {os.listdir(root_dir)}")
-
     train_dataset = ModelNet40Dataset(root_dir, split="train")
     test_dataset = ModelNet40Dataset(root_dir, split="test")
+
+    print(f"Dataset root directory: {root_dir}")
+    print(f"Files in root directory: {os.listdir(root_dir)}")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
