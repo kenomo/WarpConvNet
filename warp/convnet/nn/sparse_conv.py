@@ -5,7 +5,10 @@ import torch
 import torch.nn as nn
 
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warp.convnet.nn.functional.sparse_conv import spatially_sparse_conv
+from warp.convnet.nn.functional.sparse_conv import (
+    STRIDED_CONV_MODE,
+    spatially_sparse_conv,
+)
 from warp.convnet.utils.ntuple import ntuple
 
 
@@ -22,6 +25,7 @@ class SpatiallySparseConv(nn.Module):
         generative: bool = False,
         kernel_search_batch_size: int = 8,
         num_spatial_dims: Optional[int] = 3,
+        stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     ):
         super(SpatiallySparseConv, self).__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
@@ -38,6 +42,8 @@ class SpatiallySparseConv(nn.Module):
         self.bias = None
         if bias:
             self.bias = nn.Parameter(torch.randn(out_channels))
+
+        self.stride_mode = stride_mode
 
     def __repr__(self):
         # return class name and parameters that are not default
@@ -69,6 +75,7 @@ class SpatiallySparseConv(nn.Module):
             output_spatially_sparse_tensor=output_spatially_sparse_tensor,
             transposed=self.transposed,
             generative=self.generative,
+            stride_mode=self.stride_mode,
         )
 
 
@@ -84,6 +91,7 @@ class SparseConv2d(SpatiallySparseConv):
         transposed=False,
         generative: bool = False,
         kernel_search_batch_size=8,
+        stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     ):
         super(SparseConv2d, self).__init__(
             in_channels=in_channels,
@@ -96,6 +104,7 @@ class SparseConv2d(SpatiallySparseConv):
             generative=generative,
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=2,
+            stride_mode=stride_mode,
         )
 
 
@@ -111,6 +120,7 @@ class SparseConv3d(SpatiallySparseConv):
         transposed=False,
         generative: bool = False,
         kernel_search_batch_size=8,
+        stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     ):
         super(SparseConv3d, self).__init__(
             in_channels=in_channels,
@@ -123,4 +133,5 @@ class SparseConv3d(SpatiallySparseConv):
             generative=generative,
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=3,
+            stride_mode=stride_mode,
         )

@@ -26,7 +26,7 @@ from warp.convnet.utils.ntuple import ntuple
 
 
 class STRIDED_CONV_MODE(Enum):
-    REDUCE_AND_STRIDE = "reduce_and_stride"
+    REDUCE_AND_STRIDE = "reduce_and_stride"  # Apply convolution on the pooled input. This increases the density of the input
     STRIDE_ONLY = "stride_only"
 
 
@@ -267,8 +267,15 @@ def generate_output_coords_and_kernel_map(
             batch_indexed_in_coords, stride
         )
         # if generative, we need to expand the coordinates in addition
-        if generative:
+        if generative and stride_mode == STRIDED_CONV_MODE.STRIDE_ONLY:
             batch_indexed_out_coords, out_offsets = expand_coords(
+                batch_indexed_out_coords,
+                kernel_size=kernel_size,
+                kernel_dilation=kernel_dilation,
+                kernel_batch=kernel_search_batch_size,
+            )
+        elif generative and stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE:
+            batch_indexed_expanded_coords, expanded_offsets = expand_coords(
                 batch_indexed_out_coords,
                 kernel_size=kernel_size,
                 kernel_dilation=kernel_dilation,
@@ -309,7 +316,7 @@ def generate_output_coords_and_kernel_map(
             kernel_dilation,
             kernel_search_batch_size,
         )
-    elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE:
+    elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and not generative:
         # Compute mapping from output to output since it will be reduced
         kernel_map = kernel_map_from_size(
             batch_indexed_out_coords,
@@ -319,6 +326,18 @@ def generate_output_coords_and_kernel_map(
             kernel_dilation,
             kernel_search_batch_size,
         )
+    elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and generative:
+        # Compute mapping from output to expanded output since it will be reduced
+        kernel_map = kernel_map_from_size(
+            batch_indexed_out_coords,
+            batch_indexed_expanded_coords,
+            ntuple(1, ndim=input_sparse_tensor.num_spatial_dims),
+            kernel_size,
+            kernel_dilation,
+            kernel_search_batch_size,
+        )
+        batch_indexed_out_coords = batch_indexed_expanded_coords
+        out_offsets = expanded_offsets
     else:
         raise ValueError(
             f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"

@@ -7,6 +7,7 @@ from warp.convnet.core.hashmap import VectorHashTable
 from warp.convnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
 from warp.convnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warp.convnet.nn.functional.sparse_conv import (
+    STRIDED_CONV_MODE,
     SpatiallySparseConvExplicitGEMMFunction,
     generate_output_coords,
     spatially_sparse_conv,
@@ -193,6 +194,46 @@ class TestSparseConv(unittest.TestCase):
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
         # Check that the output is larger than the input
         self.assertTrue(out.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0])
+
+    def test_sparse_conv_stride_mode(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        conv = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE
+        ).to(self.st.device)
+        out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+
+        conv2 = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, stride_mode=STRIDED_CONV_MODE.STRIDE_ONLY
+        ).to(self.st.device)
+        out2 = conv2(self.st)
+        self.assertTrue(out2.feature_tensor.shape[1] == C_out)
+        self.assertTrue(out.feature_tensor.shape[0] == out2.feature_tensor.shape[0])
+
+        # generative
+        conv = SpatiallySparseConv(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            stride_mode=STRIDED_CONV_MODE.STRIDE_ONLY,
+            generative=True,
+        ).to(self.st.device)
+        out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+
+        conv = SpatiallySparseConv(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE,
+            generative=True,
+        ).to(self.st.device)
+        out = conv(self.st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
 
 if __name__ == "__main__":
