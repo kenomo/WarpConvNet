@@ -275,7 +275,7 @@ def spatially_sparse_conv(
 
     num_out_coords = batch_indexed_out_coords.shape[0]
 
-    if stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE:
+    if stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and any(s != 1 for s in stride):
         input_sparse_tensor = sparse_reduce(
             input_sparse_tensor,
             kernel_size=stride,  # reduce by stride
@@ -370,6 +370,10 @@ def generate_output_coords_and_kernel_map(
                 kernel_dilation=kernel_dilation,
                 kernel_batch=kernel_search_batch_size,
             )
+            # rename
+            batch_indexed_in_coords = batch_indexed_out_coords
+            batch_indexed_out_coords = batch_indexed_expanded_coords
+            out_offsets = expanded_offsets
     elif all(s == 1 for s in stride):
         batch_indexed_out_coords, out_offsets = (
             batch_indexed_in_coords,
@@ -416,17 +420,14 @@ def generate_output_coords_and_kernel_map(
             kernel_search_batch_size,
         )
     elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and generative:
-        # Compute mapping from output to expanded output since it will be reduced
         kernel_map = kernel_map_from_size(
+            batch_indexed_in_coords,
             batch_indexed_out_coords,
-            batch_indexed_expanded_coords,
             ntuple(1, ndim=input_sparse_tensor.num_spatial_dims),
             kernel_size,
             kernel_dilation,
             kernel_search_batch_size,
         )
-        batch_indexed_out_coords = batch_indexed_expanded_coords
-        out_offsets = expanded_offsets
     else:
         raise ValueError(
             f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"
