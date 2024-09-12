@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import fire
 import torch
@@ -10,6 +10,7 @@ import warp as wp
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, Dataset
+from torchmetrics.classification import MulticlassConfusionMatrix
 from tqdm import tqdm
 
 import wandb
@@ -116,6 +117,27 @@ def dict_to_sparse_tensor(
     )
 
 
+def confusion_matrix_to_metrics(conf_matrix: Tensor) -> Dict[str, float]:
+    """
+    Return accuracy, miou, class_iou, class_accuracy
+
+    Rows are ground truth, columns are predictions.
+    """
+    conf_matrix = conf_matrix.cpu()
+    accuracy = (conf_matrix.diag().sum() / conf_matrix.sum()).item() * 100
+    class_accuracy = (conf_matrix.diag() / conf_matrix.sum(dim=1)) * 100
+    class_iou = conf_matrix.diag() / (
+        conf_matrix.sum(dim=1) + conf_matrix.sum(dim=0) - conf_matrix.diag()
+    )
+    miou = class_iou.mean().item() * 100
+    return {
+        "accuracy": accuracy,
+        "miou": miou,
+        "class_iou": class_iou,
+        "class_accuracy": class_accuracy,
+    }
+
+
 class UNet(nn.Module):
     def __init__(self, in_channels, out_channels, base_channels=32):
         super(UNet, self).__init__()
@@ -124,7 +146,7 @@ class UNet(nn.Module):
             nn.LayerNorm(base_channels),
             nn.ReLU(),
         )
-        final_channels = base_channels * 2
+        final_channels = base_channels * 4
         encoder_channels = [
             base_channels,
             base_channels * 2,
@@ -168,6 +190,7 @@ class UNet(nn.Module):
         )
 
     def forward(self, x: SpatiallySparseTensor):
+        torch.cuda.empty_cache()
         x = T.apply_feature_transform(x, self.mlp)
         encoder_outputs = self.encoder(x)
         decoder_outputs = self.decoder(encoder_outputs)
@@ -203,13 +226,14 @@ def train(
         if use_wandb:
             wandb.log(
                 {
-                    "train_loss": loss.item(),
+                    "train/loss": loss.item(),
+                    "train/lr": optimizer.param_groups[0]["lr"],
                     "epoch": epoch,
-                    "batch": batch_idx,
                 }
             )
 
 
+@torch.inference_mode()
 def test(
     model: nn.Module,
     device: str,
@@ -217,38 +241,48 @@ def test(
     voxel_size: float = 0.05,
     ignore_index: int = 255,
     use_wandb: bool = True,
+    num_test_batches: Optional[int] = None,
 ):
     model.eval()
+    confusion_matrix = MulticlassConfusionMatrix(num_classes=20, ignore_index=ignore_index).to(
+        device
+    )
     test_loss = 0
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for batch_dict in test_loader:
-            st, batch_dict = dict_to_sparse_tensor(
-                batch_dict, voxel_size=voxel_size, device=device
-            )
-            output = model(st.to(device))
-            labels = batch_dict["labels"].long()
-            test_loss += F.cross_entropy(
-                output.feature_tensor,
-                labels,
-                reduction="mean",
-                ignore_index=ignore_index,
-            ).item()
-            pred = output.feature_tensor.argmax(dim=1)
-            correct += pred.eq(labels).sum().item()
-            total += labels.numel()
+    num_batches = 0
+    for batch_dict in test_loader:
+        st, batch_dict = dict_to_sparse_tensor(batch_dict, voxel_size=voxel_size, device=device)
+        output = model(st.to(device))
+        labels = batch_dict["labels"].long()
+        test_loss += F.cross_entropy(
+            output.feature_tensor,
+            labels,
+            reduction="mean",
+            ignore_index=ignore_index,
+        ).item()
+        pred = output.feature_tensor.argmax(dim=1)
+        confusion_matrix.update(pred, labels)
+        num_batches += 1
+        if num_test_batches is not None and num_batches >= num_test_batches:
+            break
 
-    test_loss /= total
-    accuracy = 100.0 * correct / total
+    test_loss /= num_batches
+    metrics = confusion_matrix_to_metrics(confusion_matrix.compute())
 
     if use_wandb:
-        wandb.log({"test_loss": test_loss, "test_accuracy": accuracy})
+        wandb.log(
+            {
+                "test/loss": test_loss,
+                "test/accuracy": metrics["accuracy"],
+                "test/miou": metrics["miou"],
+                "test/class_iou": metrics["class_iou"],
+                "test/class_accuracy": metrics["class_accuracy"],
+            }
+        )
 
     print(
-        f"\nTest set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{total} ({accuracy:.2f}%)\n"
+        f"\nTest set: Average loss: {test_loss:.4f}, Accuracy: {metrics['accuracy']:.2f}%, mIoU: {metrics['miou']:.2f}%\n"
     )
-    return accuracy
+    return metrics["miou"]
 
 
 def main(
@@ -296,6 +330,10 @@ def main(
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = StepLR(optimizer, step_size=scheduler_step_size, gamma=gamma)
 
+    # Test before training
+    miou = test(
+        model, device, test_loader, voxel_size, ignore_index, use_wandb, num_test_batches=5
+    )
     for epoch in range(1, epochs + 1):
         train(
             model,
@@ -307,10 +345,10 @@ def main(
             ignore_index,
             use_wandb,
         )
-        accuracy = test(model, device, test_loader, voxel_size, ignore_index, use_wandb)
+        miou = test(model, device, test_loader, voxel_size, ignore_index, use_wandb)
         scheduler.step()
 
-    print(f"Final accuracy: {accuracy:.2f}%")
+    print(f"Final mIoU: {miou:.2f}%")
 
 
 if __name__ == "__main__":

@@ -213,7 +213,7 @@ def test(model, device, test_loader):
 
 
 def main(
-    root_dir: str = "./modelnet40_data",
+    root_dir: str = "./data/modelnet40",
     batch_size: int = 128,
     test_batch_size: int = 100,
     epochs: int = 100,
