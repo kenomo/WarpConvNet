@@ -9,7 +9,6 @@ from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
     BatchedFeatures,
     BatchedSpatialFeatures,
-    _list_to_batched_tensor,
 )
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
 from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
@@ -17,6 +16,7 @@ from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
     offsets_from_batch_index,
 )
+from warpconvnet.utils.list_to_batch import list_to_batched_tensor
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.ravel import ravel_multi_index
 
@@ -47,7 +47,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         """
         if isinstance(batched_tensor, list):
             assert offsets is None, "If batched_tensors is a list, offsets must be None."
-            batched_tensor, offsets, _ = _list_to_batched_tensor(batched_tensor)
+            batched_tensor, offsets, _ = list_to_batched_tensor(batched_tensor)
 
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets, requires_grad=False)

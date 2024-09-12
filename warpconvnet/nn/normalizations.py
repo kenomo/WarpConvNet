@@ -6,6 +6,13 @@ from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.transforms import apply_feature_transform
 
+__all__ = [
+    "NormalizationBase",
+    "LayerNorm",
+    "InstanceNorm",
+    "GroupNorm",
+]
+
 
 class NormalizationBase(nn.Module):
     def __init__(self, norm: nn.Module):

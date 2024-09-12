@@ -247,13 +247,28 @@ def spatially_sparse_conv(
     stride = ntuple(stride, ndim=num_spatial_dims)
 
     num_total_kernels = np.prod(kernel_size)
+
+    if np.prod(kernel_size) == 1 and np.prod(stride) == 1:
+        return input_sparse_tensor.replace(
+            batched_features=BatchedFeatures(
+                input_sparse_tensor.feature_tensor @ weight[0] + bias,
+                offsets=input_sparse_tensor.offsets,
+            ),
+        )
+
     if kernel_search_batch_size is None:
         kernel_search_batch_size = max(num_total_kernels // kernel_size[0], 8)
 
     in_tensor_stride = input_sparse_tensor.stride
     if in_tensor_stride is None:
         in_tensor_stride = ntuple(1, ndim=num_spatial_dims)
-    out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
+
+    if not transposed:
+        out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
+    else:
+        out_tensor_stride = output_spatially_sparse_tensor.stride
+        if out_tensor_stride is None:
+            out_tensor_stride = ntuple(1, ndim=num_spatial_dims)
 
     if transposed and not generative:
         assert (

@@ -1,15 +1,16 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
+import warp as wp
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-import warp as wp
 from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.utils.batch_index import (
     batch_index_from_offset,
     batch_indexed_coordinates,
 )
+from warpconvnet.utils.list_to_batch import list_to_batched_tensor
 from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
 __all__ = [
@@ -110,6 +111,25 @@ def voxel_downsample_random_indices(
         batch_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
 
     return unique_indices, batch_offsets
+
+
+@torch.no_grad()
+def voxel_downsample_random_indices_list_of_coords(
+    list_of_coords: List[Float[Tensor, "N 3"]],
+    voxel_size: float,
+    device: str,
+) -> Tuple[Int[Tensor, "M"], Int[Tensor, "B + 1"]]:  # noqa: F821
+    """
+    Args:
+        list_of_coords: List[Float[Tensor, "N 3"]] - list of batched coordinates
+        voxel_size: float - voxel size
+
+    Returns:
+        unique_indices: sorted indices of unique voxels.
+        batch_offsets: Batch offsets.
+    """
+    batched_coords, offsets, _ = list_to_batched_tensor(list_of_coords)
+    return voxel_downsample_random_indices(batched_coords.to(device), offsets, voxel_size)
 
 
 @torch.no_grad()
