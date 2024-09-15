@@ -8,6 +8,7 @@ from warpconvnet.nn.functional.transforms import apply_feature_transform
 
 __all__ = [
     "NormalizationBase",
+    "BatchNorm",
     "LayerNorm",
     "InstanceNorm",
     "GroupNorm",
@@ -27,6 +28,11 @@ class NormalizationBase(nn.Module):
         input: SpatiallySparseTensor | PointCollection,
     ):
         return apply_feature_transform(input, self.norm)
+
+
+class BatchNorm(NormalizationBase):
+    def __init__(self, num_features: int, eps: float = 1e-5):
+        super().__init__(nn.BatchNorm1d(num_features, eps=eps))
 
 
 class LayerNorm(NormalizationBase):

@@ -11,13 +11,32 @@ from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
 )
 from warpconvnet.utils.list_to_batch import list_to_batched_tensor
+from warpconvnet.utils.ravel import ravel_mult_index_auto_shape, ravel_multi_index
 from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
 __all__ = [
     "voxel_downsample_csr_mapping",
     "voxel_downsample_random_indices",
     "voxel_downsample_mapping",
+    "voxel_downsample_ravel",
+    "voxel_downsample_hashmap",
 ]
+
+
+@torch.no_grad()
+def voxel_downsample_hashmap(
+    coords: Int[Tensor, "N D"],
+):
+    """
+    Args:
+        coords: Int[Tensor, "N D"] - coordinates
+
+    Returns:
+        unique_indices: sorted indices of unique voxels.
+    """
+    hash_table = VectorHashTable.from_keys(coords)
+    unique_indices = hash_table.unique_index()
+    return unique_indices
 
 
 # Voxel downsample
@@ -111,6 +130,24 @@ def voxel_downsample_random_indices(
         batch_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
 
     return unique_indices, batch_offsets
+
+
+def voxel_downsample_ravel(
+    batch_indexed_coords: Float[Tensor, "N D+1"],  # noqa: F821
+    voxel_size: float,
+):
+    """
+    Args:
+        batch_indexed_coords: Float[Tensor, "N D+1"] - batch indexed coordinates
+        voxel_size: float - voxel size
+
+    Returns:
+        unique_indices: sorted indices of unique voxels.
+    """
+    batch_indexed_coords[:, 1:] = torch.floor(batch_indexed_coords[:, 1:] / voxel_size).int()
+    raveled_coords = ravel_mult_index_auto_shape(batch_indexed_coords)
+    _, _, _, _, perm = unique_torch(raveled_coords, dim=0)
+    return perm
 
 
 @torch.no_grad()

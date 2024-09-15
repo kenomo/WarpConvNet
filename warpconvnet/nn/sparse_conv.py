@@ -1,8 +1,11 @@
-from typing import Optional, Tuple, Union
+import math
+from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import init
+from torch.nn.init import calculate_gain
 
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_conv import (
@@ -32,6 +35,7 @@ class SpatiallySparseConv(nn.Module):
     ):
         super(SpatiallySparseConv, self).__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
+        self.num_spatial_dims = num_spatial_dims
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -48,6 +52,7 @@ class SpatiallySparseConv(nn.Module):
         if bias:
             self.bias = nn.Parameter(torch.randn(out_channels))
 
+        self.reset_parameters()
         self.stride_mode = stride_mode
 
     def __repr__(self):
@@ -63,6 +68,39 @@ class SpatiallySparseConv(nn.Module):
             out_str += f", generative={self.generative}"
         out_str += ")"
         return out_str
+
+    def _calculate_fan_in_and_fan_out(self):
+        receptive_field_size = np.prod(self.kernel_size)
+        fan_in = self.in_channels * receptive_field_size
+        fan_out = self.out_channels * receptive_field_size
+        return fan_in, fan_out
+
+    def _calculate_correct_fan(self, mode: Literal["fan_in", "fan_out"]):
+        mode = mode.lower()
+        assert mode in ["fan_in", "fan_out"]
+
+        fan_in, fan_out = self._calculate_fan_in_and_fan_out()
+        return fan_in if mode == "fan_in" else fan_out
+
+    def _custom_kaiming_uniform_(self, tensor, a=0, mode="fan_in", nonlinearity="leaky_relu"):
+        fan = self._calculate_correct_fan(mode)
+        gain = calculate_gain(nonlinearity, a)
+        std = gain / math.sqrt(fan)
+        bound = math.sqrt(self.num_spatial_dims) * std
+        with torch.no_grad():
+            return tensor.uniform_(-bound, bound)
+
+    def reset_parameters(self):
+        self._custom_kaiming_uniform_(
+            self.weight,
+            a=math.sqrt(5),
+            mode="fan_out" if self.transposed else "fan_in",
+        )
+
+        if self.bias is not None:
+            fan_in, _ = self._calculate_fan_in_and_fan_out()
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def forward(
         self,

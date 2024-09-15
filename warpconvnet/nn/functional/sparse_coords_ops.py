@@ -1,21 +1,24 @@
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import numpy as np
 import torch
+import warp as wp
 from jaxtyping import Int
 from torch import Tensor
 
-import warp as wp
 from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_offsets_from_size
 from warpconvnet.utils.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ntuple import ntuple
+from warpconvnet.utils.ravel import ravel_mult_index_auto_shape
+from warpconvnet.utils.unique import unique_hashmap
 
 
 @torch.no_grad()
 def generate_output_coords(
     batch_indexed_coords: Int[Tensor, "N D+1"],
     stride: Tuple[int, ...],
+    backend: Literal["hashmap", "ravel", "unique"] = "unique",
 ) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Downsample the coordinates by the stride.
@@ -38,12 +41,24 @@ def generate_output_coords(
     )
     # discretize the coordinates by floor division
     discretized_coords = torch.floor(batch_indexed_coords / batched_stride).int()
-    # Get unique coordinates
-    unique_coords = torch.unique(discretized_coords, dim=0, sorted=True)
+    if backend == "hashmap":
+        unique_indices, _ = unique_hashmap(discretized_coords)
+        unique_coords = discretized_coords[unique_indices]
+    elif backend == "ravel":
+        unique_indices = ravel_mult_index_auto_shape(discretized_coords)
+        unique_coords = discretized_coords[unique_indices]
+    elif backend == "unique":
+        unique_coords = torch.unique(discretized_coords, dim=0, sorted=True)
+    else:
+        raise ValueError(f"Invalid method: {backend}")
 
-    out_batch_index = unique_coords[:, 0]
-    out_offsets = offsets_from_batch_index(out_batch_index, backend="torch")
+    if backend != "unique":
+        # sort the batch index for the offset
+        out_batch_index = unique_coords[:, 0]
+        _, perm = torch.sort(out_batch_index)
+        unique_coords = unique_coords[perm]
 
+    out_offsets = offsets_from_batch_index(unique_coords[:, 0], backend="torch")
     return unique_coords, out_offsets
 
 

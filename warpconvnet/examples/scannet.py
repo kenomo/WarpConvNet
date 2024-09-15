@@ -14,9 +14,11 @@ from torchmetrics.classification import MulticlassConfusionMatrix
 from tqdm import tqdm
 
 import wandb
-import warpconvnet.nn.functional.transforms as T
 from warpconvnet.geometry.ops.voxel_ops import (
-    voxel_downsample_random_indices_list_of_coords,
+    batch_indexed_coordinates,
+    voxel_downsample_hashmap,
+    voxel_downsample_random_indices,
+    voxel_downsample_ravel,
 )
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import (
@@ -24,15 +26,15 @@ from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedFeatures,
     SpatiallySparseTensor,
 )
-from warpconvnet.models.sparse_conv_unet import SparseConvDecoder, SparseConvEncoder
+from warpconvnet.models.sparse_conv_unet import SparseUNet
 from warpconvnet.nn.activations import ReLU
-from warpconvnet.nn.normalizations import LayerNorm
+from warpconvnet.nn.normalizations import BatchNorm, LayerNorm
 from warpconvnet.nn.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,
     SparseConv3d,
 )
-from warpconvnet.nn.sparse_pool import SparseMaxPool
+from warpconvnet.utils.batch_index import offsets_from_batch_index
 
 CONV_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM
 KERNEL_MATMUL_BATCH_SIZE = 9
@@ -44,10 +46,11 @@ class ScanNetDataset(Dataset):
     Dataset from the OpenScene project.
     """
 
-    def __init__(self, root: str, split: str = "train"):
+    def __init__(self, root: str, split: str = "train", voxel_size: Optional[float] = None):
         super().__init__()
         self.root = root
         self.split = split
+        self.voxel_size = voxel_size
         self.prepare_data()
 
     def prepare_data(self):
@@ -73,11 +76,24 @@ class ScanNetDataset(Dataset):
             os.path.join(self.root, self.split, file.strip() + "_vh_clean_2.pth"),
             weights_only=False,
         )
-        return {
-            "coords": coords,
-            "colors": colors,
-            "labels": labels,
-        }
+        # All to tensor
+        coords = torch.tensor(coords)
+        colors = torch.tensor(colors)
+        labels = torch.tensor(labels)
+        if self.voxel_size is not None:
+            coords = torch.floor(coords / self.voxel_size).int()
+            unique_indices = voxel_downsample_hashmap(coords.cuda()).cpu()
+            return {
+                "coords": coords[unique_indices],
+                "colors": colors[unique_indices],
+                "labels": labels[unique_indices],
+            }
+        else:
+            return {
+                "coords": coords,
+                "colors": colors,
+                "labels": labels,
+            }
 
 
 def collate_fn(batch: List[Dict[str, Tensor]]):
@@ -94,22 +110,20 @@ def dict_to_sparse_tensor(
     """
     Return sparse tensor
     """
-    unique_indices, batch_offsets = voxel_downsample_random_indices_list_of_coords(
-        batch_dict["coords"], voxel_size, device=device
-    )
+    coords = batch_dict["coords"]
+    Ns = torch.tensor([len(v) for v in coords])
+    offsets = torch.cumsum(torch.cat([torch.zeros(1), Ns], dim=0), dim=0).long()
     # cat all features into a single tensor
-    cat_batch_dict = {
-        k: torch.cat(v, dim=0).to(device)[unique_indices] for k, v in batch_dict.items()
-    }
+    cat_batch_dict = {k: torch.cat(v, dim=0).to(device) for k, v in batch_dict.items()}
     return (
         SpatiallySparseTensor(
             batched_coordinates=BatchedDiscreteCoordinates(
-                torch.floor(cat_batch_dict["coords"] / voxel_size).int(),
-                offsets=batch_offsets,
+                cat_batch_dict["coords"],
+                offsets=offsets,
             ),
             batched_features=BatchedFeatures(
                 cat_batch_dict["colors"],
-                offsets=batch_offsets,
+                offsets=offsets,
             ),
             voxel_size=voxel_size,
         ),
@@ -136,66 +150,6 @@ def confusion_matrix_to_metrics(conf_matrix: Tensor) -> Dict[str, float]:
         "class_iou": class_iou,
         "class_accuracy": class_accuracy,
     }
-
-
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels, base_channels=32):
-        super(UNet, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(in_channels, base_channels),
-            nn.LayerNorm(base_channels),
-            nn.ReLU(),
-        )
-        final_channels = base_channels * 4
-        encoder_channels = [
-            base_channels,
-            base_channels * 2,
-            base_channels * 4,
-            base_channels * 8,
-            base_channels * 16,
-        ]
-        decoder_channels = [
-            base_channels * 16,
-            base_channels * 8,
-            base_channels * 4,
-            base_channels * 4,
-            final_channels,
-        ]
-        self.encoder = SparseConvEncoder(
-            num_levels=4,
-            kernel_sizes=3,
-            encoder_channels=encoder_channels,
-            num_blocks_per_level=[1, 1, 1, 1],
-        )
-        self.decoder = SparseConvDecoder(
-            num_levels=4,
-            kernel_sizes=3,
-            encoder_channels=encoder_channels,
-            decoder_channels=decoder_channels,
-            num_blocks_per_level=[1, 1, 1, 1],
-        )
-        self.final_conv = nn.Sequential(
-            SparseConv3d(
-                final_channels,
-                final_channels,
-                kernel_size=1,
-            ),
-            LayerNorm(final_channels),
-            ReLU(),
-            SparseConv3d(
-                final_channels,
-                out_channels,
-                kernel_size=1,
-            ),
-        )
-
-    def forward(self, x: SpatiallySparseTensor):
-        torch.cuda.empty_cache()
-        x = T.apply_feature_transform(x, self.mlp)
-        encoder_outputs = self.encoder(x)
-        decoder_outputs = self.decoder(encoder_outputs)
-        output = self.final_conv(decoder_outputs[-1])
-        return output
 
 
 def train(
@@ -313,8 +267,8 @@ def main(
     wp.init()
     device = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
 
-    train_dataset = ScanNetDataset(root_dir, split="train")
-    test_dataset = ScanNetDataset(root_dir, split="val")
+    train_dataset = ScanNetDataset(root_dir, split="train", voxel_size=voxel_size)
+    test_dataset = ScanNetDataset(root_dir, split="val", voxel_size=voxel_size)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
@@ -323,7 +277,9 @@ def main(
         test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
     )
 
-    model = UNet(in_channels=3, out_channels=20).to(device)  # Assuming 20 classes for ScanNet
+    model = SparseUNet(in_channels=3, out_channels=20).to(
+        device
+    )  # Assuming 20 classes for ScanNet
     if use_wandb:
         wandb.watch(model)
 

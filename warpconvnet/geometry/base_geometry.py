@@ -6,6 +6,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.list_to_batch import list_to_batched_tensor
 
 __all__ = [
@@ -199,6 +200,10 @@ class BatchedCoordinates(BatchedObject):
         """
         raise NotImplementedError
 
+    @property
+    def batch_indexed_coordinates(self) -> Tensor:
+        return batch_indexed_coordinates(self.batched_tensor, self.offsets)
+
 
 class BatchedIndices(BatchedObject):
     batched_tensor: Int[Tensor, "N"]  # noqa: F722,F821
@@ -285,8 +290,20 @@ class BatchedSpatialFeatures:
         return self.batched_coordinates.batched_tensor
 
     @property
+    def batch_indexed_coordinates(self) -> Tensor:
+        return batch_indexed_coordinates(self.coordinate_tensor, self.offsets)
+
+    @property
+    def coordinates(self):
+        return self.batch_indexed_coordinates
+
+    @property
     def feature_tensor(self):
         return self.batched_features.batched_tensor
+
+    @property
+    def features(self):
+        return self.feature_tensor
 
     @property
     def coordinate_shape(self):

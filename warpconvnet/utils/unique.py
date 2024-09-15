@@ -1,11 +1,12 @@
 from typing import Tuple
 
 import torch
+import warp as wp
 from jaxtyping import Int
 from torch import Tensor
 
-import warp as wp
 from warpconvnet.core.hashmap import HashMethod, VectorHashTable
+from warpconvnet.utils.ravel import ravel_multi_index
 
 
 def unique_torch(
@@ -53,6 +54,21 @@ def unique_torch(
         all_to_unique_offsets,
         perm,
     )
+
+
+def unique_ravel(
+    x: Int[Tensor, "N C"],
+    dim: int = 0,
+    sorted: bool = False,
+):
+    min_coords = x.min(dim=dim).values
+    shifted_x = x - min_coords
+    shape = shifted_x.max(dim=dim).values + 1
+    raveled_x = ravel_multi_index(shifted_x, shape)
+    unique_raveled_x, _, _, _, perm = unique_torch(raveled_x, dim=0)
+    if sorted:
+        perm = perm[unique_raveled_x.argsort()]
+    return perm
 
 
 def unique_hashmap(

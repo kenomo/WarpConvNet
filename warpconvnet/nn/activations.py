@@ -3,6 +3,7 @@ from typing import Union
 from torch import nn
 
 from warpconvnet.nn.functional.transforms import (
+    apply_feature_transform,
     elu,
     gelu,
     leaky_relu,
@@ -28,8 +29,15 @@ __all__ = [
 
 
 class ReLU(nn.Module):
+    def __init__(self, inplace: bool = False):
+        super().__init__()
+        self.relu = nn.ReLU(inplace=inplace)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(inplace={self.relu.inplace})"
+
     def forward(self, input: Union["SpatiallySparseTensor", "PointCollection"]):  # noqa: F821
-        return relu(input)
+        return apply_feature_transform(input, self.relu)
 
 
 class GELU(nn.Module):

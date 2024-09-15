@@ -112,10 +112,6 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
             self._hashmap = VectorHashTable.from_keys(bcoords)
         return self._hashmap
 
-    @property
-    def batch_indexed_coordinates(self) -> Tensor:
-        return batch_indexed_coordinates(self.batched_tensor, self.offsets)
-
 
 class SpatiallySparseTensor(BatchedSpatialFeatures):
     batched_coordinates: BatchedDiscreteCoordinates

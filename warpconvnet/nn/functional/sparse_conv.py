@@ -56,7 +56,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         ctx,
         batched_features: Float[Tensor, "N C_in"],
         batch_offsets: Int[Tensor, "B + 1"],  # noqa: F821
-        weight: Float[Tensor, "K C_out C_in"],
+        weight: Float[Tensor, "K C_in C_out"],
         kernel_map: DiscreteNeighborSearchResult,
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
     ) -> Float[Tensor, "M C_out"]:
@@ -356,9 +356,6 @@ def generate_output_coords_and_kernel_map(
         batch_indexed_out_coords = output_spatially_sparse_tensor.batch_indexed_coordinates
         out_offsets = output_spatially_sparse_tensor.offsets
     elif generative and all(s == 1 for s in stride):
-        assert all(
-            k % 2 == 1 for k in kernel_size
-        ), "Kernel size must be odd for generative convolution"
         assert not transposed, "Transposed and generative convolution is not supported yet"
         batch_indexed_out_coords, out_offsets = expand_coords(
             batch_indexed_in_coords,
