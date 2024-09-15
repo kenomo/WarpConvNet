@@ -167,7 +167,7 @@ def train(
     for batch_idx, batch_dict in enumerate(bar):
         optimizer.zero_grad()
         st, batch_dict = dict_to_sparse_tensor(batch_dict, voxel_size=voxel_size, device=device)
-        output = model(st.to(device))
+        output, _, _ = model(st.to(device))
         loss = F.cross_entropy(
             output.feature_tensor,
             batch_dict["labels"].long(),
@@ -205,7 +205,7 @@ def test(
     num_batches = 0
     for batch_dict in test_loader:
         st, batch_dict = dict_to_sparse_tensor(batch_dict, voxel_size=voxel_size, device=device)
-        output = model(st.to(device))
+        output, _, _ = model(st.to(device))
         labels = batch_dict["labels"].long()
         test_loss += F.cross_entropy(
             output.feature_tensor,

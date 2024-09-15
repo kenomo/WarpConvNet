@@ -195,7 +195,6 @@ class SparseConvDecoder(nn.Module):
         assert encoder_channels[-1] == decoder_channels[0]
 
         self.up_convs = nn.ModuleList()
-        self.skips = nn.ModuleList()
         self.level_blocks = nn.ModuleList()
 
         for level in range(self.num_levels):
@@ -206,10 +205,13 @@ class SparseConvDecoder(nn.Module):
             up_conv = SparseConv3d(
                 in_channels,
                 out_channels,
+                stride=2,
                 kernel_size=2,
+                transposed=True,
                 kernel_search_batch_size=kernel_search_batch_size,
                 kernel_matmul_batch_size=kernel_matmul_batch_size,
                 conv_algo=conv_algo,
+                bias=False,
             )
             self.up_convs.append(up_conv)
 
@@ -267,10 +269,16 @@ class SparseUNet(nn.Module):
         encoder_depth = len(encoder_multipliers) - 1
         num_blocks_per_level = ntuple(num_blocks_per_level, ndim=encoder_depth)
 
-        self.mlp = nn.Sequential(
-            nn.Linear(in_channels, base_channels),
-            nn.BatchNorm1d(base_channels),
-            nn.ReLU(inplace=True),
+        self.in_conv = nn.Sequential(
+            SparseConv3d(
+                in_channels,
+                base_channels,
+                kernel_size=1,
+                kernel_search_batch_size=kernel_search_batch_size,
+                kernel_matmul_batch_size=kernel_matmul_batch_size,
+            ),
+            BatchNorm(base_channels),
+            ReLU(inplace=True),
         )
         encoder_channels = [base_channels * m for m in encoder_multipliers]
         decoder_channels = [base_channels * m for m in decoder_multipliers]
@@ -314,8 +322,8 @@ class SparseUNet(nn.Module):
         )
 
     def forward(self, x: SpatiallySparseTensor):
-        x = apply_feature_transform(x, self.mlp)
+        x = self.in_conv(x)
         encoder_outputs = self.encoder(x)
         decoder_outputs = self.decoder(encoder_outputs)
         output = self.final_conv(decoder_outputs[-1])
-        return output
+        return output, encoder_outputs, decoder_outputs

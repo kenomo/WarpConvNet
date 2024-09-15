@@ -265,10 +265,15 @@ def spatially_sparse_conv(
 
     if not transposed:
         out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
-    else:
+    else:  # transposed
         out_tensor_stride = output_spatially_sparse_tensor.stride
         if out_tensor_stride is None:
             out_tensor_stride = ntuple(1, ndim=num_spatial_dims)
+        else:  # stride is provided
+            # At least one of the output stride dimensions should be smaller than the input stride dimensions
+            assert any(
+                o < i for o, i in zip(out_tensor_stride, in_tensor_stride)
+            ), "Output stride is larger than input stride"
 
     if transposed and not generative:
         assert (

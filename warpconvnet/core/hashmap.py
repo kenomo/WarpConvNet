@@ -3,10 +3,9 @@ from typing import Union
 
 import numpy as np
 import torch
+import warp as wp
 from jaxtyping import Int
 from torch import Tensor
-
-import warp as wp
 
 
 class HashMethod(enum.Enum):
@@ -274,7 +273,9 @@ class VectorHashTable:
         obj.insert(vec_keys)
         return obj
 
-    def search(self, search_keys: wp.array2d) -> wp.array:
+    def search(self, search_keys: Union[wp.array2d, Tensor]) -> wp.array:
+        if isinstance(search_keys, torch.Tensor):
+            search_keys = wp.from_torch(search_keys)
         return self._hash_struct.search(search_keys)
 
     def unique_index(self) -> Int[Tensor, "N"]:  # noqa: F821
