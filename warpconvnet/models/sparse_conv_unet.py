@@ -37,6 +37,7 @@ class ConvBlock(nn.Module):
                 out_channels,
                 kernel_size=kernel_size,
                 stride=stride,
+                bias=False,
                 kernel_search_batch_size=kernel_search_batch_size,
                 kernel_matmul_batch_size=kernel_matmul_batch_size,
                 conv_algo=conv_algo,
@@ -258,6 +259,7 @@ class SparseUNet(nn.Module):
         base_channels=32,
         encoder_multipliers: List[int] = [1, 2, 4, 8, 16],
         decoder_multipliers: List[int] = [16, 8, 4, 4, 4],
+        block_type: Literal["res", "conv"] = "conv",
         kernel_size: int = 3,
         num_blocks_per_level: Union[List[int], int] = 1,
         kernel_search_batch_size: int = 8,
@@ -276,6 +278,7 @@ class SparseUNet(nn.Module):
                 kernel_size=1,
                 kernel_search_batch_size=kernel_search_batch_size,
                 kernel_matmul_batch_size=kernel_matmul_batch_size,
+                bias=False,
             ),
             BatchNorm(base_channels),
             ReLU(inplace=True),
@@ -290,6 +293,7 @@ class SparseUNet(nn.Module):
             num_blocks_per_level=num_blocks_per_level,
             kernel_search_batch_size=kernel_search_batch_size,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
+            block_type=block_type,
             conv_algo=conv_algo,
         )
         self.decoder = SparseConvDecoder(
@@ -300,6 +304,7 @@ class SparseUNet(nn.Module):
             num_blocks_per_level=num_blocks_per_level,
             kernel_search_batch_size=kernel_search_batch_size,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
+            block_type=block_type,
             conv_algo=conv_algo,
         )
         self.final_conv = nn.Sequential(
@@ -309,6 +314,7 @@ class SparseUNet(nn.Module):
                 kernel_size=1,
                 kernel_search_batch_size=kernel_search_batch_size,
                 kernel_matmul_batch_size=kernel_matmul_batch_size,
+                bias=False,
             ),
             BatchNorm(final_channels),
             ReLU(inplace=True),
@@ -320,6 +326,13 @@ class SparseUNet(nn.Module):
                 kernel_matmul_batch_size=kernel_matmul_batch_size,
             ),
         )
+        self.apply(self.set_bn_init)
+
+    @staticmethod
+    def set_bn_init(m):
+        if isinstance(m, nn.BatchNorm1d):
+            m.weight.data.fill_(1.0)
+            m.bias.data.fill_(0.0)
 
     def forward(self, x: SpatiallySparseTensor):
         x = self.in_conv(x)

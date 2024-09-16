@@ -249,9 +249,12 @@ def spatially_sparse_conv(
     num_total_kernels = np.prod(kernel_size)
 
     if np.prod(kernel_size) == 1 and np.prod(stride) == 1:
+        out_feature_tensor = input_sparse_tensor.feature_tensor @ weight[0]
+        if bias is not None:
+            out_feature_tensor += bias
         return input_sparse_tensor.replace(
             batched_features=BatchedFeatures(
-                input_sparse_tensor.feature_tensor @ weight[0] + bias,
+                out_feature_tensor,
                 offsets=input_sparse_tensor.offsets,
             ),
         )

@@ -1,7 +1,8 @@
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import fire
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -165,11 +166,12 @@ def train(
     model.train()
     bar = tqdm(train_loader)
     for batch_idx, batch_dict in enumerate(bar):
+        torch.cuda.empty_cache()
         optimizer.zero_grad()
         st, batch_dict = dict_to_sparse_tensor(batch_dict, voxel_size=voxel_size, device=device)
         output, _, _ = model(st.to(device))
         loss = F.cross_entropy(
-            output.feature_tensor,
+            output.features,
             batch_dict["labels"].long(),
             reduction="mean",
             ignore_index=ignore_index,
@@ -198,6 +200,7 @@ def test(
     num_test_batches: Optional[int] = None,
 ):
     model.eval()
+    torch.cuda.empty_cache()
     confusion_matrix = MulticlassConfusionMatrix(num_classes=20, ignore_index=ignore_index).to(
         device
     )
@@ -208,12 +211,12 @@ def test(
         output, _, _ = model(st.to(device))
         labels = batch_dict["labels"].long()
         test_loss += F.cross_entropy(
-            output.feature_tensor,
+            output.features,
             labels,
             reduction="mean",
             ignore_index=ignore_index,
         ).item()
-        pred = output.feature_tensor.argmax(dim=1)
+        pred = output.features.argmax(dim=1)
         confusion_matrix.update(pred, labels)
         num_batches += 1
         if num_test_batches is not None and num_batches >= num_test_batches:
@@ -239,10 +242,21 @@ def test(
     return metrics["miou"]
 
 
+def set_seed(seed: int):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main(
     root_dir: str = "./data/scannet_3d",
     batch_size: int = 32,
     voxel_size: float = 0.05,
+    encoder_multipliers: List[int] = [1, 2, 4, 8, 16],
+    decoder_multipliers: List[int] = [16, 8, 4, 4, 4],
+    block_type: Literal["res", "conv"] = "conv",
     ignore_index: int = 255,
     epochs: int = 50,
     lr: float = 1e-3,
@@ -250,7 +264,11 @@ def main(
     gamma: float = 0.7,
     device: str = "cuda",
     use_wandb: bool = False,
+    seed: int = 42,
 ):
+    # Initialize seeed
+    set_seed(seed)
+
     if use_wandb:
         wandb.init(
             project="scannet-segmentation",
@@ -265,6 +283,8 @@ def main(
         )
 
     wp.init()
+    # Debug mode
+    # wp.config.verify_cuda = True
     device = torch.device(device if torch.cuda.is_available() and device == "cuda" else "cpu")
 
     train_dataset = ScanNetDataset(root_dir, split="train", voxel_size=voxel_size)
@@ -277,7 +297,13 @@ def main(
         test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn
     )
 
-    model = SparseUNet(in_channels=3, out_channels=20).to(
+    model = SparseUNet(
+        in_channels=3,
+        out_channels=20,
+        encoder_multipliers=encoder_multipliers,
+        decoder_multipliers=decoder_multipliers,
+        block_type=block_type,
+    ).to(
         device
     )  # Assuming 20 classes for ScanNet
     if use_wandb:
