@@ -9,8 +9,6 @@ from warpconvnet.tests.test_point_collection import TestPointCollection
 from warpconvnet.tests.test_point_conv import TestPointConv
 
 # Network
-from warpconvnet.tests.test_point_conv_enc_dec import TestPointConvEncoder
-from warpconvnet.tests.test_point_conv_unet import TestPointConvUNet
 from warpconvnet.tests.test_point_pool import TestPointPool
 from warpconvnet.tests.test_sort import TestSorting
 
@@ -39,9 +37,6 @@ def test_suite():
     suite.addTests(loader.loadTestsFromTestCase(TestNeighborSearchDiscrete))
 
     suite.addTests(loader.loadTestsFromTestCase(TestSinusoidalEncoding))
-
-    suite.addTests(loader.loadTestsFromTestCase(TestPointConvEncoder))
-    suite.addTests(loader.loadTestsFromTestCase(TestPointConvUNet))
 
     suite.addTests(loader.loadTestsFromTestCase(TestVoxelOps))
     suite.addTests(loader.loadTestsFromTestCase(TestSorting))

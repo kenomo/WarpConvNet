@@ -1,0 +1,69 @@
+import os
+from typing import Optional
+
+import torch
+from torch.utils.data import Dataset
+
+from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_hashmap
+
+SCANNET_URL = "https://cvg-data.inf.ethz.ch/openscene/data/scannet_processed/scannet_3d.zip"
+
+
+class ScanNetDataset(Dataset):
+    """
+    Dataset from the OpenScene project.
+    """
+
+    def __init__(
+        self,
+        root: str = "./data/scannet",
+        split: str = "train",
+        voxel_size: Optional[float] = None,
+    ):
+        super().__init__()
+        self.root = root
+        self.split = split
+        self.voxel_size = voxel_size
+        self.prepare_data()
+
+    def prepare_data(self):
+        # If data is not downloaded, download it
+        if not os.path.exists(self.root):
+            os.makedirs(self.root)
+            os.system(f"wget {SCANNET_URL} -O {self.root}/scannet_3d.zip")
+            os.system(f"unzip {self.root}/scannet_3d.zip -d {self.root}")
+            os.system(f"mv {self.root}/scannet_3d/* {self.root}")
+            os.system(f"rmdir {self.root}/scannet_3d")
+
+        # Get split txts
+        self.files = []
+        with open(os.path.join(self.root, f"scannetv2_{self.split}.txt"), "r") as f:
+            self.files = sorted(f.readlines())
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        file = self.files[index]
+        coords, colors, labels = torch.load(
+            os.path.join(self.root, self.split, file.strip() + "_vh_clean_2.pth"),
+            weights_only=False,
+        )
+        # All to tensor
+        coords = torch.tensor(coords)
+        colors = torch.tensor(colors)
+        labels = torch.tensor(labels)
+        if self.voxel_size is not None:
+            coords = torch.floor(coords / self.voxel_size).int()
+            unique_indices = voxel_downsample_hashmap(coords.cuda()).cpu()
+            return {
+                "coords": coords[unique_indices],
+                "colors": colors[unique_indices],
+                "labels": labels[unique_indices],
+            }
+        else:
+            return {
+                "coords": coords,
+                "colors": colors,
+                "labels": labels,
+            }
