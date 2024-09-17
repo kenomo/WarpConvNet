@@ -279,11 +279,18 @@ class PointCollection(BatchedSpatialFeatures):
         return cls(batched_coordinates, batched_features)
 
     def to_sparse(
-        self, voxel_size: float, pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS
+        self,
+        voxel_size: Optional[float] = None,
+        pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS,
     ):
         """
         Convert the point collection to a spatially sparse tensor.
         """
-        pooling_args.downsample_voxel_size = voxel_size
+        if voxel_size is not None:
+            pooling_args.downsample_voxel_size = voxel_size
+        else:
+            assert (
+                pooling_args.downsample_voxel_size is not None
+            ), "Voxel size must be provided if downsampling is desired"
         st, _ = point_collection_pool(self, pooling_args, return_type="sparse_tensor")
         return st

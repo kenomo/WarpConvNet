@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import fire
 import torch
@@ -10,78 +11,115 @@ from jaxtyping import Float
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 import warpconvnet.nn.functional.transforms as T
 from warpconvnet.dataset.modelnet import ModelNet40Dataset
+from warpconvnet.geometry.ops.neighbor_search_continuous import (
+    ContinuousNeighborSearchArgs,
+)
 from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.activations import ReLU
+from warpconvnet.nn.functional.point_pool import (
+    FEATURE_POOLING_MODE,
+    FeaturePoolingArgs,
+)
 from warpconvnet.nn.normalizations import LayerNorm
+from warpconvnet.nn.point_conv import PointConv
 from warpconvnet.nn.sparse_conv import SparseConv3d
 
 
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        # encoding channels * 3 (xyz) is the input features
-        self.conv1 = SparseConv3d(24, 32, kernel_size=3, stride=1)
-        self.norm1 = LayerNorm(32)
-        self.conv1_stride = SparseConv3d(32, 64, kernel_size=2, stride=2)
-        self.conv2 = SparseConv3d(64, 128, kernel_size=3, stride=1)
-        self.norm2 = LayerNorm(128)
-        self.conv2_stride = SparseConv3d(128, 256, kernel_size=2, stride=2)
-        self.conv3 = SparseConv3d(256, 512, kernel_size=3, stride=1)
-        self.norm3 = LayerNorm(512)
-        self.conv4 = nn.Conv3d(512, 1024, kernel_size=3, stride=2)
-        self.conv4_stride = nn.Conv3d(1024, 1024, kernel_size=2, stride=2)
-        self.norm4 = nn.LayerNorm(1024 * 2 * 2 * 2)
-        self.fc1 = nn.Linear(1024 * 2 * 2 * 2, 1024)
-        self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(1024, 40)  # 40 classes in ModelNet40
+class UseAllConvNet(nn.Module):
+    """
+    Example network that showcases the use of point conv, sparse conv, and dense conv in one model.
+    """
 
-    def forward(self, x: Float[Tensor, "B N 3"]):
-        pc = PointCollection.from_list_of_coordinates(x, encoding_channels=8, encoding_range=1)
-        x = pc.to_sparse(voxel_size=0.05)
-        x = self.conv1(x)
-        x = self.norm1(x)
-        x = T.relu(x)
-        x = self.conv1_stride(x)
-        x = T.relu(x)
-        x = self.conv2(x)
-        x = self.norm2(x)
-        x = T.relu(x)
-        x = self.conv2_stride(x)
-        x = T.relu(x)
-        x = self.conv3(x)
-        x = self.norm3(x)
-        x = x.to_dense(channel_dim=1, min_coords=(-5, -5, -5), max_coords=(4, 4, 4))
-        x = F.relu(x)
-        x = self.conv4(x)
-        x = F.relu(x)
-        x = self.conv4_stride(x)
-        x = torch.flatten(x, 1)
-        x = self.norm4(x)
-        x = F.relu(x)
-        x = self.dropout1(x)
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        output = F.log_softmax(x, dim=1)
-        return output
+    def __init__(
+        self,
+        to_sparse_pooling_args: Optional[FeaturePoolingArgs] = None,
+        voxel_size: float = 0.05,
+    ):
+        super(UseAllConvNet, self).__init__()
+
+        self.point_conv = nn.Sequential(
+            PointConv(
+                24,
+                64,
+                neighbor_search_args=ContinuousNeighborSearchArgs("knn", k=16),
+            ),
+            LayerNorm(64),
+            ReLU(),
+            PointConv(
+                64,
+                64,
+                neighbor_search_args=ContinuousNeighborSearchArgs("radius", radius=voxel_size),
+            ),
+            LayerNorm(64),
+            ReLU(),
+        )
+        # Pooling from point to sparse tensor
+        if to_sparse_pooling_args is None:
+            to_sparse_pooling_args = FeaturePoolingArgs(
+                downsample_voxel_size=voxel_size,
+                pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
+                reductions=["max"],
+            )
+        self.to_sparse_pooling_args = to_sparse_pooling_args
+        self.sparse_conv = nn.Sequential(
+            SparseConv3d(64, 64, kernel_size=3, stride=1),
+            LayerNorm(64),
+            ReLU(),
+            SparseConv3d(64, 64, kernel_size=2, stride=2),  # stride
+            LayerNorm(64),
+            ReLU(),
+            SparseConv3d(64, 128, kernel_size=3, stride=1),
+            LayerNorm(128),
+            ReLU(),
+            SparseConv3d(128, 256, kernel_size=2, stride=2),  # stride
+            LayerNorm(256),
+            ReLU(),
+            SparseConv3d(256, 512, kernel_size=3, stride=1),
+            LayerNorm(512),
+            ReLU(),
+        )
+        self.dense_conv = nn.Sequential(
+            nn.Conv3d(512, 1024, kernel_size=2, stride=2),
+            nn.BatchNorm3d(1024),
+            nn.ReLU(),
+            nn.Conv3d(1024, 1024, kernel_size=2, stride=2),
+            nn.BatchNorm3d(1024),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Dropout(0.5),
+            nn.Linear(1024 * 2 * 2 * 2, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(),
+            nn.Linear(1024, 40),  # 40 classes in ModelNet40
+        )
+
+    def forward(self, x: Float[Tensor, "B N 3"]) -> Float[Tensor, "B 40"]:
+        pc: PointCollection = PointCollection.from_list_of_coordinates(
+            x, encoding_channels=8, encoding_range=1
+        )
+        pc = self.point_conv(pc)
+        st: SpatiallySparseTensor = pc.to_sparse(pooling_args=self.to_sparse_pooling_args)
+        st = self.sparse_conv(st)
+        dt: Tensor = st.to_dense(channel_dim=1, min_coords=(-5, -5, -5), max_coords=(4, 4, 4))
+        return self.dense_conv(dt)
 
 
-def train(model, device, train_loader, optimizer, epoch):
+def train(model, device, train_loader, optimizer, epoch, scheduler):
     model.train()
-    for batch_idx, data_dict in enumerate(train_loader):
+    bar = tqdm(train_loader)
+    for batch_idx, data_dict in enumerate(bar):
         data, target = data_dict["coords"].to(device), data_dict["labels"].to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = F.cross_entropy(output, target)
         loss.backward()
         optimizer.step()
-        if batch_idx % 100 == 0:
-            print(
-                f"Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} "
-                f"({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}"
-            )
+        bar.set_description(f"Loss: {loss.item():.6f}, LR: {scheduler.get_last_lr()}")
 
 
 def test(model, device, test_loader):
@@ -89,10 +127,10 @@ def test(model, device, test_loader):
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data_dict in test_loader:
+        for data_dict in tqdm(test_loader):
             data, target = data_dict["coords"].to(device), data_dict["labels"].to(device)
             output = model(data)
-            test_loss += F.nll_loss(output, target, reduction="sum").item()
+            test_loss += F.cross_entropy(output, target, reduction="sum").item()
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
 
@@ -106,7 +144,7 @@ def test(model, device, test_loader):
 
 def main(
     root_dir: str = "./data/modelnet40",
-    batch_size: int = 128,
+    batch_size: int = 32,
     test_batch_size: int = 100,
     epochs: int = 100,
     lr: float = 1e-3,
@@ -126,12 +164,12 @@ def main(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
 
-    model = Net().to(device)
+    model = UseAllConvNet().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr)
     scheduler = StepLR(optimizer, step_size=scheduler_step_size, gamma=gamma)
 
     for epoch in range(1, epochs + 1):
-        train(model, device, train_loader, optimizer, epoch)
+        train(model, device, train_loader, optimizer, epoch, scheduler)
         accuracy = test(model, device, test_loader)
         scheduler.step()
 
