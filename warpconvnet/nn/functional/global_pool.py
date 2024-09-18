@@ -4,14 +4,15 @@ import torch
 import torch.nn as nn
 from torch_scatter import segment_csr
 
+from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
 
 def global_pool(
-    x: Union[PointCollection, SpatiallySparseTensor],
-    pool_type: Literal["max", "mean", "sum"],
-) -> Union[PointCollection, SpatiallySparseTensor]:
+    x: BatchedSpatialFeatures,
+    reduce: Literal["max", "mean", "sum"],
+) -> BatchedSpatialFeatures:
     """
     Global pooling that generates a single feature per batch.
     The coordinates of the output are the simply the 0 vector.
@@ -23,7 +24,7 @@ def global_pool(
     output_offsets = torch.arange(B + 1, dtype=torch.int32)  # [0, 1, 2, ..., B]
     features = x.features
     input_offsets = x.offsets.long().to(features.device)
-    output_features = segment_csr(src=features, indptr=input_offsets, reduce=pool_type)
+    output_features = segment_csr(src=features, indptr=input_offsets, reduce=reduce)
     return x.replace(
         batched_coordinates=output_coords,
         batched_features=output_features,

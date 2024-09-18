@@ -30,7 +30,7 @@ def _var(
 
 def row_reduction(
     features: Float[Tensor, "N F"],  # noqa
-    neighbors_row_splits: Int[Tensor, "M"],  # noqa
+    neighbors_row_splits: Int[Tensor, "M+1"],  # noqa
     reduction: REDUCTIONS,
     eps: float = 1e-6,
 ) -> Float[Tensor, "M F"]:  # noqa

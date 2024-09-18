@@ -1,8 +1,13 @@
 from typing import Literal
 
+import torch
 import torch.nn as nn
 
+from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.functional.global_pool import global_pool
+from warpconvnet.nn.functional.point_pool import point_collection_pool
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 
 
@@ -33,3 +38,12 @@ class SparseMaxPool(SparsePool):
 class SparseMinPool(SparsePool):
     def __init__(self, kernel_size: int, stride: int):
         super().__init__(kernel_size, stride, "min")
+
+
+class GlobalPool(nn.Module):
+    def __init__(self, reduce: Literal["min", "max", "mean", "sum"] = "max"):
+        super().__init__()
+        self.reduce = reduce
+
+    def forward(self, x: BatchedSpatialFeatures):
+        return global_pool(x, self.reduce)
