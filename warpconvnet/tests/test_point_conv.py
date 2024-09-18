@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
@@ -12,7 +12,7 @@ from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
 )
-from warpconvnet.nn.point_conv import PointConv, PointConvBlock, PointConvUNetBlock
+from warpconvnet.nn.point_conv import PointConv
 
 
 class TestPointConv(unittest.TestCase):
@@ -64,30 +64,6 @@ class TestPointConv(unittest.TestCase):
         # Forward pass
         out = conv(pc)  # noqa: F841
 
-    def test_point_conv_block(self):
-        pc = self.pc
-        # Create conv layer
-        in_channels, out_channels = self.C, 16
-        search_args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
-            radius=0.1,
-        )
-        conv = PointConvBlock(
-            in_channels,
-            out_channels,
-            neighbor_search_args=search_args,
-        ).to(self.device)
-        # Forward pass
-        out = conv(pc)
-        # backward
-        out.feature_tensor.mean().backward()
-        # print the conv param grads
-        for name, param in conv.named_parameters():
-            if param.grad is not None:
-                print(name, param.grad.shape)
-            else:
-                print(name, "has no grad")
-
     def test_point_conv_downsample(self):
         pc = self.pc
         # Create conv layer
@@ -117,38 +93,6 @@ class TestPointConv(unittest.TestCase):
             if param.numel() > 0:
                 self.assertTrue(param.grad is not None)
 
-    def test_point_conv_unet_block(self):
-        pc = self.pc
-        # Create conv layer
-        in_channels, out_channels = self.C, 16
-        search_args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
-            radius=0.1,
-        )
-        pool_args = FeaturePoolingArgs(
-            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
-            reductions=["mean"],
-            downsample_voxel_size=0.1,
-        )
-        conv = PointConvUNetBlock(
-            in_channels=in_channels,
-            inner_module_in_channels=32,
-            inner_module_out_channels=32,
-            out_channels=out_channels,
-            neighbor_search_args=search_args,
-            pooling_args=pool_args,
-        ).to(self.device)
-        # Forward pass
-        out = conv(pc)
-        # backward
-        out[0].feature_tensor.mean().backward()
-        # print the conv param grads
-        for name, param in conv.named_parameters():
-            if param.numel() > 0:
-                print(name, param.grad.shape)
-                self.assertTrue(param.grad is not None)
-
 
 if __name__ == "__main__":
-    wp.init()
     unittest.main()

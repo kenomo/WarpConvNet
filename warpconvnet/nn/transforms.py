@@ -2,21 +2,21 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import BatchedFeatures
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
 from warpconvnet.nn.mlp import MLPBlock
 
 __all__ = [
-    "PointCollectionTransform",
-    "PointCollectionCat",
-    "PointCollectionSum",
-    "PointCollectionLinear",
-    "PointCollectionMLP",
+    "Transform",
+    "Cat",
+    "Sum",
+    "Linear",
+    "MLP",
 ]
 
 
-class PointCollectionTransform(nn.Module):
+class Transform(nn.Module):
     """
     Point transform module that applies a feature transform to the input point collection.
     No spatial operations are performed.
@@ -27,7 +27,7 @@ class PointCollectionTransform(nn.Module):
 
             model:
             feature_transform:
-                _target_: warpconvnet.nn.point_transform.PointCollectionTransform
+                _target_: warpconvnet.nn.point_transform.Transform
                 feature_transform_fn: _target_: torch.nn.ReLU
     """
 
@@ -35,7 +35,7 @@ class PointCollectionTransform(nn.Module):
         super().__init__()
         self.feature_transform_fn = feature_transform_fn
 
-    def forward(self, *pcs: Tuple[PointCollection] | PointCollection) -> PointCollection:
+    def forward(self, *sfs: Tuple[BatchedSpatialFeatures, ...]) -> BatchedSpatialFeatures:
         """
         Apply the feature transform to the input point collection
 
@@ -45,35 +45,41 @@ class PointCollectionTransform(nn.Module):
         Returns:
             Transformed point collection
         """
-        assert [isinstance(pc, PointCollection) for pc in pcs] == [True] * len(pcs)
-        pc = pcs[0]
-        features = [pc.feature_tensor for pc in pcs]
+        assert [isinstance(sf, BatchedSpatialFeatures) for sf in sfs] == [True] * len(sfs)
+        # Assert that all spatial features have the same offsets
+        assert all(sf.offsets == sfs[0].offsets for sf in sfs)
+        sf = sfs[0]
+        features = [sf.feature_tensor for sf in sfs]
 
         out_features = self.feature_transform_fn(*features)
-        return PointCollection(
-            batched_coordinates=pc.batched_coordinates,
-            batched_features=BatchedFeatures(out_features, pc.batched_features.offsets),
-            **pc.extra_attributes,
+        return sf.replace(
+            batched_features=BatchedFeatures(out_features, sf.offsets),
         )
 
 
-class PointCollectionCat(PointCollectionTransform):
+class Cat(Transform):
     def __init__(self):
         # concatenation
         super().__init__(lambda *x: torch.concatenate(x, dim=-1))
 
 
-class PointCollectionSum(PointCollectionTransform):
+class Sum(Transform):
+    @staticmethod
+    def _sum_fn(cls, xs: Tuple[Tensor, ...]) -> Tensor:
+        feat = xs[0].clone()
+        for x in xs[1:]:
+            feat += x
+        return feat
+
     def __init__(self):
-        # sum
-        super().__init__(lambda *x: torch.sum(torch.stack(x), dim=0))
+        super().__init__(self._sum_fn)
 
 
-class PointCollectionLinear(PointCollectionTransform):
+class Linear(Transform):
     def __init__(self, in_channels: int, out_channels: int, bias: bool = True):
         super().__init__(nn.Linear(in_channels, out_channels, bias=bias))
 
 
-class PointCollectionMLP(PointCollectionTransform):
+class MLP(Transform):
     def __init__(self, in_channels: int, hidden_channels: int, out_channels: int):
         super().__init__(MLPBlock(in_channels, hidden_channels, out_channels))

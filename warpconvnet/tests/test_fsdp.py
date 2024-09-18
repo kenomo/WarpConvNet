@@ -2,10 +2,10 @@ import unittest
 
 import torch
 import torch.distributed as dist
+import warp as wp
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-import warp as wp
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
@@ -15,9 +15,8 @@ from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
 )
-from warpconvnet.nn.mlp import MLPBlock
 from warpconvnet.nn.point_conv import PointConv
-from warpconvnet.nn.point_transform import PointCollectionTransform
+from warpconvnet.nn.transforms import MLP
 
 
 class TestFSDP(unittest.TestCase):
@@ -52,9 +51,7 @@ class TestFSDP(unittest.TestCase):
                 pooling_args=pooling_arg,
                 out_point_type="downsample",
             ),
-            PointCollectionTransform(
-                MLPBlock(out_channels, hidden_channels=32, out_channels=out_channels)
-            ),
+            MLP(out_channels, hidden_channels=32, out_channels=out_channels),
         ).to(device)
 
         fsdp_model = FSDP(model)
