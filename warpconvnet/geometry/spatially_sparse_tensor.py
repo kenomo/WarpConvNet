@@ -141,7 +141,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
                 isinstance(batched_features, Tensor) and offsets is not None
             ), "If coordinate is a tensor, features must be a tensor and offsets must be provided."
             batched_coordinates = BatchedDiscreteCoordinates(
-                tensors=batched_coordinates, offsets=offsets, device=device
+                batched_coordinates, offsets=offsets, device=device
             )
             batched_features = BatchedFeatures(batched_features, offsets=offsets, device=device)
 
@@ -290,26 +290,3 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
     @property
     def batch_indexed_coordinates(self) -> Tensor:
         return self.batched_coordinates.batch_indexed_coordinates
-
-    @property
-    def batch_size(self):
-        return self.batched_coordinates.batch_size
-
-    @property
-    def num_spatial_dims(self):
-        return self.batched_coordinates.num_spatial_dims
-
-    def replace(
-        self,
-        batched_coordinates: Optional[BatchedDiscreteCoordinates] = None,
-        batched_features: Optional[BatchedFeatures] = None,
-        **kwargs,
-    ) -> "SpatiallySparseTensor":
-        # copy the _extra_attributes
-        extra_attributes = self.extra_attributes.copy()
-        extra_attributes.update(kwargs)
-        return self.__class__(
-            batched_coordinates or self.batched_coordinates,
-            batched_features or self.batched_features,
-            **extra_attributes,
-        )

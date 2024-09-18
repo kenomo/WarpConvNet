@@ -286,6 +286,10 @@ class BatchedSpatialFeatures:
         )
 
     @property
+    def num_spatial_dims(self):
+        return self.batched_coordinates.num_spatial_dims
+
+    @property
     def coordinate_tensor(self):
         return self.batched_coordinates.batched_tensor
 
@@ -324,6 +328,10 @@ class BatchedSpatialFeatures:
     @property
     def num_channels(self):
         return self.batched_features.num_channels
+
+    @property
+    def batch_size(self) -> int:
+        return len(self.offsets) - 1
 
     def sort(self):
         raise NotImplementedError
@@ -431,7 +439,11 @@ class BatchedSpatialFeatures:
 
         kwargs = {**self.extra_attributes, **kwargs}
         return self.__class__(
-            batched_coordinates=batched_coordinates or self.batched_coordinates,
-            batched_features=batched_features or self.batched_features,
+            batched_coordinates=self.batched_coordinates
+            if batched_coordinates is None
+            else batched_coordinates,
+            batched_features=self.batched_features
+            if batched_features is None
+            else batched_features,
             **kwargs,
         )
