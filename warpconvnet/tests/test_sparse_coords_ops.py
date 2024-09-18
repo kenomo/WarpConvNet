@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
@@ -35,10 +35,10 @@ class TestSparseOps(unittest.TestCase):
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
-        st_upsampled = expand_coords(self.st, (3, 3, 3), (1, 1, 1))
-        self.assertTrue(
-            st_upsampled.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0]
+        up_batch_indexed_coords = expand_coords(
+            self.st.batch_indexed_coordinates, self.st.offsets, (3, 3, 3), (1, 1, 1)
         )
+        self.assertTrue(up_batch_indexed_coords.shape[0] > self.st.coordinate_tensor.shape[0])
 
 
 if __name__ == "__main__":

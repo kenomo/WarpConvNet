@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
@@ -102,7 +102,7 @@ class TestSparseConv(unittest.TestCase):
             offseted_out_coords = batch_indexed_output_coords + kernel_offsets[i]
             indices = in_hashmap.search(wp.from_torch(offseted_out_coords))
             indices = wp.to_torch(indices)
-            valid_bool = (indices > 0).to(device)
+            valid_bool = (indices >= 0).to(device)
             num_valid = valid_bool.sum().item()
             found_in_map = indices[valid_bool]
 

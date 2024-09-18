@@ -2,20 +2,24 @@ import unittest
 
 # Layers
 from warpconvnet.tests.test_encoding import TestSinusoidalEncoding
+
+# Common
+from warpconvnet.tests.test_global_pool import TestGlobalPool
 from warpconvnet.tests.test_neighbor_search_discrete import TestNeighborSearchDiscrete
 
 # Points
 from warpconvnet.tests.test_point_collection import TestPointCollection
 from warpconvnet.tests.test_point_conv import TestPointConv
-
-# Network
 from warpconvnet.tests.test_point_pool import TestPointPool
+
+# All utility
 from warpconvnet.tests.test_sort import TestSorting
+from warpconvnet.tests.test_sparse_conv import TestSparseConv
+from warpconvnet.tests.test_sparse_coords_ops import TestSparseOps
+from warpconvnet.tests.test_sparse_pool import TestSparsePool
 
 # Sparse Tensors
 from warpconvnet.tests.test_spatially_sparse_tensor import TestSpatiallySparseTensor
-
-# All utility
 from warpconvnet.tests.test_utils import TestUtils
 
 # Low-level ops
@@ -35,12 +39,15 @@ def test_suite():
 
     suite.addTests(loader.loadTestsFromTestCase(TestSpatiallySparseTensor))
     suite.addTests(loader.loadTestsFromTestCase(TestNeighborSearchDiscrete))
+    suite.addTests(loader.loadTestsFromTestCase(TestSparseConv))
+    suite.addTests(loader.loadTestsFromTestCase(TestSparseOps))
+    suite.addTests(loader.loadTestsFromTestCase(TestSparsePool))
 
     suite.addTests(loader.loadTestsFromTestCase(TestSinusoidalEncoding))
 
     suite.addTests(loader.loadTestsFromTestCase(TestVoxelOps))
     suite.addTests(loader.loadTestsFromTestCase(TestSorting))
-
+    suite.addTests(loader.loadTestsFromTestCase(TestGlobalPool))
     return suite
 
 

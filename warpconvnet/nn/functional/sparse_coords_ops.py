@@ -64,11 +64,11 @@ def generate_output_coords(
 
 @torch.no_grad()
 def expand_coords(
-    batch_indexed_coords: Int[Tensor, "N 4"],
+    batch_indexed_coords: Int[Tensor, "N D+1"],  # noqa: F821
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     kernel_batch: Optional[int] = None,
-) -> Tuple[Int[Tensor, "M 4"], Int[Tensor, "B + 1"]]:  # noqa: F821
+) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Expand the coordinates by the kernel size
     """
