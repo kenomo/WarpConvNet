@@ -1,12 +1,11 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import numpy as np
 import torch
 import torch.bin
+import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
-
-import warp as wp
 
 snippet = """
     __shared__ int shared_offsets[256];
@@ -39,23 +38,23 @@ snippet = """
 
 @wp.func_native(snippet)
 def _find_bin_native(
-    offsets: wp.array(dtype=wp.int32),
+    offsets: wp.array(dtype=Any),
     offsets_len: int,
     tid: int,
-    batch_index_wp: wp.array(dtype=wp.int32),
+    batch_index_wp: wp.array(dtype=Any),
     batch_index_len: int,
 ):
     ...
 
 
 @wp.func
-def _find_bin(offsets: wp.array(dtype=wp.int32), tid: int) -> int:
+def _find_bin(offsets: wp.array(dtype=Any), tid: int) -> int:
     N = offsets.shape[0] - 1
     bin_id = int(-1)
     for i in range(N):
         start = offsets[i]
         end = offsets[i + 1]
-        if start <= tid < end:
+        if start <= tid and tid < end:
             bin_id = i
             break
     return bin_id

@@ -47,7 +47,7 @@ class Transform(nn.Module):
         """
         assert [isinstance(sf, BatchedSpatialFeatures) for sf in sfs] == [True] * len(sfs)
         # Assert that all spatial features have the same offsets
-        assert all(sf.offsets == sfs[0].offsets for sf in sfs)
+        assert all(torch.allclose(sf.offsets, sfs[0].offsets) for sf in sfs)
         sf = sfs[0]
         features = [sf.feature_tensor for sf in sfs]
 
