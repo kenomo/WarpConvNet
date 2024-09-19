@@ -16,10 +16,24 @@ from warpconvnet.geometry.point_collection import (
 from warpconvnet.nn.base_module import BaseModule
 from warpconvnet.nn.encoding import SinusoidalEncoding
 from warpconvnet.nn.functional.point_pool import FeaturePoolingArgs
-from warpconvnet.nn.mlp import FeatureMLPBlock
+from warpconvnet.nn.mlp import FeatureResidualMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, row_reduction
 
 __all__ = ["PointConv"]
+
+
+def _get_module_input_channel(module: nn.Module) -> int:
+    """Recursively call the function to extract the input channel of the module"""
+    if isinstance(module, nn.Linear):
+        return module.in_features
+    elif isinstance(module, nn.Sequential):
+        return _get_module_input_channel(module[0])
+    elif isinstance(module, nn.Module):
+        # Find first module and call the function
+        for name, module in module.named_children():
+            return _get_module_input_channel(module)
+    else:
+        raise ValueError(f"Unsupported module type: {type(module)}")
 
 
 class PointConv(BaseModule):
@@ -35,7 +49,7 @@ class PointConv(BaseModule):
         out_transform_mlp: Optional[nn.Module] = None,
         hidden_dim: Optional[int] = None,
         channel_multiplier: int = 2,
-        use_rel_pos: bool = True,
+        use_rel_pos: bool = False,
         use_rel_pos_encode: bool = False,
         pos_encode_dim: int = 32,
         pos_encode_range: float = 4,
@@ -109,14 +123,15 @@ class PointConv(BaseModule):
                 edge_in_channels += pos_encode_dim * 3
             elif use_rel_pos:
                 edge_in_channels += 3
-            edge_transform_mlp = FeatureMLPBlock(
+            edge_transform_mlp = FeatureResidualMLPBlock(
                 in_channels=edge_in_channels,
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,
             )
         self.edge_transform_mlp = edge_transform_mlp
+        self.edge_mlp_in_channels = _get_module_input_channel(edge_transform_mlp)
         if out_transform_mlp is None:
-            out_transform_mlp = FeatureMLPBlock(
+            out_transform_mlp = FeatureResidualMLPBlock(
                 in_channels=out_channels * len(reductions),
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,
@@ -164,8 +179,8 @@ class PointConv(BaseModule):
             + query_num_channels
             + self.use_rel_pos_encode * self.positional_encoding.num_channels * 3
             + (not self.use_rel_pos_encode) * self.use_rel_pos * 3
-            == self.edge_transform_mlp.in_channels
-        ), f"input features shape {in_pc.feature_tensor.shape} and query feature shape {query_pc.feature_tensor.shape} does not match the edge_transform_mlp input features {self.edge_transform_mlp.in_channels}"
+            == self.edge_mlp_in_channels
+        ), f"input features shape {in_pc.feature_tensor.shape} and query feature shape {query_pc.feature_tensor.shape} does not match the edge_transform_mlp input channels {self.edge_mlp_in_channels}"
 
         # Get the neighbors
         neighbors = in_pc.neighbors(

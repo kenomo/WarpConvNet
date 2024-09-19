@@ -2,10 +2,10 @@ from torch import nn
 
 from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
 
-__all__ = ["FeatureMLPBlock", "Linear"]
+__all__ = ["FeatureResidualMLPBlock", "Linear"]
 
 
-class FeatureMLPBlock(nn.Module):
+class FeatureResidualMLPBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -35,16 +35,29 @@ class FeatureMLPBlock(nn.Module):
 
 
 class Linear(nn.Linear):
-    def __init__(self, in_channels: int, out_channels: int, bias: bool = True):
-        super().__init__(in_channels, out_channels, bias=bias)
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__(in_features, out_features, bias=bias)
 
     def forward(self, x: BatchedSpatialFeatures):
         return x.replace(batched_features=BatchedFeatures(super().forward(x.features), x.offsets))
 
 
-class MLPBlock(FeatureMLPBlock):
-    def __init__(self, in_channels: int, out_channels: int = None, hidden_channels: int = None):
-        super().__init__(in_channels, out_channels, hidden_channels)
+class LinearNormActivation(nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(in_features, out_features, bias=bias),
+            nn.LayerNorm(out_features),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: BatchedSpatialFeatures):
+        return x.replace(batched_features=BatchedFeatures(self.block(x.features), x.offsets))
+
+
+class ResidualMLPBlock(FeatureResidualMLPBlock):
+    def __init__(self, in_features: int, out_features: int = None, hidden_features: int = None):
+        super().__init__(in_features, out_features, hidden_features)
 
     def forward(self, x: BatchedSpatialFeatures):
         return x.replace(batched_features=BatchedFeatures(super().forward(x.features), x.offsets))
