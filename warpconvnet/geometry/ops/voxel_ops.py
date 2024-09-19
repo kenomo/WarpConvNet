@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 
+import numpy as np
 import torch
 import warp as wp
 from jaxtyping import Bool, Float, Int
@@ -20,6 +21,7 @@ __all__ = [
     "voxel_downsample_mapping",
     "voxel_downsample_ravel",
     "voxel_downsample_hashmap",
+    "voxel_downsample_np",
 ]
 
 
@@ -211,3 +213,24 @@ def voxel_downsample_mapping(
     # Get the index of true values
     down_map = torch.nonzero(valid).squeeze(1)
     return up_map, down_map, valid
+
+
+def voxel_downsample_np(
+    coords: np.ndarray,
+    voxel_size: Optional[float] = None,
+):
+    """
+    Args:
+        coords: np.ndarray - coordinates
+        voxel_size: float - voxel size
+
+    Returns:
+        unique_coords: np.ndarray - unique coordinates
+        unique_indices: np.ndarray - indices of unique coordinates
+    """
+    if voxel_size is not None:
+        coords = np.floor(coords / voxel_size).astype(np.int32)
+    else:
+        coords = coords.astype(np.int32)
+    unique_coords, unique_indices = np.unique(coords, axis=0, return_index=True)
+    return unique_coords, unique_indices

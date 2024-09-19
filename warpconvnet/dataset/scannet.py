@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 from torch.utils.data import Dataset
 
-from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_hashmap
+from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_np
 
 SCANNET_URL = "https://cvg-data.inf.ethz.ch/openscene/data/scannet_processed/scannet_3d.zip"
 
@@ -50,14 +50,11 @@ class ScanNetDataset(Dataset):
             weights_only=False,
         )
         # All to tensor
-        coords = torch.tensor(coords)
-        colors = torch.tensor(colors)
-        labels = torch.tensor(labels)
         if self.voxel_size is not None:
-            coords = torch.floor(coords / self.voxel_size).int()
-            unique_indices = voxel_downsample_hashmap(coords.cuda()).cpu()
+            # Use cpu for downsampling in dataloader. Should use multiple workers.
+            unique_coords, unique_indices = voxel_downsample_np(coords, self.voxel_size)
             return {
-                "coords": coords[unique_indices],
+                "coords": unique_coords,
                 "colors": colors[unique_indices],
                 "labels": labels[unique_indices],
             }

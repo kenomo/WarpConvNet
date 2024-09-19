@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor

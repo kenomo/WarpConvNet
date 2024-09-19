@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import (

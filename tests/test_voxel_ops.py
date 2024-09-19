@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_mapping
 from warpconvnet.geometry.point_collection import PointCollection
 

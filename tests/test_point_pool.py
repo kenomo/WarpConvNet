@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,

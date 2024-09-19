@@ -1,8 +1,8 @@
 import unittest
 
 import torch
-
 import warp as wp
+
 from warpconvnet.geometry.ops.coord_ops import relative_coords
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
