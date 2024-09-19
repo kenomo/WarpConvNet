@@ -266,22 +266,22 @@ def spatially_sparse_conv(
     if in_tensor_stride is None:
         in_tensor_stride = ntuple(1, ndim=num_spatial_dims)
 
-    if not transposed:
-        out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
-    else:  # transposed
-        out_tensor_stride = output_spatially_sparse_tensor.stride
-        if out_tensor_stride is None:
-            out_tensor_stride = ntuple(1, ndim=num_spatial_dims)
-        else:  # stride is provided
-            # At least one of the output stride dimensions should be smaller than the input stride dimensions
-            assert any(
-                o < i for o, i in zip(out_tensor_stride, in_tensor_stride)
-            ), "Output stride is larger than input stride"
-
     if transposed and not generative:
         assert (
             output_spatially_sparse_tensor is not None
         ), "Output spatially sparse tensor is required for transposed convolution"
+
+    if not transposed:
+        out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
+    else:  # transposed
+        if output_spatially_sparse_tensor is not None:
+            out_tensor_stride = output_spatially_sparse_tensor.stride
+        else:
+            out_tensor_stride = ntuple(1, ndim=num_spatial_dims)
+        # At least one of the output stride dimensions should be smaller than the input stride dimensions
+        assert any(
+            o < i for o, i in zip(out_tensor_stride, in_tensor_stride)
+        ), "Output stride is larger than input stride"
 
     # Generate output coordinates and kernel map
     batch_indexed_out_coords, out_offsets, kernel_map = generate_output_coords_and_kernel_map(

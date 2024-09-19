@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -58,6 +58,9 @@ group_norm = create_norm_function(F.group_norm)
 
 # Concatenation
 def cat(*inputs: BatchedSpatialFeatures, dim: int = 1):
+    # If called with a single sequence argument, unpack it
+    if len(inputs) == 1 and isinstance(inputs[0], Sequence):
+        inputs = inputs[0]
     assert all(
         isinstance(input, BatchedSpatialFeatures) for input in inputs
     ), f"Expected all inputs to be BatchedSpatialFeatures, got {type(inputs)}"

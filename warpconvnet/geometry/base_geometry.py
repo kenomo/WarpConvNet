@@ -273,8 +273,9 @@ class BatchedSpatialFeatures:
         coords = self.batched_coordinates[idx]
         features = self.batched_features[idx]
         return self.__class__(
-            batched_coordinates=self.batched_coordinates.__class__(coords),
-            batched_features=self.batched_features.__class__(features),
+            batched_coordinates=coords,
+            batched_features=features,
+            offsets=torch.tensor([0, len(coords)]),
             **self._extra_attributes,
         )
 
