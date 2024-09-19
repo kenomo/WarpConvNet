@@ -5,14 +5,11 @@ import torch.nn as nn
 from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
-from warpconvnet.nn.mlp import MLPBlock
 
 __all__ = [
     "Transform",
     "Cat",
     "Sum",
-    "Linear",
-    "MLP",
 ]
 
 
@@ -45,6 +42,14 @@ class Transform(nn.Module):
         Returns:
             Transformed point collection
         """
+        if isinstance(sfs, BatchedSpatialFeatures):
+            return sfs.replace(
+                batched_features=BatchedFeatures(
+                    self.feature_transform_fn(sfs.feature_tensor), sfs.offsets
+                )
+            )
+
+        # When input is not a single BatchedSpatialFeatures, we assume the inputs are features
         assert [isinstance(sf, BatchedSpatialFeatures) for sf in sfs] == [True] * len(sfs)
         # Assert that all spatial features have the same offsets
         assert all(torch.allclose(sf.offsets, sfs[0].offsets) for sf in sfs)
@@ -73,13 +78,3 @@ class Sum(Transform):
 
     def __init__(self):
         super().__init__(self._sum_fn)
-
-
-class Linear(Transform):
-    def __init__(self, in_channels: int, out_channels: int, bias: bool = True):
-        super().__init__(nn.Linear(in_channels, out_channels, bias=bias))
-
-
-class MLP(Transform):
-    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int):
-        super().__init__(MLPBlock(in_channels, hidden_channels, out_channels))

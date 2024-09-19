@@ -437,13 +437,20 @@ class BatchedSpatialFeatures:
             _extra_attributes = kwargs.pop("_extra_attributes")
             kwargs = {**_extra_attributes, **kwargs}
 
+        if isinstance(batched_features, torch.Tensor):
+            assert batched_features.shape == self.feature_tensor.shape, (
+                f"Feature shape {batched_features.shape} does not match the original feature shape "
+                f"{self.feature_tensor.shape}"
+            )
+            batched_features = BatchedFeatures(batched_features, self.offsets)
+
         kwargs = {**self.extra_attributes, **kwargs}
         return self.__class__(
-            batched_coordinates=self.batched_coordinates
-            if batched_coordinates is None
-            else batched_coordinates,
-            batched_features=self.batched_features
-            if batched_features is None
-            else batched_features,
+            batched_coordinates=(
+                self.batched_coordinates if batched_coordinates is None else batched_coordinates
+            ),
+            batched_features=(
+                self.batched_features if batched_features is None else batched_features
+            ),
             **kwargs,
         )

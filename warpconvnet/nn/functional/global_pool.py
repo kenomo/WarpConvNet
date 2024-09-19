@@ -26,7 +26,7 @@ def global_pool(
     input_offsets = x.offsets.long().to(features.device)
     output_features = segment_csr(src=features, indptr=input_offsets, reduce=reduce)
     return x.replace(
-        batched_coordinates=output_coords,
-        batched_features=output_features,
+        batched_coordinates=x.batched_coordinates.__class__(output_coords, output_offsets),
+        batched_features=x.batched_features.__class__(output_features, output_offsets),
         offsets=output_offsets,
     )

@@ -16,7 +16,7 @@ from warpconvnet.geometry.point_collection import (
 from warpconvnet.nn.base_module import BaseModule
 from warpconvnet.nn.encoding import SinusoidalEncoding
 from warpconvnet.nn.functional.point_pool import FeaturePoolingArgs
-from warpconvnet.nn.mlp import MLPBlock
+from warpconvnet.nn.mlp import FeatureMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, row_reduction
 
 __all__ = ["PointConv"]
@@ -109,17 +109,17 @@ class PointConv(BaseModule):
                 edge_in_channels += pos_encode_dim * 3
             elif use_rel_pos:
                 edge_in_channels += 3
-            edge_transform_mlp = MLPBlock(
+            edge_transform_mlp = FeatureMLPBlock(
                 in_channels=edge_in_channels,
-                hidden_channels=hidden_dim,
                 out_channels=out_channels,
+                hidden_channels=hidden_dim,
             )
         self.edge_transform_mlp = edge_transform_mlp
         if out_transform_mlp is None:
-            out_transform_mlp = MLPBlock(
+            out_transform_mlp = FeatureMLPBlock(
                 in_channels=out_channels * len(reductions),
-                hidden_channels=hidden_dim,
                 out_channels=out_channels,
+                hidden_channels=hidden_dim,
             )
         self.out_transform_mlp = out_transform_mlp
 

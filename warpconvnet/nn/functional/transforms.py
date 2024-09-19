@@ -1,24 +1,25 @@
 from typing import Callable
 
+import torch
 import torch.nn.functional as F
 
-from warpconvnet.geometry.base_geometry import BatchedFeatures
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
 
 
 def apply_feature_transform(
-    input: SpatiallySparseTensor | PointCollection,
+    input: BatchedSpatialFeatures,
     transform: Callable,
 ):
-    assert isinstance(input, SpatiallySparseTensor) or isinstance(input, PointCollection)
+    assert isinstance(
+        input, BatchedSpatialFeatures
+    ), f"Expected BatchedSpatialFeatures, got {type(input)}"
     return input.replace(
         batched_features=BatchedFeatures(transform(input.feature_tensor), offsets=input.offsets),
     )
 
 
 def create_activation_function(torch_func):
-    def wrapper(input: SpatiallySparseTensor | PointCollection):
+    def wrapper(input: BatchedSpatialFeatures):
         return apply_feature_transform(input, torch_func)
 
     return wrapper
@@ -38,7 +39,7 @@ log_softmax = create_activation_function(F.log_softmax)
 
 # Normalization functions
 def create_norm_function(torch_norm_func):
-    def wrapper(input: SpatiallySparseTensor | PointCollection, *args, **kwargs):
+    def wrapper(input: BatchedSpatialFeatures, *args, **kwargs):
         return apply_feature_transform(input, lambda x: torch_norm_func(x, *args, **kwargs))
 
     return wrapper
@@ -53,3 +54,19 @@ instance_norm = create_norm_function(F.instance_norm)
 # instance_norm(input, running_mean=None, running_var=None, weight=None, bias=None, use_input_stats=True, momentum=0.1, eps=1e-5)
 group_norm = create_norm_function(F.group_norm)
 # group_norm(input, num_groups, weight=None, bias=None, eps=1e-5)
+
+
+# Concatenation
+def cat(*inputs: BatchedSpatialFeatures, dim: int = 1):
+    assert all(
+        isinstance(input, BatchedSpatialFeatures) for input in inputs
+    ), f"Expected all inputs to be BatchedSpatialFeatures, got {type(inputs)}"
+    assert all(
+        torch.allclose(input.offsets, inputs[0].offsets) for input in inputs
+    ), "All inputs must have the same offsets"
+    return inputs[0].replace(
+        batched_features=BatchedFeatures(
+            torch.cat([input.feature_tensor for input in inputs], dim=dim),
+            offsets=inputs[0].offsets,
+        )
+    )

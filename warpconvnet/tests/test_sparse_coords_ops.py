@@ -35,8 +35,8 @@ class TestSparseOps(unittest.TestCase):
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
-        up_batch_indexed_coords = expand_coords(
-            self.st.batch_indexed_coordinates, self.st.offsets, (3, 3, 3), (1, 1, 1)
+        up_batch_indexed_coords, _ = expand_coords(
+            self.st.batch_indexed_coordinates, kernel_size=(3, 3, 3), kernel_dilation=(1, 1, 1)
         )
         self.assertTrue(up_batch_indexed_coords.shape[0] > self.st.coordinate_tensor.shape[0])
 
