@@ -2,10 +2,9 @@ from enum import Enum
 from typing import Literal, Optional, Tuple
 
 import torch
+import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
-
-import warp as wp
 
 
 class CONTINUOUS_NEIGHBOR_SEARCH_MODE(Enum):
@@ -68,7 +67,7 @@ class ContinuousNeighborSearchArgs:
             out_str = f"VOXEL({self._grid_dim})"
         return out_str
 
-    def clone(
+    def replace(
         self,
         mode: Optional[CONTINUOUS_NEIGHBOR_SEARCH_MODE] = None,
         radius: Optional[float] = None,
@@ -455,10 +454,8 @@ def batched_knn_search(
     query_positions: [M,3]
     k: int
     """
-    assert (
-        ref_positions.shape[0] == query_positions.shape[0]
-    ), f"Batch size mismatch, {ref_positions.shape[0]} != {query_positions.shape[0]}"
     neighbors = []
+    # TODO(cchoy): warp kernel
     B = len(ref_offsets) - 1
     for b in range(B):
         neighbor_index = knn_search(

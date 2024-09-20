@@ -67,6 +67,19 @@ class TestPointPool(unittest.TestCase):
         self.assertTrue(st.batch_size == self.B)
         self.assertTrue(st.features.shape[1] == self.C)
 
+    def test_point_pool_num_points(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        # Pool features
+        pooled_pc, neighbor_search_result = point_pool(
+            pc,
+            reduction=REDUCTIONS.MEAN,
+            downsample_num_points=1000,
+            return_type="point",
+            return_neighbor_search_result=True,
+        )
+        self.assertTrue(pooled_pc.coordinates.shape[0] == 1000 * self.B)
+
 
 if __name__ == "__main__":
     wp.init()
