@@ -62,7 +62,9 @@ class TestPointPool(unittest.TestCase):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
         # Pool features
-        st = point_pool(pc, reduction=REDUCTIONS.MEAN, downsample_voxel_size=0.1, return_type="sparse")
+        st = point_pool(
+            pc, reduction=REDUCTIONS.MEAN, downsample_voxel_size=0.1, return_type="sparse"
+        )
         self.assertTrue(isinstance(st, SpatiallySparseTensor))
         self.assertTrue(st.batch_size == self.B)
         self.assertTrue(st.features.shape[1] == self.C)
@@ -74,11 +76,11 @@ class TestPointPool(unittest.TestCase):
         pooled_pc, neighbor_search_result = point_pool(
             pc,
             reduction=REDUCTIONS.MEAN,
-            downsample_num_points=1000,
+            downsample_max_num_points=1000,
             return_type="point",
             return_neighbor_search_result=True,
         )
-        self.assertTrue(pooled_pc.coordinates.shape[0] == 1000 * self.B)
+        self.assertGreaterEqual(1000 * self.B, pooled_pc.coordinates.shape[0])
 
 
 if __name__ == "__main__":

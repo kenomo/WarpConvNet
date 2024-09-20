@@ -1,4 +1,4 @@
-from enum import Enum
+import warnings
 from typing import List, Literal, Optional, Tuple, Union
 
 import torch
@@ -16,6 +16,7 @@ from warpconvnet.geometry.ops.voxel_ops import (
     voxel_downsample_random_indices,
 )
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
+from warpconvnet.utils.batch_index import batch_index_from_offset
 
 __all__ = ["point_pool"]
 
@@ -65,7 +66,7 @@ def _to_return_type(
 def point_pool(
     pc: "PointCollection",  # noqa: F821
     reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
-    downsample_num_points: Optional[int] = None,
+    downsample_max_num_points: Optional[int] = None,
     downsample_voxel_size: Optional[float] = None,
     return_type: Literal["point", "sparse"] = "point",
     return_neighbor_search_result: bool = False,
@@ -91,19 +92,19 @@ def point_pool(
         reduction = REDUCTIONS(reduction)
     # assert at least one of the two is provided
     assert (
-        downsample_num_points is not None or downsample_voxel_size is not None
+        downsample_max_num_points is not None or downsample_voxel_size is not None
     ), "Either downsample_num_points or downsample_voxel_size must be provided."
 
-    if downsample_num_points is not None:
+    if downsample_max_num_points is not None:
         from warpconvnet.geometry.point_collection import PointCollection
 
         sample_idx, down_offsets = random_sample(
             batch_offsets=pc.offsets,
-            num_samples_per_batch=downsample_num_points,
+            num_samples_per_batch=downsample_max_num_points,
         )
         down_coords = pc.coordinate_tensor[sample_idx]
         # nearest neighbor of all points to down_coords
-        down_indices = batched_knn_search(
+        knn_down_indices = batched_knn_search(
             ref_positions=down_coords,
             ref_offsets=down_offsets,
             query_positions=pc.coordinate_tensor,
@@ -111,8 +112,10 @@ def point_pool(
             k=1,
         )
         # argsort and get the number of points per down indices
-        sorted_down_indices, to_sort_indices = torch.sort(down_indices.view(-1))
-        unique_indices, counts = torch.unique_consecutive(sorted_down_indices, return_counts=True)
+        sorted_knn_down_indices, to_sorted_knn_down_indices = torch.sort(knn_down_indices.view(-1))
+        unique_indices, counts = torch.unique_consecutive(
+            sorted_knn_down_indices, return_counts=True
+        )
         knn_offsets = torch.cat(
             [
                 torch.zeros(1, dtype=counts.dtype, device=counts.device),
@@ -121,24 +124,46 @@ def point_pool(
             dim=0,
         )
         down_features = row_reduction(
-            pc.features[to_sort_indices],
+            pc.features[to_sorted_knn_down_indices],
             knn_offsets,
             reduction=reduction,
         )
         if len(unique_indices) != len(sample_idx):
-            new_down_features = torch.zeros(
-                len(sample_idx), pc.features.shape[1], device=pc.features.device
+            # select survived indices
+            down_coords = down_coords[unique_indices]
+            down_batch_indices = batch_index_from_offset(down_offsets, backend="torch")
+            down_batch_indices = down_batch_indices.to(unique_indices.device)[unique_indices]
+            _, down_counts = torch.unique_consecutive(down_batch_indices, return_counts=True)
+            down_offsets = torch.cat(
+                [
+                    torch.zeros(1, dtype=down_counts.dtype),
+                    torch.cumsum(down_counts.cpu(), dim=0),
+                ],
+                dim=0,
             )
-            new_down_features[unique_indices] = down_features
-            down_features = new_down_features
+            if return_neighbor_search_result:
+                # update the indices to the unique indices
+                warnings.warn(
+                    "Neighbor search result requires remapping the indices to the unique indices. "
+                    "This may incur additional overhead.",
+                    stacklevel=2,
+                )
+                mapping = torch.zeros(
+                    len(sample_idx), dtype=unique_indices.dtype, device=unique_indices.device
+                )
+                mapping[unique_indices] = torch.arange(
+                    len(unique_indices), device=unique_indices.device
+                )
+                knn_down_indices = mapping[knn_down_indices]
+
         out_pc = PointCollection(
             batched_coordinates=down_coords,
             batched_features=down_features,
             offsets=down_offsets,
-            num_points=downsample_num_points,
+            num_points=downsample_max_num_points,
         )
         if return_neighbor_search_result:
-            return out_pc, NeighborSearchResult(down_indices, down_offsets)
+            return out_pc, NeighborSearchResult(knn_down_indices, knn_offsets)
         return out_pc
 
     if reduction == REDUCTIONS.RANDOM:
