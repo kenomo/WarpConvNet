@@ -33,17 +33,17 @@ class TestSparsePool(unittest.TestCase):
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
-        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="max")
+        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="max")
         self.assertTrue(
             st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
 
-        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="max")
+        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="max")
         self.assertTrue(
             st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
 
-        st_downsampled_first = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduce="random")
+        st_downsampled_first = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="random")
         self.assertTrue(
             st_downsampled_first.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )

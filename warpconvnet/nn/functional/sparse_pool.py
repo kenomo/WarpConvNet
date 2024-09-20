@@ -1,8 +1,7 @@
 import warnings
-from typing import Literal, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
-from torch_scatter import segment_csr
 
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
@@ -14,6 +13,7 @@ from warpconvnet.geometry.spatially_sparse_tensor import (
     SpatiallySparseTensor,
 )
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warpconvnet.ops.reductions import REDUCTIONS, row_reduction
 from warpconvnet.utils.ntuple import ntuple
 
 
@@ -21,12 +21,15 @@ def sparse_reduce(
     spatially_sparse_tensor: SpatiallySparseTensor,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
-    reduce: Literal["max", "min", "mean", "sum", "random"] = "max",
+    reduction: Union[REDUCTIONS, str] = REDUCTIONS.MAX,
     kernel_search_batch_size: Optional[int] = None,
 ) -> SpatiallySparseTensor:
     """
     Max pooling for spatially sparse tensors.
     """
+    if isinstance(reduction, str):
+        reduction = REDUCTIONS(reduction)
+
     if stride is None:
         stride = kernel_size
     ndim = spatially_sparse_tensor.num_spatial_dims
@@ -52,26 +55,11 @@ def sparse_reduce(
         kernel_search_batch_size=kernel_search_batch_size,
         kernel_center_offset=ntuple(0, ndim=ndim),
     )
-    in_maps, unique_out_maps, offsets = kernel_map.to_csr()
+    in_maps, unique_out_maps, map_offsets = kernel_map.to_csr()
     in_features = spatially_sparse_tensor.feature_tensor
+    device = in_features.device
 
-    if reduce == "random":
-        first_in_maps = in_maps[offsets[:-1]]
-        out_features = spatially_sparse_tensor.feature_tensor[first_in_maps]
-        return spatially_sparse_tensor.replace(
-            batched_coordinates=BatchedDiscreteCoordinates(
-                batch_indexed_out_coords[:, 1:],
-                output_offsets,
-            ),
-            batched_features=BatchedFeatures(out_features, output_offsets),
-            stride=out_tensor_stride,
-        )
-
-    out_features = segment_csr(
-        in_features[in_maps],
-        indptr=offsets.to(in_features.device),
-        reduce=reduce,
-    )
+    out_features = row_reduction(in_features, map_offsets.to(device), reduction)
 
     if len(unique_out_maps) != batch_indexed_out_coords.shape[0]:
         warnings.warn(
@@ -108,7 +96,7 @@ def sparse_max_pool(
     """
     Max pooling for spatially sparse tensors.
     """
-    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, "max")
+    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, reduction=REDUCTIONS.MAX)
 
 
 def sparse_avg_pool(
@@ -119,4 +107,4 @@ def sparse_avg_pool(
     """
     Average pooling for spatially sparse tensors.
     """
-    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, "mean")
+    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, reduction=REDUCTIONS.MEAN)

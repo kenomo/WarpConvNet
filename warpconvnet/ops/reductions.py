@@ -46,7 +46,9 @@ def row_reduction(
         out_feature = torch.sqrt(_var(features, neighbors_row_splits)[0] + eps)
     elif reduction == REDUCTIONS.RANDOM:
         num_per_row = neighbors_row_splits.diff()
-        rand_idx = (torch.rand(len(num_per_row)) * num_per_row).floor().long()
+        rand_idx = (
+            (torch.rand(len(num_per_row), device=num_per_row.device) * num_per_row).floor().long()
+        )
         sample_idx = rand_idx + neighbors_row_splits[:-1]
         out_feature = features[sample_idx.to(features.device)]
     else:

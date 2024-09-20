@@ -306,7 +306,7 @@ def spatially_sparse_conv(
             input_sparse_tensor,
             kernel_size=stride,  # reduce by stride
             stride=stride,
-            reduce=stride_reduce,
+            reduction=stride_reduce,
         )
 
     # Call explicit gemm
