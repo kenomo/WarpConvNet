@@ -8,11 +8,8 @@ from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
 )
 from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.nn.functional.point_pool import (
-    FEATURE_POOLING_MODE,
-    FeaturePoolingArgs,
-)
 from warpconvnet.nn.point_conv import PointConv
+from warpconvnet.ops.reductions import REDUCTIONS
 
 
 class TestPointConv(unittest.TestCase):
@@ -72,16 +69,12 @@ class TestPointConv(unittest.TestCase):
             mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
             radius=0.1,
         )
-        pool_args = FeaturePoolingArgs(
-            pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
-            reductions=["mean"],
-            downsample_voxel_size=0.1,
-        )
         conv = PointConv(
             in_channels,
             out_channels,
             neighbor_search_args=search_args,
-            pooling_args=pool_args,
+            pooling_reduction=REDUCTIONS.MEAN,
+            pooling_voxel_size=0.1,
             out_point_type="downsample",
         ).to(self.device)
         # Forward pass

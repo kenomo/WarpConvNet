@@ -14,9 +14,10 @@ class REDUCTIONS(Enum):
     SUM = "sum"
     VAR = "var"
     STD = "std"
+    RANDOM = "random"
 
 
-REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "var", "std"]
+REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "var", "std", "random"]
 
 
 def _var(
@@ -43,6 +44,11 @@ def row_reduction(
         out_feature = _var(features, neighbors_row_splits)[0]
     elif reduction == REDUCTIONS.STD:
         out_feature = torch.sqrt(_var(features, neighbors_row_splits)[0] + eps)
+    elif reduction == REDUCTIONS.RANDOM:
+        num_per_row = neighbors_row_splits.diff()
+        rand_idx = (torch.rand(len(num_per_row)) * num_per_row).floor().long()
+        sample_idx = rand_idx + neighbors_row_splits[:-1]
+        out_feature = features[sample_idx.to(features.device)]
     else:
         raise ValueError(f"Invalid reduction: {reduction}")
     return out_feature

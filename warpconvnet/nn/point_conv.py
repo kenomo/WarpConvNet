@@ -15,9 +15,8 @@ from warpconvnet.geometry.point_collection import (
 )
 from warpconvnet.nn.base_module import BaseModule
 from warpconvnet.nn.encoding import SinusoidalEncoding
-from warpconvnet.nn.functional.point_pool import FeaturePoolingArgs
 from warpconvnet.nn.mlp import FeatureResidualMLPBlock
-from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, row_reduction
+from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = ["PointConv"]
 
@@ -44,7 +43,8 @@ class PointConv(BaseModule):
         in_channels: int,
         out_channels: int,
         neighbor_search_args: ContinuousNeighborSearchArgs,
-        pooling_args: Optional[FeaturePoolingArgs] = None,
+        pooling_reduction: Optional[REDUCTIONS] = None,
+        pooling_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
         hidden_dim: Optional[int] = None,
@@ -70,36 +70,41 @@ class PointConv(BaseModule):
             isinstance(reductions, (tuple, list)) and len(reductions) > 0
         ), f"reductions must be a list or tuple of length > 0, got {reductions}"
         if out_point_type == "provided":
-            assert pooling_args is None
+            assert pooling_reduction is None
+            assert pooling_voxel_size is None
             assert (
                 provided_in_channels is not None
             ), "provided_in_channels must be provided for provided type"
         elif out_point_type == "downsample":
-            assert pooling_args is not None, "pooling_args must be provided for downsample type"
+            assert (
+                pooling_reduction is not None and pooling_voxel_size is not None
+            ), "pooling_reduction and pooling_voxel_size must be provided for downsample type"
             assert (
                 provided_in_channels is None
             ), "provided_in_channels must be None for downsample type"
             # print warning if search radius is not \sqrt(3) times the downsample voxel size
             if (
-                pooling_args.downsample_voxel_size is not None
+                pooling_voxel_size is not None
                 and neighbor_search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS
-                and neighbor_search_args.radius < pooling_args.downsample_voxel_size * (3**0.5)
+                and neighbor_search_args.radius < pooling_voxel_size * (3**0.5)
             ):
                 warnings.warn(
-                    f"neighbor search radius {neighbor_search_args.radius} is less than sqrt(3) times the downsample voxel size {pooling_args.downsample_voxel_size}",
+                    f"neighbor search radius {neighbor_search_args.radius} is less than sqrt(3) times the downsample voxel size {pooling_voxel_size}",
                     stacklevel=2,
                 )
         elif out_point_type == "same":
-            assert pooling_args is None, "pooling_args is only used for downsample"
+            assert (
+                pooling_reduction is None and pooling_voxel_size is None
+            ), "pooling_reduction and pooling_voxel_size must be None for same type"
             assert provided_in_channels is None, "provided_in_channels must be None for same type"
         if (
-            pooling_args is not None
-            and pooling_args.downsample_voxel_size is not None
+            pooling_reduction is not None
+            and pooling_voxel_size is not None
             and neighbor_search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS
-            and pooling_args.downsample_voxel_size > neighbor_search_args.radius
+            and pooling_voxel_size > neighbor_search_args.radius
         ):
             raise ValueError(
-                f"downsample_voxel_size {pooling_args.downsample_voxel_size} must be <= radius {neighbor_search_args.radius}"
+                f"downsample_voxel_size {pooling_voxel_size} must be <= radius {neighbor_search_args.radius}"
             )
 
         assert isinstance(neighbor_search_args, ContinuousNeighborSearchArgs)
@@ -110,7 +115,8 @@ class PointConv(BaseModule):
         self.use_rel_pos_encode = use_rel_pos_encode
         self.out_point_feature_type = out_point_type
         self.neighbor_search_args = neighbor_search_args
-        self.pooling_args = pooling_args
+        self.pooling_reduction = pooling_reduction
+        self.pooling_voxel_size = pooling_voxel_size
         self.positional_encoding = SinusoidalEncoding(pos_encode_dim, data_range=pos_encode_range)
         # When down voxel size is not None, there will be out_point_features will be provided as an additional input
         if provided_in_channels is None:
@@ -142,8 +148,8 @@ class PointConv(BaseModule):
         out_str = f"{self.__class__.__name__}(in_channels={self.in_channels} out_channels={self.out_channels}"
         if self.use_rel_pos_encode:
             out_str += f" rel_pos_encode={self.use_rel_pos_encode}"
-        if self.pooling_args is not None:
-            out_str += f" pooling={self.pooling_args}"
+        if self.pooling_reduction is not None:
+            out_str += f" pooling={self.pooling_reduction}"
         if self.neighbor_search_args is not None:
             out_str += f" neighbor={self.neighbor_search_args}"
         out_str += ")"
@@ -165,8 +171,8 @@ class PointConv(BaseModule):
         elif self.out_point_feature_type == "downsample":
             assert query_pc is None
             query_pc = in_pc.voxel_downsample(
-                self.pooling_args.downsample_voxel_size,
-                pooling_args=self.pooling_args,
+                self.pooling_voxel_size,
+                reduction=self.pooling_reduction,
             )
         elif self.out_point_feature_type == "same":
             assert query_pc is None

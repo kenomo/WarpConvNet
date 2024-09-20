@@ -32,6 +32,12 @@ def sparse_reduce(
     ndim = spatially_sparse_tensor.num_spatial_dims
     stride = ntuple(stride, ndim=ndim)
     kernel_size = ntuple(kernel_size, ndim=ndim)
+
+    in_tensor_stride = spatially_sparse_tensor.stride
+    if in_tensor_stride is None:
+        in_tensor_stride = ntuple(1, ndim=ndim)
+    out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
+
     batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
     batch_indexed_out_coords, output_offsets = generate_output_coords(
         batch_indexed_in_coords, stride
@@ -58,6 +64,7 @@ def sparse_reduce(
                 output_offsets,
             ),
             batched_features=BatchedFeatures(out_features, output_offsets),
+            stride=out_tensor_stride,
         )
 
     out_features = segment_csr(
@@ -89,6 +96,7 @@ def sparse_reduce(
             output_offsets,
         ),
         batched_features=BatchedFeatures(out_features, output_offsets),
+        stride=out_tensor_stride,
     )
 
 

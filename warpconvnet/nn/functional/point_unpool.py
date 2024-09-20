@@ -17,6 +17,9 @@ def _unpool_features(
     pooling_neighbor_search_result: NeighborSearchResult,
     unpooling_mode: Optional[FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,
 ) -> Float[Tensor, "M C"]:
+    if isinstance(unpooling_mode, str):
+        unpooling_mode = FEATURE_UNPOOLING_MODE(unpooling_mode)
+
     if unpooling_mode == FEATURE_UNPOOLING_MODE.REPEAT:
         # pooling_neighbor_search_result.neighbors_index is the index of the neighbors in the pooled_features
         # pooling_neighbor_search_result.neighbors_row_splits is the row splits of the neighbors in the pooled_features
@@ -28,13 +31,17 @@ def _unpool_features(
     raise NotImplementedError(f"Unpooling mode {unpooling_mode} not implemented")
 
 
-def point_collection_unpool(
+def point_unpool(
     pooled_pc: "PointCollection",  # noqa: F821
     unpooled_pc: "PointCollection",  # noqa: F821
-    pooling_neighbor_search_result: NeighborSearchResult,
     concat_unpooled_pc: bool,
     unpooling_mode: Optional[FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,
+    pooling_neighbor_search_result: Optional[NeighborSearchResult] = None,
 ) -> "PointCollection":  # noqa: F821
+    if pooling_neighbor_search_result is None:
+        # TODO(cchoy): Nearest neighbor search from unpooled_pc to pooled_pc
+        raise NotImplementedError("Neighbor search result is required for unpooling")
+
     unpooled_features = _unpool_features(
         pooled_features=pooled_pc.batched_features.batched_tensor,
         pooling_neighbor_search_result=pooling_neighbor_search_result,

@@ -7,7 +7,7 @@ from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.global_pool import global_pool
-from warpconvnet.nn.functional.point_pool import point_collection_pool
+from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 
 

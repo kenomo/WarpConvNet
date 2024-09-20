@@ -274,7 +274,10 @@ def spatially_sparse_conv(
     if not transposed:
         out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
     else:  # transposed
-        if output_spatially_sparse_tensor is not None:
+        if (
+            output_spatially_sparse_tensor is not None
+            and output_spatially_sparse_tensor.stride is not None
+        ):
             out_tensor_stride = output_spatially_sparse_tensor.stride
         else:
             out_tensor_stride = ntuple(1, ndim=num_spatial_dims)

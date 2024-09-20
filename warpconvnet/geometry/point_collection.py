@@ -1,5 +1,6 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
+import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -23,15 +24,29 @@ from warpconvnet.geometry.ops.warp_sort import (
     sorting_permutation,
 )
 from warpconvnet.nn.functional.encodings import sinusoidal_encoding
-from warpconvnet.nn.functional.point_pool import (
-    DEFAULT_FEATURE_POOLING_ARGS,
-    FEATURE_POOLING_MODE,
-    FeaturePoolingArgs,
-    point_collection_pool,
-    pool_features,
-)
+from warpconvnet.nn.functional.point_pool import point_pool
+from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = ["BatchedContinuousCoordinates", "PointCollection"]
+
+
+def random_downsample(
+    offsets: Int[Tensor, "B+1"],  # noqa: F821
+    sample_points: int,
+) -> Tuple[Int[Tensor, "M"], Int[Tensor, "B+1"]]:  # noqa: F821
+    """
+    Randomly downsample the coordinates to the specified number of points
+    """
+    num_points = offsets.diff()
+    batch_size = len(num_points)
+    # sample sample_points per batch. BxN
+    sampled_indices = torch.floor(
+        torch.rand(batch_size, sample_points) * num_points.view(-1, 1)
+    ).to(torch.int32)
+    # Add offsets
+    sampled_indices = sampled_indices + offsets[:-1].view(-1, 1)
+    sampled_indices = sampled_indices.view(-1)
+    return sampled_indices, offsets
 
 
 class BatchedContinuousCoordinates(BatchedCoordinates):
@@ -50,6 +65,15 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
             offsets=self.offsets,
         )
         return self.__class__(tensors=self.batched_tensor[perm], offsets=down_offsets)
+
+    def downsample(self, sample_points: int):
+        """
+        Downsample the coordinates to the specified number of points
+        """
+        sampled_indices, sample_offsets = random_downsample(self.offsets, sample_points)
+        return self.__class__(
+            batched_tensor=self.batched_tensor[sampled_indices], offsets=sample_offsets
+        )
 
     def neighbors(
         self,
@@ -168,7 +192,7 @@ class PointCollection(BatchedSpatialFeatures):
     def voxel_downsample(
         self,
         voxel_size: float,
-        pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS,
+        reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR] = REDUCTIONS.RANDOM,
     ):
         """
         Voxel downsample the coordinates
@@ -176,7 +200,7 @@ class PointCollection(BatchedSpatialFeatures):
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
         extra_args = self.extra_attributes
         extra_args["voxel_size"] = voxel_size
-        if pooling_args.pooling_mode == FEATURE_POOLING_MODE.RANDOM_SAMPLE:
+        if reduction == REDUCTIONS.RANDOM:
             perm, down_offsets = voxel_downsample_random_indices(
                 batched_points=self.coordinate_tensor,
                 offsets=self.offsets,
@@ -200,11 +224,10 @@ class PointCollection(BatchedSpatialFeatures):
 
         neighbors = NeighborSearchResult(vox_inices, vox_offsets)
         down_coords = self.coordinate_tensor[perm]
-        down_features = pool_features(
-            in_feats=self.feature_tensor,
-            down_coords=down_coords,
-            neighbors=neighbors,
-            pooling_args=pooling_args,
+        down_features = row_reduction(
+            self.feature_tensor,
+            neighbors.neighbors_row_splits,
+            reduction,
         )
 
         return self.__class__(
@@ -213,6 +236,21 @@ class PointCollection(BatchedSpatialFeatures):
             ),
             batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
             **extra_args,
+        )
+
+    def downsample(self, sample_points: int) -> "PointCollection":
+        """
+        Downsample the coordinates to the specified number of points
+        """
+        sampled_indices, sample_offsets = random_downsample(self.offsets, sample_points)
+        return self.__class__(
+            batched_coordinates=BatchedContinuousCoordinates(
+                batched_tensor=self.coordinate_tensor[sampled_indices], offsets=sample_offsets
+            ),
+            batched_features=BatchedFeatures(
+                batched_tensor=self.feature_tensor[sampled_indices], offsets=sample_offsets
+            ),
+            **self.extra_attributes,
         )
 
     def neighbors(
@@ -281,16 +319,12 @@ class PointCollection(BatchedSpatialFeatures):
     def to_sparse(
         self,
         voxel_size: Optional[float] = None,
-        pooling_args: FeaturePoolingArgs = DEFAULT_FEATURE_POOLING_ARGS,
+        reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR] = REDUCTIONS.RANDOM,
     ):
         """
         Convert the point collection to a spatially sparse tensor.
         """
-        if voxel_size is not None:
-            pooling_args.downsample_voxel_size = voxel_size
-        else:
-            assert (
-                pooling_args.downsample_voxel_size is not None
-            ), "Voxel size must be provided if downsampling is desired"
-        st, _ = point_collection_pool(self, pooling_args, return_type="sparse_tensor")
+        st = point_pool(
+            self, reduction=reduction, downsample_voxel_size=voxel_size, return_type="sparse"
+        )
         return st
