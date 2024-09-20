@@ -1,6 +1,7 @@
 import unittest
 
 import torch
+import warp as wp
 
 from warpconvnet.core.hashmap import HashMethod
 from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING
@@ -13,6 +14,7 @@ from warpconvnet.utils.unique import unique_hashmap, unique_torch
 class TestSpatiallySparseTensor(unittest.TestCase):
     def setUp(self) -> None:
         # Set random seed
+        wp.init()
         torch.manual_seed(0)
 
         self.B, min_N, max_N, self.C = 3, 100000, 1000000, 7
@@ -85,12 +87,28 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         dense_tensor = torch.rand(16, 3, 128, 128)
         # Empty out 80% of the elements
         dense_tensor[dense_tensor < 0.8] = 0
-        st = SpatiallySparseTensor.from_dense(dense_tensor, channel_dim=1)
+        st = SpatiallySparseTensor.from_dense(dense_tensor, dense_tensor_channel_dim=1)
         self.assertTrue(st.batch_size == 16)
 
         # test to_dense
         dense_tensor2 = st.to_dense(channel_dim=1)
         self.assertTrue((dense_tensor2 == dense_tensor).all())
+
+    def test_sparse_to_dense_to_sparse(self):
+        device = torch.device("cuda:0")
+        st = self.st.to(device=device)
+        dense_tensor = st.to_dense(channel_dim=1)
+        # convolution on dense
+        out_channels = 13
+        conv = torch.nn.Conv3d(self.C, out_channels, 3, padding=1, bias=False).to(device=device)
+        dense_tensor = conv(dense_tensor)
+
+        # convert back to sparse
+        st2 = SpatiallySparseTensor.from_dense(
+            dense_tensor,
+            to_spatial_sparse_tensor=st,
+        )
+        self.assertTrue(st2.num_channels == out_channels)
 
 
 if __name__ == "__main__":

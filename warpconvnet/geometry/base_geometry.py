@@ -439,9 +439,9 @@ class BatchedSpatialFeatures:
             kwargs = {**_extra_attributes, **kwargs}
 
         if isinstance(batched_features, torch.Tensor):
-            assert batched_features.shape == self.feature_tensor.shape, (
-                f"Feature shape {batched_features.shape} does not match the original feature shape "
-                f"{self.feature_tensor.shape}"
+            assert batched_features.shape[0] == self.feature_tensor.shape[0], (
+                f"Feature length {batched_features.shape[0]} does not match the original feature length "
+                f"{self.feature_tensor.shape[0]}"
             )
             batched_features = BatchedFeatures(batched_features, self.offsets)
 

@@ -151,33 +151,63 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
     def from_dense(
         cls,
         dense_tensor: Float[Tensor, "B C H W"] | Float[Tensor, "B C H W D"],
-        channel_dim: int = 1,
+        dense_tensor_channel_dim: int = 1,
+        to_spatial_sparse_tensor: Optional["SpatiallySparseTensor"] = None,
+        dense_max_coords: Optional[Tuple[int, ...]] = None,
         **kwargs,
     ):
         # Move channel dimension to the end
-        if channel_dim != -1 or dense_tensor.ndim != channel_dim + 1:
-            dense_tensor = dense_tensor.moveaxis(channel_dim, -1)
-        spatial_shape = dense_tensor.shape[:-1]
-        # abs sum all elements in the tensor
-        abs_sum = torch.abs(dense_tensor).sum(dim=-1, keepdim=False)
-        # Find all non-zero elements. Expected to be sorted.
-        non_zero_inds = torch.nonzero(abs_sum).int()
+        if dense_tensor_channel_dim != -1 or dense_tensor.ndim != dense_tensor_channel_dim + 1:
+            dense_tensor = dense_tensor.moveaxis(dense_tensor_channel_dim, -1)
+        spatial_shape = dense_tensor.shape[1:-1]
+        batched_spatial_shape = dense_tensor.shape[:-1]
 
         # Flatten the spatial dimensions
         flattened_tensor = dense_tensor.flatten(0, -2)
 
-        # Convert multi-dimensional indices to flattened indices
-        flattened_indices = ravel_multi_index(non_zero_inds, spatial_shape)
+        if to_spatial_sparse_tensor is None:
+            # abs sum all elements in the tensor
+            abs_sum = torch.abs(dense_tensor).sum(dim=-1, keepdim=False)
+            # Find all non-zero elements. Expected to be sorted.
+            non_zero_inds = torch.nonzero(abs_sum).int()
+            # Convert multi-dimensional indices to flattened indices
+            flattened_indices = ravel_multi_index(non_zero_inds, batched_spatial_shape)
 
-        # Use index_select to get the features
-        non_zero_feats = torch.index_select(flattened_tensor, 0, flattened_indices)
+            # Use index_select to get the features
+            non_zero_feats = torch.index_select(flattened_tensor, 0, flattened_indices)
 
-        offsets = offsets_from_batch_index(non_zero_inds[:, 0])
-        return cls(
-            batched_coordinates=BatchedDiscreteCoordinates(non_zero_inds[:, 1:], offsets=offsets),
-            batched_features=BatchedFeatures(non_zero_feats, offsets=offsets),
-            **kwargs,
-        )
+            offsets = offsets_from_batch_index(non_zero_inds[:, 0])
+            return cls(
+                batched_coordinates=BatchedDiscreteCoordinates(
+                    non_zero_inds[:, 1:], offsets=offsets
+                ),
+                batched_features=BatchedFeatures(non_zero_feats, offsets=offsets),
+                **kwargs,
+            )
+        else:
+            assert to_spatial_sparse_tensor.num_spatial_dims == len(spatial_shape)
+            assert to_spatial_sparse_tensor.batch_size == batched_spatial_shape[0]
+            # Use the provided spatial sparse tensor's coordinate only
+            batch_indexed_coords = to_spatial_sparse_tensor.batch_indexed_coordinates
+            # subtract the min_coords
+            min_coords = to_spatial_sparse_tensor.coordinates.min(dim=0).values[1:].view(1, -1)
+            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords
+            if dense_max_coords is not None:
+                invalid = (batch_indexed_coords[:, 1:] > dense_max_coords).any(dim=1)
+                batch_indexed_coords[invalid] = 0
+            else:
+                sparse_max_coords = batch_indexed_coords[:, 1:].max(dim=0).values
+                # This assumes the max_coords are already aligned with the spatial_shape.
+                assert torch.all(
+                    sparse_max_coords.cpu() < torch.tensor(spatial_shape)
+                ), "Max coords must be aligned with the spatial shape."
+            # Ravel the coordinates. This assumes the max_coords are already aligned with the spatial_shape.
+            flattened_indices = ravel_multi_index(batch_indexed_coords, batched_spatial_shape)
+            # use index_select to get the features
+            non_zero_feats = torch.index_select(flattened_tensor, 0, flattened_indices)
+            if dense_max_coords is not None:
+                non_zero_feats[invalid] = 0
+            return to_spatial_sparse_tensor.replace(batched_features=non_zero_feats)
 
     def to_dense(
         self,
@@ -233,6 +263,9 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
                 f"Provided spatial shape {spatial_shape} must be same length as the number of spatial dimensions {self.num_spatial_dims}."
             )
 
+        if isinstance(spatial_shape, Tensor):
+            spatial_shape = spatial_shape.tolist()
+
         # Create a dense tensor
         dense_tensor = torch.zeros(
             (self.batch_size, *spatial_shape, self.num_channels),
@@ -245,8 +278,10 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             batch_indexed_coords, (self.batch_size, *spatial_shape)
         )
         dense_tensor.flatten(0, -2)[flattened_indices] = features
-        # Put the channel dimension in the specified position and move the rest of the dimensions contiguous
-        dense_tensor = dense_tensor.moveaxis(-1, channel_dim)
+
+        if channel_dim != -1:
+            # Put the channel dimension in the specified position and move the rest of the dimensions contiguous
+            dense_tensor = dense_tensor.moveaxis(-1, channel_dim)
         return dense_tensor
 
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "SpatiallySparseTensor":
