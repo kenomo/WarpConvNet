@@ -2,8 +2,8 @@ import unittest
 
 import torch
 
-from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.functional.encodings import sinusoidal_encoding
+from warpconvnet.nn.encodings import RelativeCoordsEncoding, SinusoidalEncoding
+from warpconvnet.nn.functional.encodings import get_freqs, sinusoidal_encoding
 
 
 class TestSinusoidalEncoding(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestSinusoidalEncoding(unittest.TestCase):
             x,
             num_channels=num_channels,
             data_range=1.0,
-            encoding_dim=-1,
+            encoding_axis=-1,
         )
         # Check the distributions of the output to be even between -1, to 1
         # Count the number of values in each bin evenly spaced between -1, to 1

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from jaxtyping import Float
@@ -15,7 +15,7 @@ class FEATURE_UNPOOLING_MODE(Enum):
 def _unpool_features(
     pooled_features: Float[Tensor, "N C"],
     pooling_neighbor_search_result: NeighborSearchResult,
-    unpooling_mode: Optional[FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,
+    unpooling_mode: Optional[Union[str, FEATURE_UNPOOLING_MODE]] = FEATURE_UNPOOLING_MODE.REPEAT,
 ) -> Float[Tensor, "M C"]:
     if isinstance(unpooling_mode, str):
         unpooling_mode = FEATURE_UNPOOLING_MODE(unpooling_mode)
@@ -35,7 +35,7 @@ def point_unpool(
     pooled_pc: "PointCollection",  # noqa: F821
     unpooled_pc: "PointCollection",  # noqa: F821
     concat_unpooled_pc: bool,
-    unpooling_mode: Optional[FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,
+    unpooling_mode: Optional[Union[str, FEATURE_UNPOOLING_MODE]] = FEATURE_UNPOOLING_MODE.REPEAT,
     pooling_neighbor_search_result: Optional[NeighborSearchResult] = None,
 ) -> "PointCollection":  # noqa: F821
     if pooling_neighbor_search_result is None:

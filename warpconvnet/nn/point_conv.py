@@ -14,7 +14,7 @@ from warpconvnet.geometry.point_collection import (
     PointCollection,
 )
 from warpconvnet.nn.base_module import BaseModule
-from warpconvnet.nn.encoding import SinusoidalEncoding
+from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.mlp import FeatureResidualMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 

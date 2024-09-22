@@ -1,27 +1,67 @@
 from typing import Optional
 
-import torch.nn as nn
+import numpy as np
+import torch
+from jaxtyping import Float
+from torch import Tensor, nn
 
-from warpconvnet.nn.functional.encodings import sinusoidal_encoding
+from warpconvnet.geometry.ops.coord_ops import relative_coords
+from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.nn.functional.encodings import get_freqs, sinusoidal_encoding
 
 
 class SinusoidalEncoding(nn.Module):
-    """SinusoidalEncoding."""
-
-    def __init__(
-        self, num_channels: int, data_range: float = 2.0, encoding_dim: Optional[int] = None
-    ):
+    def __init__(self, num_channels: int, data_range: float = 2.0):
         """
+        Initialize a sinusoidal encoding layer.
+
         Args:
-            num_channels: Number of channels in the input data per channel. e.g. if input has 3 channels, and num_channels is 12, then there will be 12 * 3 = 36 channels in the output for each channel in the input.
-            data_range: Range of the input data. max - min. e.g. if data is between 0 and 1, then data_range is 1.
-            encoding_dim: Dimension to apply the encoding to. If None, the encoding is applied to the last dimension.
+            num_channels: Number of channels to encode. Must be even.
+            data_range: The range of the data. For example, if the data is in the range [0, 1], then data_range=1.
         """
         super().__init__()
         assert num_channels % 2 == 0, f"num_channels must be even for sin/cos, got {num_channels}"
         self.num_channels = num_channels
-        self.data_range = data_range
-        self.encoding_dim = encoding_dim
+        self.register_buffer("freqs", get_freqs(num_channels, data_range))
 
-    def forward(self, x):
-        return sinusoidal_encoding(x, self.num_channels, self.data_range, self.encoding_dim)
+    def forward(self, x: Float[Tensor, "* C"]) -> Float[Tensor, "* num_channels*C"]:  # noqa: F821
+        return sinusoidal_encoding(x, freqs=self.freqs)
+
+
+class RelativeCoordsEncoding(nn.Module):
+    def __init__(
+        self,
+        use_sinusoidal: bool = True,
+        num_channels: Optional[int] = None,
+        data_range: Optional[float] = 2.0,
+    ):
+        """
+        Initialize a relative coordinates sinusoidal encoding layer.
+
+        Args:
+            num_channels: Number of channels to encode. Must be even.
+            data_range: The range of the data. For example, if the data is in the range [0, 1], then data_range=1.
+        """
+        super().__init__()
+        if use_sinusoidal:
+            assert (
+                num_channels is not None
+            ), "num_channels must be provided when using sinusoidal encoding"
+            self.sinusoidal_encoding = SinusoidalEncoding(num_channels, data_range)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(use_sinusoidal={self.sinusoidal_encoding is not None})"
+
+    def forward(
+        self,
+        neighbor_coordinates: Float[Tensor, "N D"],
+        neighbor_search_result: NeighborSearchResult,
+        query_coordinates: Optional[Float[Tensor, "M D"]] = None,
+    ) -> Float[Tensor, "X D"]:
+        rel_coords = relative_coords(
+            neighbor_coordinates, neighbor_search_result, query_coordinates
+        )
+        if self.sinusoidal_encoding is None:
+            return rel_coords
+        else:
+            return self.sinusoidal_encoding(rel_coords)
