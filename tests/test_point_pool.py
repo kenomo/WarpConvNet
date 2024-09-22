@@ -7,6 +7,7 @@ from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.point_pool import REDUCTIONS, point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
+from warpconvnet.nn.point_pool import PointMaxPool
 
 
 class TestPointPool(unittest.TestCase):
@@ -82,7 +83,19 @@ class TestPointPool(unittest.TestCase):
         )
         self.assertGreaterEqual(1000 * self.B, pooled_pc.coordinates.shape[0])
 
+    def test_point_max_pool(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        pooled_pc = point_pool(
+            pc,
+            reduction=REDUCTIONS.MAX,
+            downsample_max_num_points=1000,
+            return_type="point",
+        )
+
+        self.assertTrue(torch.all(pooled_pc.offsets.diff() <= 1000))
+        self.assertTrue(pooled_pc.features.shape[1] == self.C)
+
 
 if __name__ == "__main__":
-    wp.init()
     unittest.main()
