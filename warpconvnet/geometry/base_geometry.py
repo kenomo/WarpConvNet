@@ -119,15 +119,15 @@ class BatchedObject:
     def __getitem__(self, idx: int) -> Float[Tensor, "N C"]:  # noqa: F722,F821
         return self.batched_tensor[self.offsets[idx] : self.offsets[idx + 1]]
 
-    def equal_shape(self, value: object) -> bool:
+    def equal_shape(self, value: "BatchedObject") -> bool:
         return (self.offsets == value.offsets).all() and self.numel() == value.numel()
 
-    def equal_rigorous(self, value: object) -> bool:
+    def equal_rigorous(self, value: "BatchedObject") -> bool:
         if not isinstance(value, BatchedObject):
             return False
         return self.equal_shape(value) and (self.batched_tensor == value.batched_tensor).all()
 
-    def __eq__(self, value: object) -> bool:
+    def __eq__(self, value: "BatchedObject") -> bool:
         """
         Accelerated version that only checks length and offsets
         """
@@ -300,7 +300,7 @@ class BatchedSpatialFeatures:
 
     @property
     def coordinates(self):
-        return self.batch_indexed_coordinates
+        return self.coordinate_tensor
 
     @property
     def feature_tensor(self):

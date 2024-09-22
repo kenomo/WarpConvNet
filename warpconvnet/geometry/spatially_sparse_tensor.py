@@ -190,7 +190,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             # Use the provided spatial sparse tensor's coordinate only
             batch_indexed_coords = to_spatial_sparse_tensor.batch_indexed_coordinates
             # subtract the min_coords
-            min_coords = to_spatial_sparse_tensor.coordinates.min(dim=0).values[1:].view(1, -1)
+            min_coords = to_spatial_sparse_tensor.coordinate_tensor.min(dim=0).view(1, -1)
             batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords
             if dense_max_coords is not None:
                 invalid = (batch_indexed_coords[:, 1:] > dense_max_coords).any(dim=1)

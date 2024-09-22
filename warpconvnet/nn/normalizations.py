@@ -1,6 +1,8 @@
 from typing import List
 
-from torch import nn
+import torch
+from jaxtyping import Float
+from torch import Tensor, nn
 
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
@@ -12,6 +14,7 @@ __all__ = [
     "LayerNorm",
     "InstanceNorm",
     "GroupNorm",
+    "RMSNorm",
 ]
 
 
@@ -48,3 +51,22 @@ class InstanceNorm(NormalizationBase):
 class GroupNorm(NormalizationBase):
     def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5):
         super().__init__(nn.GroupNorm(num_groups, num_channels, eps=eps))
+
+
+class _RMSNorm(nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x: Float[Tensor, "... D"]) -> Float[Tensor, "... D"]:
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x: Float[Tensor, "... D"]) -> Float[Tensor, "... D"]:
+        output = self._norm(x.float()).type_as(x)
+        return output * self.weight
+
+
+class RMSNorm(NormalizationBase):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__(_RMSNorm(dim, eps))

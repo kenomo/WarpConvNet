@@ -11,21 +11,29 @@ from warpconvnet.nn.functional.encodings import get_freqs, sinusoidal_encoding
 
 
 class SinusoidalEncoding(nn.Module):
-    def __init__(self, num_channels: int, data_range: float = 2.0):
+    def __init__(self, num_channels: int, data_range: float = 2.0, concat_input: bool = True):
         """
         Initialize a sinusoidal encoding layer.
 
         Args:
             num_channels: Number of channels to encode. Must be even.
             data_range: The range of the data. For example, if the data is in the range [0, 1], then data_range=1.
+            concat_input: Whether to concatenate the input to the output.
         """
         super().__init__()
         assert num_channels % 2 == 0, f"num_channels must be even for sin/cos, got {num_channels}"
         self.num_channels = num_channels
-        self.register_buffer("freqs", get_freqs(num_channels, data_range))
+        self.concat_input = concat_input
+        self.register_buffer("freqs", get_freqs(num_channels // 2, data_range))
+
+    def num_output_channels(self, num_input_channels: int) -> int:
+        if self.concat_input:
+            return (num_input_channels + 1) * self.num_channels
+        else:
+            return num_input_channels * self.num_channels
 
     def forward(self, x: Float[Tensor, "* C"]) -> Float[Tensor, "* num_channels*C"]:  # noqa: F821
-        return sinusoidal_encoding(x, freqs=self.freqs)
+        return sinusoidal_encoding(x, freqs=self.freqs, concat_input=self.concat_input)
 
 
 class RelativeCoordsEncoding(nn.Module):
