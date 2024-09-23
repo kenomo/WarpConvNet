@@ -334,6 +334,10 @@ class BatchedSpatialFeatures:
     def batch_size(self) -> int:
         return len(self.offsets) - 1
 
+    @property
+    def shape(self):
+        return self.feature_shape
+
     def sort(self):
         raise NotImplementedError
 

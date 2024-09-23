@@ -59,7 +59,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         self.batched_tensor = batched_tensor
         self.voxel_size = voxel_size
         self.voxel_origin = voxel_origin
-        # Conver the tensor stride to ntuple
+        # Convert the tensor stride to ntuple
         if tensor_stride is not None:
             self.tensor_stride = ntuple(tensor_stride, ndim=3)
         else:
@@ -152,7 +152,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         cls,
         dense_tensor: Float[Tensor, "B C H W"] | Float[Tensor, "B C H W D"],
         dense_tensor_channel_dim: int = 1,
-        to_spatial_sparse_tensor: Optional["SpatiallySparseTensor"] = None,
+        target_spatial_sparse_tensor: Optional["SpatiallySparseTensor"] = None,
         dense_max_coords: Optional[Tuple[int, ...]] = None,
         **kwargs,
     ):
@@ -165,7 +165,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         # Flatten the spatial dimensions
         flattened_tensor = dense_tensor.flatten(0, -2)
 
-        if to_spatial_sparse_tensor is None:
+        if target_spatial_sparse_tensor is None:
             # abs sum all elements in the tensor
             abs_sum = torch.abs(dense_tensor).sum(dim=-1, keepdim=False)
             # Find all non-zero elements. Expected to be sorted.
@@ -185,12 +185,14 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
                 **kwargs,
             )
         else:
-            assert to_spatial_sparse_tensor.num_spatial_dims == len(spatial_shape)
-            assert to_spatial_sparse_tensor.batch_size == batched_spatial_shape[0]
+            assert target_spatial_sparse_tensor.num_spatial_dims == len(spatial_shape)
+            assert target_spatial_sparse_tensor.batch_size == batched_spatial_shape[0]
             # Use the provided spatial sparse tensor's coordinate only
-            batch_indexed_coords = to_spatial_sparse_tensor.batch_indexed_coordinates
+            batch_indexed_coords = target_spatial_sparse_tensor.batch_indexed_coordinates
             # subtract the min_coords
-            min_coords = to_spatial_sparse_tensor.coordinate_tensor.min(dim=0).view(1, -1)
+            min_coords = target_spatial_sparse_tensor.coordinate_tensor.min(dim=0).values.view(
+                1, -1
+            )
             batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords
             if dense_max_coords is not None:
                 invalid = (batch_indexed_coords[:, 1:] > dense_max_coords).any(dim=1)
@@ -207,7 +209,7 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             non_zero_feats = torch.index_select(flattened_tensor, 0, flattened_indices)
             if dense_max_coords is not None:
                 non_zero_feats[invalid] = 0
-            return to_spatial_sparse_tensor.replace(batched_features=non_zero_feats)
+            return target_spatial_sparse_tensor.replace(batched_features=non_zero_feats)
 
     def to_dense(
         self,

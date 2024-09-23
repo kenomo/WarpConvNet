@@ -56,8 +56,10 @@ class PointConv(BaseModule):
         reductions: List[REDUCTION_TYPES_STR] = ("mean",),
         out_point_type: Literal["provided", "downsample", "same"] = "same",
         provided_in_channels: Optional[int] = None,
+        bias: bool = True,
     ):
-        """If use_relative_position_encoding is True, the positional encoding vertex coordinate
+        """
+        If use_relative_position_encoding is True, the positional encoding vertex coordinate
         difference is added to the edge features.
 
         out_point_feature_type: If "upsample", the output point features will be upsampled to the input point cloud size.
@@ -133,6 +135,7 @@ class PointConv(BaseModule):
                 in_channels=edge_in_channels,
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,
+                bias=bias,
             )
         self.edge_transform_mlp = edge_transform_mlp
         self.edge_mlp_in_channels = _get_module_input_channel(edge_transform_mlp)
@@ -141,6 +144,7 @@ class PointConv(BaseModule):
                 in_channels=out_channels * len(reductions),
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,
+                bias=bias,
             )
         self.out_transform_mlp = out_transform_mlp
 

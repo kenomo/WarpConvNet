@@ -12,6 +12,7 @@ class FeatureResidualMLPBlock(nn.Module):
         out_channels: int = None,
         hidden_channels: int = None,
         activation=nn.ReLU,
+        bias: bool = True,
     ):
         super().__init__()
         if hidden_channels is None:
@@ -19,11 +20,11 @@ class FeatureResidualMLPBlock(nn.Module):
         if out_channels is None:
             out_channels = in_channels
         self.in_channels = in_channels
-        self.fc1 = nn.Linear(in_channels, hidden_channels)
+        self.fc1 = nn.Linear(in_channels, hidden_channels, bias=bias)
         self.norm1 = nn.LayerNorm(hidden_channels)
-        self.fc2 = nn.Linear(hidden_channels, out_channels)
+        self.fc2 = nn.Linear(hidden_channels, out_channels, bias=bias)
         self.norm2 = nn.LayerNorm(out_channels)
-        self.shortcut = nn.Linear(in_channels, out_channels)
+        self.shortcut = nn.Linear(in_channels, out_channels, bias=bias)
         self.activation = activation()
 
     def forward(self, x):

@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch.utils.data import Dataset
@@ -19,11 +19,15 @@ class ScanNetDataset(Dataset):
         root: str = "./data/scannet",
         split: str = "train",
         voxel_size: Optional[float] = None,
+        min_coord: Optional[Tuple[float, float, float]] = None,
     ):
         super().__init__()
         self.root = root
         self.split = split
         self.voxel_size = voxel_size
+        if min_coord is not None:
+            min_coord = torch.tensor(min_coord)
+        self.min_coord = min_coord
         self.prepare_data()
 
     def prepare_data(self):
@@ -37,7 +41,7 @@ class ScanNetDataset(Dataset):
 
         # Get split txts
         self.files = []
-        with open(os.path.join(self.root, f"scannetv2_{self.split}.txt"), "r") as f:
+        with open(os.path.join(self.root, f"scannetv2_{self.split}.txt")) as f:
             self.files = sorted(f.readlines())
 
     def __len__(self):
@@ -49,6 +53,8 @@ class ScanNetDataset(Dataset):
             os.path.join(self.root, self.split, file.strip() + "_vh_clean_2.pth"),
             weights_only=False,
         )
+        if self.min_coord is not None:
+            coords -= self.min_coord
         # All to tensor
         if self.voxel_size is not None:
             # Use cpu for downsampling in dataloader. Should use multiple workers.

@@ -11,6 +11,34 @@ ci:
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.3.0
+    hooks:
+      - id: check-docstring-first
+      - id: check-yaml
+      - id: debug-statements
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+      - id: check-toml
+      - id: check-case-conflict
+      - id: check-added-large-files
+
+  # python upgrading syntax to newer version
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.3.1
+    hooks:
+      - id: pyupgrade
+        args: [--py38-plus]
+
+  # word spelling linter
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.4
+    hooks:
+      - id: codespell
+        args:
+          - --skip=logs/**,data/**,*.ipynb
+          - --ignore-words-list=crate
+
   - repo: https://github.com/psf/black
     rev: 23.1.0
     hooks:
@@ -39,23 +67,3 @@ repos:
             "logs/*,data/*",
           ]
         additional_dependencies: [flake8-rst-docstrings==0.3.0]
-
-  # - repo: https://github.com/astral-sh/ruff-pre-commit
-  #   # Ruff version.
-  #   rev: v0.5.0
-  #   hooks:
-  #     # Run the linter.
-  #     - id: ruff
-  #       args:
-  #         [
-  #           "--fix", # Apply fixes to resolve lint violations.
-  #           "--ignore", # Ignore specific lint rules.
-  #           "F722",
-  #         ]
-  #     # Run the formatter.
-  #     - id: ruff-format
-  #       args:
-  #         [
-  #           "--exclude",
-  #           "*/convnet/*"
-  #         ]

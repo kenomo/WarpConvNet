@@ -106,7 +106,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         # convert back to sparse
         st2 = SpatiallySparseTensor.from_dense(
             dense_tensor,
-            to_spatial_sparse_tensor=st,
+            target_spatial_sparse_tensor=st,
         )
         self.assertTrue(st2.num_channels == out_channels)
 
