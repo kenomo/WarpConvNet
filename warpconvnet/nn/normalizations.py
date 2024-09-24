@@ -34,8 +34,8 @@ class NormalizationBase(nn.Module):
 
 
 class BatchNorm(NormalizationBase):
-    def __init__(self, num_features: int, eps: float = 1e-5):
-        super().__init__(nn.BatchNorm1d(num_features, eps=eps))
+    def __init__(self, num_features: int, eps: float = 1e-5, momentum: float = 0.1):
+        super().__init__(nn.BatchNorm1d(num_features, eps=eps, momentum=momentum))
 
 
 class LayerNorm(NormalizationBase):

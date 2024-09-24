@@ -7,6 +7,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
 from warpconvnet.ops.batch_copy import batch_to_cat, cat_to_batch
@@ -213,7 +214,7 @@ class TransformerBlock(nn.Module):
         return out
 
 
-class SpatialFeaturesAttention(Attention):
+class Transformer(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -222,8 +223,56 @@ class SpatialFeaturesAttention(Attention):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
+        hidden_dim_multiplier: int = 4,
+        ffn_dim_multiplier: Optional[float] = None,
+        num_layers: int = 1,
+        norm_eps: float = 1e-5,
+    ):
+        super().__init__()
+        self.blocks = nn.ModuleList()
+        for _ in range(num_layers):
+            self.blocks.append(
+                TransformerBlock(
+                    dim,
+                    num_heads,
+                    qkv_bias,
+                    qk_scale,
+                    attn_drop,
+                    proj_drop,
+                    hidden_dim_multiplier,
+                    ffn_dim_multiplier,
+                    norm_eps,
+                )
+            )
+        self.norm = RMSNorm(dim, eps=norm_eps)
+
+    def forward(
+        self,
+        x: Float[Tensor, "B N D"],
+        pos: Float[Tensor, "B N 3"],
+        mask: Optional[Float[Tensor, "B N N"]] = None,
+        num_points: Optional[Int[Tensor, "B"]] = None,  # noqa: F821
+    ) -> Float[Tensor, "B N D"]:
+        for block in self.blocks:
+            x = block(x, pos, mask, num_points)
+        return self.norm(x)
+
+
+class SpatialFeaturesTransformer(Transformer):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        num_layers: int = 1,
+        qkv_bias: bool = False,
+        qk_scale: Optional[float] = None,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
         num_encoding_channels: int = 32,
         encoding_range: float = 1.0,
+        hidden_dim_multiplier: int = 4,
+        ffn_dim_multiplier: Optional[float] = None,
+        norm_eps: float = 1e-5,
     ):
         super().__init__(
             dim,
@@ -232,6 +281,10 @@ class SpatialFeaturesAttention(Attention):
             qk_scale,
             attn_drop,
             proj_drop,
+            hidden_dim_multiplier,
+            ffn_dim_multiplier,
+            num_layers,
+            norm_eps,
         )
         self.to_attn = ToAttention(
             dim,
@@ -245,7 +298,6 @@ class SpatialFeaturesAttention(Attention):
 
     def forward(self, x: BatchedSpatialFeatures) -> BatchedSpatialFeatures:
         features, pos_enc, mask, num_points = self.to_attn(x)
-        # No need to zero out points here, as from_attn will crop out the padded points
-        y = super().forward(features, pos_enc, mask)
+        y = super().forward(features, pos_enc, mask, num_points)
         y = self.from_attn(y, x)
         return y

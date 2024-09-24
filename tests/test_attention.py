@@ -6,7 +6,7 @@ import warp as wp
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.attention import (
     Attention,
-    SpatialFeaturesAttention,
+    SpatialFeaturesTransformer,
     ToAttention,
     TransformerBlock,
     ZeroOutPoints,
@@ -27,7 +27,7 @@ class TestAttention(unittest.TestCase):
     def test_spatial_attention(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
-        attn = SpatialFeaturesAttention(
+        attn = SpatialFeaturesTransformer(
             self.C,
             num_heads=8,
             num_encoding_channels=32,

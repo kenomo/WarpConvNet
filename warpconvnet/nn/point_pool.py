@@ -96,12 +96,20 @@ class PointSumPool(PointPoolBase):
 
 class PointUnpool(nn.Module):
     def __init__(
-        self, unpooling_mode: Union[str, FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT
+        self,
+        unpooling_mode: Union[str, FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,
+        concat_unpooled_pc: bool = False,
     ):
         super().__init__()
         if isinstance(unpooling_mode, str):
             unpooling_mode = FEATURE_UNPOOLING_MODE(unpooling_mode)
         self.unpooling_mode = unpooling_mode
+        self.concat_unpooled_pc = concat_unpooled_pc
 
     def forward(self, pooled_pc: PointCollection, unpooled_pc: PointCollection):
-        return point_unpool(pooled_pc, unpooled_pc, self.unpooling_mode)
+        return point_unpool(
+            pooled_pc=pooled_pc,
+            unpooled_pc=unpooled_pc,
+            unpooling_mode=self.unpooling_mode,
+            concat_unpooled_pc=self.concat_unpooled_pc,
+        )

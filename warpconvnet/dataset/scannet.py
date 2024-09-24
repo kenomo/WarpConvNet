@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 from torch.utils.data import Dataset
@@ -19,12 +19,14 @@ class ScanNetDataset(Dataset):
         root: str = "./data/scannet",
         split: str = "train",
         voxel_size: Optional[float] = None,
+        out_type: Literal["point", "voxel"] = "voxel",
         min_coord: Optional[Tuple[float, float, float]] = None,
     ):
         super().__init__()
         self.root = root
         self.split = split
         self.voxel_size = voxel_size
+        self.out_type = out_type
         if min_coord is not None:
             min_coord = torch.tensor(min_coord)
         self.min_coord = min_coord
@@ -59,6 +61,8 @@ class ScanNetDataset(Dataset):
         if self.voxel_size is not None:
             # Use cpu for downsampling in dataloader. Should use multiple workers.
             unique_coords, unique_indices = voxel_downsample_np(coords, self.voxel_size)
+            if self.out_type == "point":
+                unique_coords = coords[unique_indices]
             return {
                 "coords": unique_coords,
                 "colors": colors[unique_indices],
