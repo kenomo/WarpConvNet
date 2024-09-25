@@ -8,6 +8,7 @@ from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
+from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
 from warpconvnet.ops.batch_copy import batch_to_cat, cat_to_batch
@@ -47,7 +48,7 @@ def offset_to_mask(
     return mask
 
 
-class ToAttention(nn.Module):
+class ToAttention(BaseSpatialModule):
     def __init__(
         self,
         out_channels: int,

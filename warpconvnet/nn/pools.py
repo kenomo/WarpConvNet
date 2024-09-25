@@ -6,12 +6,13 @@ import torch.nn as nn
 from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.global_pool import global_pool
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 
 
-class SparsePool(nn.Module):
+class SparsePool(BaseSpatialModule):
     def __init__(
         self,
         kernel_size: int,
@@ -40,7 +41,7 @@ class SparseMinPool(SparsePool):
         super().__init__(kernel_size, stride, "min")
 
 
-class GlobalPool(nn.Module):
+class GlobalPool(BaseSpatialModule):
     def __init__(self, reduce: Literal["min", "max", "mean", "sum"] = "max"):
         super().__init__()
         self.reduce = reduce

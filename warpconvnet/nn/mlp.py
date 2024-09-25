@@ -1,6 +1,7 @@
 from torch import nn
 
 from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
+from warpconvnet.nn.base_module import BaseSpatialModule
 
 __all__ = ["FeatureResidualMLPBlock", "Linear"]
 
@@ -35,15 +36,16 @@ class FeatureResidualMLPBlock(nn.Module):
         return out
 
 
-class Linear(nn.Linear):
+class Linear(BaseSpatialModule):
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
-        super().__init__(in_features, out_features, bias=bias)
+        super().__init__()
+        self.block = nn.Linear(in_features, out_features, bias=bias)
 
     def forward(self, x: BatchedSpatialFeatures):
-        return x.replace(batched_features=BatchedFeatures(super().forward(x.features), x.offsets))
+        return x.replace(batched_features=BatchedFeatures(self.block(x.features), x.offsets))
 
 
-class LinearNormActivation(nn.Module):
+class LinearNormActivation(BaseSpatialModule):
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
         super().__init__()
         self.block = nn.Sequential(

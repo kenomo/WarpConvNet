@@ -10,24 +10,19 @@ import warp as wp
 from jaxtyping import Float
 from torch import Tensor
 from torch.optim.lr_scheduler import StepLR
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import warpconvnet.nn.functional.transforms as T
 from warpconvnet.dataset.modelnet import ModelNet40Dataset
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
 )
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warpconvnet.nn.activations import ReLU
-from warpconvnet.nn.functional.point_pool import (
-    FEATURE_POOLING_MODE,
-    FeaturePoolingArgs,
-)
-from warpconvnet.nn.normalizations import LayerNorm
 from warpconvnet.nn.point_conv import PointConv
+from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv3d
+from warpconvnet.ops.reductions import REDUCTIONS
 
 
 class UseAllConvNet(nn.Module):
@@ -37,51 +32,45 @@ class UseAllConvNet(nn.Module):
 
     def __init__(
         self,
-        to_sparse_pooling_args: Optional[FeaturePoolingArgs] = None,
         voxel_size: float = 0.05,
     ):
-        super(UseAllConvNet, self).__init__()
+        super().__init__()
 
-        self.point_conv = nn.Sequential(
+        self.point_conv = Sequential(
             PointConv(
                 24,
                 64,
                 neighbor_search_args=ContinuousNeighborSearchArgs("knn", k=16),
             ),
-            LayerNorm(64),
-            ReLU(),
+            nn.LayerNorm(64),
+            nn.ReLU(),
             PointConv(
                 64,
                 64,
                 neighbor_search_args=ContinuousNeighborSearchArgs("radius", radius=voxel_size),
             ),
-            LayerNorm(64),
-            ReLU(),
+            nn.LayerNorm(64),
+            nn.ReLU(),
         )
         # Pooling from point to sparse tensor
-        if to_sparse_pooling_args is None:
-            to_sparse_pooling_args = FeaturePoolingArgs(
-                downsample_voxel_size=voxel_size,
-                pooling_mode=FEATURE_POOLING_MODE.REDUCTIONS,
-                reductions=["max"],
-            )
-        self.to_sparse_pooling_args = to_sparse_pooling_args
-        self.sparse_conv = nn.Sequential(
+        self.voxel_size = voxel_size
+        # must use Sequential here to use spatial ops such as SparseConv3d
+        self.sparse_conv = Sequential(
             SparseConv3d(64, 64, kernel_size=3, stride=1),
-            LayerNorm(64),
-            ReLU(),
+            nn.LayerNorm(64),
+            nn.ReLU(),
             SparseConv3d(64, 64, kernel_size=2, stride=2),  # stride
-            LayerNorm(64),
-            ReLU(),
+            nn.LayerNorm(64),
+            nn.ReLU(),
             SparseConv3d(64, 128, kernel_size=3, stride=1),
-            LayerNorm(128),
-            ReLU(),
+            nn.LayerNorm(128),
+            nn.ReLU(),
             SparseConv3d(128, 256, kernel_size=2, stride=2),  # stride
-            LayerNorm(256),
-            ReLU(),
+            nn.LayerNorm(256),
+            nn.ReLU(),
             SparseConv3d(256, 512, kernel_size=3, stride=1),
-            LayerNorm(512),
-            ReLU(),
+            nn.LayerNorm(512),
+            nn.ReLU(),
         )
         self.dense_conv = nn.Sequential(
             nn.Conv3d(512, 1024, kernel_size=2, stride=2),
@@ -103,7 +92,9 @@ class UseAllConvNet(nn.Module):
             x, encoding_channels=8, encoding_range=1
         )
         pc = self.point_conv(pc)
-        st: SpatiallySparseTensor = pc.to_sparse(pooling_args=self.to_sparse_pooling_args)
+        st: SpatiallySparseTensor = pc.to_sparse(
+            reduction=REDUCTIONS.MAX, voxel_size=self.voxel_size
+        )
         st = self.sparse_conv(st)
         dt: Tensor = st.to_dense(channel_dim=1, min_coords=(-5, -5, -5), max_coords=(4, 4, 4))
         return self.dense_conv(dt)

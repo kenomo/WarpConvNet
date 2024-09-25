@@ -13,7 +13,7 @@ from warpconvnet.geometry.point_collection import (
     BatchedFeatures,
     PointCollection,
 )
-from warpconvnet.nn.base_module import BaseModule
+from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.mlp import FeatureResidualMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
@@ -35,7 +35,7 @@ def _get_module_input_channel(module: nn.Module) -> int:
         raise ValueError(f"Unsupported module type: {type(module)}")
 
 
-class PointConv(BaseModule):
+class PointConv(BaseSpatialModule):
     """PointFeatureConv."""
 
     def __init__(

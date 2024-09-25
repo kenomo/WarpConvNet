@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
+from warpconvnet.nn.base_module import BaseSpatialModule
 
 __all__ = [
     "Transform",
@@ -13,7 +14,7 @@ __all__ = [
 ]
 
 
-class Transform(nn.Module):
+class Transform(BaseSpatialModule):
     """
     Point transform module that applies a feature transform to the input point collection.
     No spatial operations are performed.

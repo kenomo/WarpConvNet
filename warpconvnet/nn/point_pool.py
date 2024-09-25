@@ -5,6 +5,7 @@ import torch.nn as nn
 from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
 from warpconvnet.ops.reductions import REDUCTIONS
@@ -12,7 +13,7 @@ from warpconvnet.ops.reductions import REDUCTIONS
 __all__ = ["PointPoolBase", "PointMaxPool", "PointAvgPool", "PointSumPool", "PointUnpool"]
 
 
-class PointPoolBase(nn.Module):
+class PointPoolBase(BaseSpatialModule):
     def __init__(
         self,
         reduction: Union[str, REDUCTIONS] = REDUCTIONS.MAX,
@@ -94,7 +95,7 @@ class PointSumPool(PointPoolBase):
         )
 
 
-class PointUnpool(nn.Module):
+class PointUnpool(BaseSpatialModule):
     def __init__(
         self,
         unpooling_mode: Union[str, FEATURE_UNPOOLING_MODE] = FEATURE_UNPOOLING_MODE.REPEAT,

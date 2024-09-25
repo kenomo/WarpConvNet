@@ -8,6 +8,7 @@ from torch.nn import init
 from torch.nn.init import calculate_gain
 
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,
@@ -16,7 +17,7 @@ from warpconvnet.nn.functional.sparse_conv import (
 from warpconvnet.utils.ntuple import ntuple
 
 
-class SpatiallySparseConv(nn.Module):
+class SpatiallySparseConv(BaseSpatialModule):
     def __init__(
         self,
         in_channels: int,
@@ -33,7 +34,7 @@ class SpatiallySparseConv(nn.Module):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     ):
-        super(SpatiallySparseConv, self).__init__()
+        super().__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
         self.num_spatial_dims = num_spatial_dims
         self.in_channels = in_channels
@@ -140,7 +141,7 @@ class SparseConv2d(SpatiallySparseConv):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         kernel_matmul_batch_size: int = 2,
     ):
-        super(SparseConv2d, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,
@@ -173,7 +174,7 @@ class SparseConv3d(SpatiallySparseConv):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         kernel_matmul_batch_size: int = 2,
     ):
-        super(SparseConv3d, self).__init__(
+        super().__init__(
             in_channels=in_channels,
             out_channels=out_channels,
             kernel_size=kernel_size,

@@ -3,9 +3,11 @@ from typing import Any, Dict, Tuple
 import torch
 import torch.nn as nn
 
+from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
 
-class BaseModule(nn.Module):
-    """Base module for models."""
+
+class BaseSpatialModule(nn.Module):
+    """Base module for spatial features. The input must be an instance of `BatchedSpatialFeatures`."""
 
     def __init__(self):
         super().__init__()
@@ -16,8 +18,12 @@ class BaseModule(nn.Module):
         """Returns the device that the model is on."""
         return self.device_indicator_param.device
 
+    def forward(self, x: BatchedSpatialFeatures):
+        """Forward pass."""
+        raise NotImplementedError
 
-class BaseModel(BaseModule):
+
+class BaseSpatialModel(BaseSpatialModule):
     """Base model class."""
 
     def data_dict_to_input(self, data_dict, **kwargs) -> Any:

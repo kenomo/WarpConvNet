@@ -11,33 +11,35 @@ from torchvision import datasets, transforms
 import warpconvnet.nn.functional.transforms as T
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
+from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv2d
 
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = SparseConv2d(1, 32, kernel_size=3, stride=1, kernel_search_batch_size=9)
-        self.conv2 = SparseConv2d(32, 64, kernel_size=3, stride=1, kernel_search_batch_size=9)
-        self.fc1 = nn.Linear(14 * 14 * 64, 128)
-        self.fc2 = nn.Linear(128, 10)
-        self.dropout1 = nn.Dropout2d(0.25)
-        self.dropout2 = nn.Dropout2d(0.5)
+        super().__init__()
+        # must use Sequential here to use spatial ops such as SparseConv2d
+        self.layers = Sequential(
+            SparseConv2d(1, 32, kernel_size=3, stride=1, kernel_search_batch_size=9),
+            nn.ReLU(),
+            SparseConv2d(32, 64, kernel_size=3, stride=1, kernel_search_batch_size=9),
+            nn.ReLU(),
+        )
+        self.head = nn.Sequential(
+            nn.Dropout(0.25),
+            nn.Linear(14 * 14 * 64, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, 10),
+        )
 
     def forward(self, x: Tensor):
         x = SpatiallySparseTensor.from_dense(x)
-        x = self.conv1(x)
-        x = T.relu(x)
-        x = self.conv2(x)
-        x = T.relu(x)
+        x = self.layers(x)
         x = sparse_max_pool(x, kernel_size=(2, 2), stride=(2, 2))
         x = x.to_dense(channel_dim=1, spatial_shape=(14, 14))
         x = torch.flatten(x, 1)
-        x = self.dropout1(x)
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.dropout2(x)
-        x = self.fc2(x)
+        x = self.head(x)
         output = F.log_softmax(x, dim=1)
         return output
 
