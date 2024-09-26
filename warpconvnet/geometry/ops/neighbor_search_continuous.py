@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import torch
 import warp as wp
@@ -437,6 +437,32 @@ def knn_search(
     else:
         raise ValueError(f"search_method {search_method} not supported.")
     return neighbors_index
+
+
+@torch.no_grad()
+def batch_list_knn_search(
+    ref_positions: List[Int[Tensor, "N 3"]],
+    query_positions: List[Int[Tensor, "M 3"]],
+    k: int,
+    search_method: Literal["chunk", "bvh"] = "chunk",  # noqa: F821
+    chunk_size: int = 4096,
+) -> List[Int[Tensor, "M K"]]:
+    """
+    ref_positions: List[Tensor[N, 3]]
+    query_positions: List[Tensor[M, 3]]
+    k: int
+    """
+    neighbors = []
+    for ref_pos, query_pos in zip(ref_positions, query_positions):
+        neighbor_index = knn_search(
+            ref_pos,
+            query_pos,
+            k,
+            search_method,
+            chunk_size,
+        )
+        neighbors.append(neighbor_index)
+    return neighbors
 
 
 @torch.no_grad()

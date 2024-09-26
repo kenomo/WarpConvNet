@@ -19,13 +19,14 @@ snippet = """
     }
     __syncthreads();
 
+    // index is the row index of the tid
     if (tid < batch_index_len) {
         // Find bin
         int bin = -1;
         for (int i = 0; i < offsets_len - 1; i++) {
             int start = shared_offsets[i];
             int end = shared_offsets[i + 1];
-            if (start <= tid && tid < end) {
+            if (start <= index && index < end) {
                 bin = i;
                 break;
             }
@@ -41,6 +42,7 @@ def _find_bin_native(
     offsets: wp.array(dtype=Any),
     offsets_len: int,
     tid: int,
+    index: int,
     batch_index_wp: wp.array(dtype=Any),
     batch_index_len: int,
 ):
@@ -69,7 +71,22 @@ def _batch_index(
     if offsets.shape[0] > 256:
         batch_index_wp[tid] = _find_bin(offsets, tid)
     else:
-        _find_bin_native(offsets, offsets.shape[0], tid, batch_index_wp, batch_index_wp.shape[0])
+        _find_bin_native(
+            offsets, offsets.shape[0], tid, tid, batch_index_wp, batch_index_wp.shape[0]
+        )
+
+
+@wp.kernel
+def _batch_index_from_indicies(
+    indices: wp.array(dtype=wp.int32),
+    offsets: wp.array(dtype=wp.int32),
+    batch_index_wp: wp.array(dtype=wp.int32),
+) -> None:
+    tid = wp.tid()
+    index = indices[tid]
+    _find_bin_native(
+        offsets, offsets.shape[0], tid, index, batch_index_wp, batch_index_wp.shape[0]
+    )
 
 
 def batch_index_from_offset(
@@ -113,6 +130,39 @@ def batch_index_from_offset(
         _batch_index,
         int(np.ceil(N / 256.0)) * 256,
         inputs=[offsets_wp, batch_index_wp],
+        device=device,
+    )
+    return wp.to_torch(batch_index_wp)
+
+
+def batch_index_from_indicies(
+    indices: Int[Tensor, "N"],  # noqa: F821
+    offsets: Int[Tensor, "B+1"],  # noqa: F821
+    device: Optional[str] = None,
+) -> Int[Tensor, "N"]:  # noqa: F821
+    assert isinstance(indices, torch.Tensor), "indices must be a torch.Tensor"
+    assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
+
+    # offset to int
+    offsets = offsets.int()
+
+    if device is not None:
+        offsets = offsets.to(device)
+
+    if device is None:
+        device = str(offsets.device)
+
+    # Assert this is not cpu
+    assert "cpu" not in device, "device must be a cuda device"
+
+    N = indices.shape[0]
+    indicies_wp = wp.from_torch(indices.int(), dtype=wp.int32).to(device)
+    offsets_wp = wp.from_torch(offsets.int(), dtype=wp.int32).to(device)
+    batch_index_wp = wp.zeros(shape=(N,), dtype=wp.int32, device=device)
+    wp.launch(
+        _batch_index_from_indicies,
+        int(np.ceil(N / 256.0)) * 256,
+        inputs=[indicies_wp, offsets_wp, batch_index_wp],
         device=device,
     )
     return wp.to_torch(batch_index_wp)

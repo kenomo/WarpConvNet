@@ -6,6 +6,7 @@ import warp as wp
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import (
+    batch_index_from_indicies,
     batch_index_from_offset,
     batch_indexed_coordinates,
     offsets_from_batch_index,
@@ -117,6 +118,18 @@ class TestUtils(unittest.TestCase):
 
         for backend in backends:
             print(f"Offsets from batch index {backend} time: {backend_times[backend].min_elapsed}")
+
+    def test_batch_index_from_indicies(self):
+        device = "cuda:0"
+        backends = ["torch"]
+        backend_times = {backend: Timer() for backend in backends}
+        tot_N = self.Ns.sum()
+        offsets = self.pc.offsets.to(device)
+        batch_index = batch_index_from_offset(offsets)
+        indices = torch.randint(0, tot_N, (100,))
+        sel_batch_index = batch_index[indices]
+        pred_batch_index = batch_index_from_indicies(indices, offsets, device=device)
+        self.assertTrue(torch.allclose(sel_batch_index, pred_batch_index))
 
 
 if __name__ == "__main__":

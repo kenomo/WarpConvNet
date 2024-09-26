@@ -7,9 +7,12 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
 from warpconvnet.utils.batch_index import (
+    batch_index_from_indicies,
     batch_index_from_offset,
     batch_indexed_coordinates,
+    offsets_from_batch_index,
 )
 from warpconvnet.utils.list_to_batch import list_to_batched_tensor
 from warpconvnet.utils.ravel import ravel_mult_index_auto_shape, ravel_multi_index
@@ -178,6 +181,7 @@ def voxel_downsample_mapping(
     down_batched_points: Float[Tensor, "M 3"],  # noqa: F821
     down_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     voxel_size: Optional[float] = None,
+    find_nearest_for_invalid: bool = False,
 ) -> Tuple[Int[Tensor, "L"], Int[Tensor, "L"], Bool[Tensor, "N"]]:  # noqa: F821
     """
     Find the mapping that select points in the up_batched_points that are in the down_batched_points up to voxel_size.
@@ -213,9 +217,28 @@ def voxel_downsample_mapping(
     # remove invalid mappings (i.e. i < 0)
     down_map = wp.to_torch(wp_down_map)
     valid = down_map >= 0
-    down_map = down_map[valid]
-    # Get the index of true values
-    up_map = torch.nonzero(valid).squeeze(1)
+    if find_nearest_for_invalid and not valid.all():
+        # Find the nearest valid point
+        invalid_idx = torch.nonzero(~valid).squeeze()
+        # get batch index
+        # The invalid batch index is sorted as it is initialized from torch.nonzero.
+        invalid_up_points = up_batched_points[invalid_idx]
+        invalid_batch_index = batch_index_from_indicies(invalid_idx, up_offsets, device=device)
+        invalid_offsets = offsets_from_batch_index(invalid_batch_index)
+        nearest_down = batched_knn_search(
+            down_batched_points.float(),
+            down_offsets,
+            invalid_up_points.float(),
+            invalid_offsets,
+            k=1,
+        )
+        # Create maps
+        up_map = torch.arange(0, len(up_batched_points))
+        down_map[invalid_idx] = nearest_down.squeeze().int()
+    else:
+        down_map = down_map[valid]
+        # Get the index of true values
+        up_map = torch.nonzero(valid).squeeze(1)
     return up_map, down_map, valid
 
 
