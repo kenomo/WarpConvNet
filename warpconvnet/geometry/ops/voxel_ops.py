@@ -177,7 +177,7 @@ def voxel_downsample_mapping(
     up_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     down_batched_points: Float[Tensor, "M 3"],  # noqa: F821
     down_offsets: Int[Tensor, "B + 1"],  # noqa: F821
-    voxel_size: float,
+    voxel_size: Optional[float] = None,
 ) -> Tuple[Int[Tensor, "L"], Int[Tensor, "L"], Bool[Tensor, "N"]]:  # noqa: F821
     """
     Find the mapping that select points in the up_batched_points that are in the down_batched_points up to voxel_size.
@@ -194,8 +194,12 @@ def voxel_downsample_mapping(
     ), "up_batched_points and down_batched_points must be on the same device"
 
     # Convert the batched points to voxel coordinates
-    up_batched_points = torch.floor(up_batched_points / voxel_size).int()
-    down_batched_points = torch.floor(down_batched_points / voxel_size).int()
+    if voxel_size is not None:
+        up_batched_points = torch.floor(up_batched_points / voxel_size).int()
+        down_batched_points = torch.floor(down_batched_points / voxel_size).int()
+    else:
+        up_batched_points = up_batched_points.int()
+        down_batched_points = down_batched_points.int()
 
     # Get the batch index
     wp_up_bcoords = batch_indexed_coordinates(up_batched_points, up_offsets, return_type="warp")
@@ -203,15 +207,15 @@ def voxel_downsample_mapping(
         down_batched_points, down_offsets, return_type="warp"
     )
 
-    up_table = VectorHashTable.from_keys(wp_up_bcoords)
+    down_table = VectorHashTable.from_keys(wp_down_bcoords)
     # Get the map that maps up_batched_points[up_map] ~= down_batched_points.
-    wp_up_map = up_table.search(wp_down_bcoords)
+    wp_down_map = down_table.search(wp_up_bcoords)
     # remove invalid mappings (i.e. i < 0)
-    up_map = wp.to_torch(wp_up_map)
-    valid = up_map >= 0
-    up_map = up_map[valid]
+    down_map = wp.to_torch(wp_down_map)
+    valid = down_map >= 0
+    down_map = down_map[valid]
     # Get the index of true values
-    down_map = torch.nonzero(valid).squeeze(1)
+    up_map = torch.nonzero(valid).squeeze(1)
     return up_map, down_map, valid
 
 

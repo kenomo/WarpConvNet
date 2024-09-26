@@ -5,6 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_mapping
 from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
 
 class TestVoxelOps(unittest.TestCase):
@@ -42,6 +43,26 @@ class TestVoxelOps(unittest.TestCase):
         # Check the mapping
         up_coords = torch.floor(pc.coordinate_tensor[up_map] / self.voxel_size)
         down_coords = torch.floor(downsampled_pc.coordinate_tensor[down_map] / self.voxel_size)
+        self.assertTrue(torch.allclose(up_coords, down_coords))
+
+    def test_voxel_down_mapping_sparse(self):
+        device = "cuda:0"
+        voxel_size = 0.025
+        pc = self.pc.to(device)
+        st: SpatiallySparseTensor = pc.to_sparse(voxel_size)
+
+        # Find the mapping
+        up_map, down_map, valid = voxel_downsample_mapping(
+            pc.coordinate_tensor,
+            pc.offsets,
+            st.coordinates * voxel_size,
+            st.offsets,
+            self.voxel_size,
+        )
+
+        # Check the mapping
+        up_coords = torch.floor(pc.coordinates[up_map] / self.voxel_size).int()
+        down_coords = torch.floor(st.coordinates[down_map])
         self.assertTrue(torch.allclose(up_coords, down_coords))
 
 
