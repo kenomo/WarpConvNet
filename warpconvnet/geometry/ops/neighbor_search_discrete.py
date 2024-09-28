@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -277,7 +277,7 @@ def neighbor_search_hashmap(
     N = len(num_neighbors_scan_inclusive)
     tot = num_neighbors_scan_inclusive[N - 1 : N].numpy()
 
-    # Allocate ouput
+    # Allocate outputs
     in_coords_index = wp.empty(tot, dtype=int, device=device)
     query_coords_index = wp.empty(tot, dtype=int, device=device)
     scratch_coords = wp.empty_like(batched_query_coords)
@@ -419,7 +419,7 @@ def kernel_map_from_size(
     """
     Generate the kernel map for the spatially sparse convolution.
 
-    in_to_out_stride_ratio: the ratio of the input stride to the output stride. This will be multipled to output coordinates to find matching input coordinates.
+    in_to_out_stride_ratio: the ratio of the input stride to the output stride. This will be multiplied to output coordinates to find matching input coordinates.
     """
     num_spatial_dims = batch_indexed_in_coords.shape[1] - 1
     if kernel_dilation is None:
@@ -462,7 +462,7 @@ def kernel_map_from_size(
         torch.arange(N_out, device=device).repeat(kernel_search_batch_size, 1).view(-1)
     )
 
-    # Gerenate kernel offsets
+    # Generate kernel offsets
     offsets = kernel_offsets_from_size(
         kernel_size, kernel_dilation, center_offset=kernel_center_offset
     ).to(device)
@@ -513,3 +513,74 @@ def kernel_map_from_size(
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32, device=device), offsets], dim=0)
 
     return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
+
+
+def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821
+    x = hash(arr[0])
+    for i in range(1, len(arr)):
+        x = x * 31 + hash(arr[i])
+    return x
+
+
+class KernelMapCacheKey:
+    """
+    Key for kernel map cache.
+    """
+
+    kernel_size: Tuple[int, ...]
+    kernel_dilation: Tuple[int, ...]
+    transposed: bool
+    in_offsets: Int[Tensor, "B+1"]  # noqa: F821
+    out_offsets: Int[Tensor, "B+1"]  # noqa: F821
+
+    def __init__(self, kernel_size, kernel_dilation, transposed, in_offsets, out_offsets):
+        self.kernel_size = kernel_size
+        self.kernel_dilation = kernel_dilation
+        self.transposed = transposed
+        self.in_offsets = in_offsets.detach().cpu().int()
+        self.out_offsets = out_offsets.detach().cpu().int()
+
+    def __hash__(self):
+        return int(
+            _int_sequence_hash(self.kernel_size)
+            ^ _int_sequence_hash(self.kernel_dilation)
+            ^ hash(self.transposed)
+            ^ _int_sequence_hash(self.in_offsets.tolist())
+            ^ _int_sequence_hash(self.out_offsets.tolist())
+        )
+
+    def __eq__(self, other: "KernelMapCacheKey"):
+        return (
+            self.kernel_size == other.kernel_size
+            and self.kernel_dilation == other.kernel_dilation
+            and self.transposed == other.transposed
+            and self.in_offsets.equal(other.in_offsets)
+            and self.out_offsets.equal(other.out_offsets)
+        )
+
+    def __repr__(self):
+        return f"KernelMapCacheKey(kernel_size={self.kernel_size}, kernel_dilation={self.kernel_dilation}, transposed={self.transposed}, in_offsets={self.in_offsets}, out_offsets={self.out_offsets})"
+
+
+class KernelMapCache:
+    """
+    Cache for kernel map.
+    """
+
+    def __init__(self):
+        self.cache = {}
+
+    def get(self, key: KernelMapCacheKey) -> Optional[DiscreteNeighborSearchResult]:
+        return self.cache.get(key, None)
+
+    def put(self, key: KernelMapCacheKey, value: DiscreteNeighborSearchResult):
+        self.cache[key] = value
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({len(self.cache)} keys)"
+
+    def __getstate__(self):
+        return None
+
+    def __setstate__(self, state):
+        self.cache = {}

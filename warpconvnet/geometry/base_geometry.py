@@ -428,6 +428,10 @@ class BatchedSpatialFeatures:
     def extra_attributes(self):
         return self._extra_attributes.copy()
 
+    @property
+    def cache(self):
+        return self._extra_attributes.get("_cache")
+
     def replace(
         self,
         batched_coordinates: Optional[BatchedCoordinates] = None,

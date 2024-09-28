@@ -11,6 +11,8 @@ from torch.autograd import Function
 from warpconvnet.geometry.base_geometry import BatchedFeatures
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
+    KernelMapCache,
+    KernelMapCacheKey,
     kernel_map_from_size,
 )
 from warpconvnet.geometry.spatially_sparse_tensor import (
@@ -407,6 +409,19 @@ def generate_output_coords_and_kernel_map(
             f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"
         )
 
+    # if input_sparse_tensor.cache is not None, check the cache first
+    kernel_map_cache_key = KernelMapCacheKey(
+        kernel_size=kernel_size,
+        kernel_dilation=kernel_dilation,
+        transposed=transposed,
+        in_offsets=input_sparse_tensor.offsets,
+        out_offsets=out_offsets,
+    )
+    if input_sparse_tensor.cache is not None:
+        kernel_map = input_sparse_tensor.cache.get(kernel_map_cache_key)
+        if kernel_map is not None:
+            return batch_indexed_out_coords, out_offsets, kernel_map
+
     # Kernel map generation
     if transposed and not generative:
         # Swap in and out maps for transposed kernel map generation and swap it back
@@ -456,4 +471,10 @@ def generate_output_coords_and_kernel_map(
             f"Unsupported case. stride_mode: {stride_mode}, generative: {generative}, transposed: {transposed}"
         )
 
+    # put the kernel map in the cache
+
+    if input_sparse_tensor.cache is None:
+        input_sparse_tensor._extra_attributes["_cache"] = KernelMapCache()
+
+    input_sparse_tensor.cache.put(kernel_map_cache_key, kernel_map)
     return batch_indexed_out_coords, out_offsets, kernel_map

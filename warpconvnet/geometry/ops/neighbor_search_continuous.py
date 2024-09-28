@@ -138,7 +138,7 @@ class NeighborSearchResult:
         return f"{self.__class__.__name__}(neighbors_index={self._neighbors_index.shape}, neighbors_row_splits={self._neighbors_row_splits.shape})"
 
 
-def int_tensor_hash(arr: Int[Tensor, "N"]) -> int:  # noqa: F821
+def _int_tensor_hash(arr: Int[Tensor, "N"]) -> int:  # noqa: F821
     arr = arr.tolist()
     x = hash(arr[0])
     for i in range(1, len(arr)):
@@ -165,8 +165,8 @@ class NeighborSearchCacheKey:
     def __hash__(self):
         return int(
             hash(self.search_args)
-            ^ int_tensor_hash(self.ref_offsets)
-            ^ int_tensor_hash(self.query_offsets)
+            ^ _int_tensor_hash(self.ref_offsets)
+            ^ _int_tensor_hash(self.query_offsets)
         )
 
     def __eq__(self, other: "NeighborSearchCacheKey"):
@@ -174,9 +174,12 @@ class NeighborSearchCacheKey:
             return False
         return (
             self.search_args == other.search_args
-            and torch.all(self.ref_offsets == other.ref_offsets).item()
-            and torch.all(self.query_offsets == other.query_offsets).item()
+            and self.ref_offsets.equal(other.ref_offsets)
+            and self.query_offsets.equal(other.query_offsets)
         )
+
+    def __repr__(self):
+        return f"CacheKey(search_args={self.search_args}, ref_offsets={self.ref_offsets}, query_offsets={self.query_offsets})"
 
 
 class NeighborSearchCache:
@@ -191,7 +194,7 @@ class NeighborSearchCache:
         self, search_args: ContinuousNeighborSearchArgs, ref_offsets: Tensor, query_offsets: Tensor
     ):
         key = NeighborSearchCacheKey(search_args, ref_offsets, query_offsets)
-        return self._search_cache.get(hash(key))
+        return self._search_cache.get(key)
 
     def put(
         self,
@@ -201,17 +204,14 @@ class NeighborSearchCache:
         result: NeighborSearchResult,
     ):
         key = NeighborSearchCacheKey(search_args, ref_offsets, query_offsets)
-        self._search_cache[hash(key)] = result
+        self._search_cache[key] = result
 
     def __getstate__(self):
         # Exclude the cache from being pickled
-        state = self.__dict__.copy()
-        state["_cache"] = None
-        return state
+        return None
 
     def __setstate__(self, state):
         # Restore the cache as an empty dictionary
-        self.__dict__.update(state)
         self._search_cache = {}
 
     def __repr__(self):

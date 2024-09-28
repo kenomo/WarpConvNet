@@ -309,10 +309,6 @@ class PointCollection(BatchedSpatialFeatures):
     def ordering(self):
         return self._extra_attributes.get("ordering", None)
 
-    @property
-    def cache(self):
-        return self._extra_attributes.get("_cache", None)
-
     @classmethod
     def from_list_of_coordinates(
         cls,
