@@ -424,6 +424,26 @@ def generate_output_coords_and_kernel_map(
 
     # Kernel map generation
     if transposed and not generative:
+        # Check if the kernel map for non transposed case exists
+        kernel_map_cache_key_non_transposed = KernelMapCacheKey(
+            kernel_size=kernel_size,
+            kernel_dilation=kernel_dilation,
+            transposed=False,
+            in_offsets=out_offsets,
+            out_offsets=input_sparse_tensor.offsets,
+        )
+        kernel_map_non_transposed = input_sparse_tensor.cache.get(
+            kernel_map_cache_key_non_transposed
+        )
+        if kernel_map_non_transposed is not None:
+            # Swap in and out maps for transposed kernel map generation and swap it back
+            kernel_map = DiscreteNeighborSearchResult(
+                in_maps=kernel_map_non_transposed.out_maps,
+                out_maps=kernel_map_non_transposed.in_maps,
+                offsets=kernel_map_non_transposed.offsets,
+            )
+            return batch_indexed_out_coords, out_offsets, kernel_map
+
         # Swap in and out maps for transposed kernel map generation and swap it back
         kernel_map = kernel_map_from_size(
             batch_indexed_out_coords,
