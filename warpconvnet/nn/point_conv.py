@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -15,7 +15,7 @@ from warpconvnet.geometry.point_collection import (
 )
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.mlp import FeatureResidualMLPBlock
+from warpconvnet.nn.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = ["PointConv"]
@@ -47,6 +47,7 @@ class PointConv(BaseSpatialModule):
         pooling_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
+        mlp_block: Union[FeatureMLPBlock, FeatureResidualMLPBlock] = FeatureMLPBlock,
         hidden_dim: Optional[int] = None,
         channel_multiplier: int = 2,
         use_rel_pos: bool = False,
@@ -131,7 +132,7 @@ class PointConv(BaseSpatialModule):
                 edge_in_channels += pos_encode_dim * 3
             elif use_rel_pos:
                 edge_in_channels += 3
-            edge_transform_mlp = FeatureResidualMLPBlock(
+            edge_transform_mlp = mlp_block(
                 in_channels=edge_in_channels,
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,
@@ -140,7 +141,7 @@ class PointConv(BaseSpatialModule):
         self.edge_transform_mlp = edge_transform_mlp
         self.edge_mlp_in_channels = _get_module_input_channel(edge_transform_mlp)
         if out_transform_mlp is None:
-            out_transform_mlp = FeatureResidualMLPBlock(
+            out_transform_mlp = mlp_block(
                 in_channels=out_channels * len(reductions),
                 out_channels=out_channels,
                 hidden_channels=hidden_dim,

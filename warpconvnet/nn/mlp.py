@@ -1,9 +1,34 @@
-from torch import nn
+from typing import Optional
+
+import torch
+import torch.nn as nn
+from jaxtyping import Float
+from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
 from warpconvnet.nn.base_module import BaseSpatialModule
 
 __all__ = ["FeatureResidualMLPBlock", "Linear"]
+
+
+class FeatureMLPBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        hidden_channels: Optional[int] = None,
+        activation: nn.Module = nn.ReLU,
+        bias: bool = True,
+    ):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(in_channels, out_channels, bias=bias),
+            nn.LayerNorm(out_channels),
+            activation(),
+        )
+
+    def forward(self, x: Float[Tensor, "B C"]):
+        return self.block(x)
 
 
 class FeatureResidualMLPBlock(nn.Module):
@@ -32,7 +57,7 @@ class FeatureResidualMLPBlock(nn.Module):
         )
         self.activation = activation()
 
-    def forward(self, x):
+    def forward(self, x: Float[Tensor, "B C"]):
         out = self.activation(self.norm1(self.fc1(x)))
         out = self.norm2(self.fc2(out))
         # add skip connection
