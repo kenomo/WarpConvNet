@@ -8,6 +8,7 @@ from torch import Tensor
 
 from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
+from warpconvnet.nn.unique import ToUnique
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
     batch_index_from_offset,
@@ -15,7 +16,7 @@ from warpconvnet.utils.batch_index import (
     offsets_from_batch_index,
 )
 from warpconvnet.utils.list_to_batch import list_to_batched_tensor
-from warpconvnet.utils.ravel import ravel_mult_index_auto_shape, ravel_multi_index
+from warpconvnet.utils.ravel import ravel_multi_index, ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
 __all__ = [
@@ -50,7 +51,13 @@ def voxel_downsample_csr_mapping(
     batched_points: Float[Tensor, "N 3"],  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F722,F821
     voxel_size: float,
-):
+) -> Tuple[
+    Int[Tensor, "M 3"],  # noqa: F821
+    Int[Tensor, "B+1"],  # noqa: F821
+    Int[Tensor, "N"],  # noqa: F821
+    Int[Tensor, "M+1"],  # noqa: F821
+    ToUnique,
+]:
     """
     Voxel downsample the coordinates
 
@@ -66,7 +73,11 @@ def voxel_downsample_csr_mapping(
         voxel_size: float - voxel size
 
     Returns:
-        Tuple[Tensor, Tensor, Tensor, Tensor] - perm, unique_offsets, to_unique_index, index_offsets
+        unique_coords: Int[Tensor, "M 3"] - unique coordinates
+        unique_offsets: Int[Tensor, "B + 1"] - unique offsets
+        to_csr_indices: Int[Tensor, "N"] - indices to csr
+        to_csr_offsets: Int[Tensor, "M+1"] - offsets to csr
+        to_unique: ToUnique - ToUnique object
     """
     # Floor the points to the voxel coordinates
     N = len(batched_points)
@@ -79,19 +90,20 @@ def voxel_downsample_csr_mapping(
         batch_index = batch_index_from_offset(offsets, device)
         voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
-    unique_vox_coords, inverse, to_unique_index, index_offsets, perm = unique_torch(
-        voxel_coords, dim=0
-    )
+    to_unique = ToUnique(unique_method="torch", return_to_unique_indices=True)
+    unique_coords, to_csr_indices, to_csr_offsets = to_unique.to_unique_csr(voxel_coords, dim=0)
 
     if B == 1:
-        unique_offsets = torch.IntTensor([0, len(unique_vox_coords)])
+        unique_offsets = torch.IntTensor([0, len(unique_coords)])
     else:
-        _, batch_counts = torch.unique(batch_index[perm], return_counts=True)
+        _, batch_counts = torch.unique(
+            batch_index[to_unique.to_unique_indices], return_counts=True
+        )
         batch_counts = batch_counts.cpu()
         unique_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
     assert len(unique_offsets) == B + 1
 
-    return perm, unique_offsets, to_unique_index, index_offsets
+    return unique_coords, unique_offsets, to_csr_indices, to_csr_offsets, to_unique
 
 
 @torch.no_grad()
@@ -150,7 +162,7 @@ def voxel_downsample_ravel(
         unique_indices: sorted indices of unique voxels.
     """
     batch_indexed_coords[:, 1:] = torch.floor(batch_indexed_coords[:, 1:] / voxel_size).int()
-    raveled_coords = ravel_mult_index_auto_shape(batch_indexed_coords)
+    raveled_coords = ravel_multi_index_auto_shape(batch_indexed_coords)
     _, _, _, _, perm = unique_torch(raveled_coords, dim=0)
     return perm
 

@@ -55,10 +55,10 @@ class TestSpatiallySparseTensor(unittest.TestCase):
                     to_orig_indices,
                     all_to_unique_indices,
                     all_to_unique_offsets,
-                    perm,
-                ) = unique_torch(bcoords, dim=0)
+                    to_unique_indices,
+                ) = unique_torch(bcoords, dim=0, return_to_unique_indices=True)
 
-        self.assertTrue(len(unique_index) == len(perm), f"{len(unique_index)} != {len(perm)}")
+        self.assertTrue(len(unique_index) == len(to_unique_indices), f"{len(unique_index)} != {len(to_unique_indices)}")
         self.assertTrue((bcoords[unique_index].unique(dim=0) == unique_coords).all())
 
         print(f"Coord size: {coords.batched_tensor.shape}, N unique: {len(unique_index)}")
@@ -109,6 +109,13 @@ class TestSpatiallySparseTensor(unittest.TestCase):
             target_spatial_sparse_tensor=st,
         )
         self.assertTrue(st2.num_channels == out_channels)
+
+    def test_to_point(self):
+        device = torch.device("cuda:0")
+        st = self.st.to(device=device)
+        st.set_tensor_stride((2, 2, 2))
+        pc = st.to_point(self.voxel_size)
+        self.assertTrue(pc.features.shape[1] == self.C)
 
 
 if __name__ == "__main__":

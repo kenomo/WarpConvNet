@@ -4,6 +4,7 @@ import torch
 import warp as wp
 
 from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.nn.unique import ToUnique
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
@@ -12,6 +13,7 @@ from warpconvnet.utils.batch_index import (
     offsets_from_batch_index,
 )
 from warpconvnet.utils.timer import Timer
+from warpconvnet.utils.unique import unique_torch
 
 
 class TestUtils(unittest.TestCase):
@@ -130,6 +132,23 @@ class TestUtils(unittest.TestCase):
         sel_batch_index = batch_index[indices]
         pred_batch_index = batch_index_from_indicies(indices, offsets, device=device)
         self.assertTrue(torch.allclose(sel_batch_index, pred_batch_index))
+
+
+class TestToUnique(unittest.TestCase):
+    def test_to_unique(self):
+        x = torch.randint(0, 5, (10,))
+        to_unique = ToUnique()
+
+        unique, to_orig_indices, to_csr_indices, to_csr_offsets, _ = unique_torch(x)
+
+        self.assertTrue(torch.allclose(x, unique[to_orig_indices]))
+        # csr will sort the x values. Sorting will make no difference
+        self.assertTrue(torch.allclose(torch.sort(x[to_csr_indices]).values, x[to_csr_indices]))
+
+        unique = to_unique.to_unique(x)
+        orig_x = to_unique.to_original(unique)
+
+        self.assertTrue(torch.allclose(x, orig_x))
 
 
 if __name__ == "__main__":

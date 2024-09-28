@@ -10,7 +10,7 @@ from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_offsets_from_size
 from warpconvnet.utils.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ntuple import ntuple
-from warpconvnet.utils.ravel import ravel_mult_index_auto_shape
+from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import unique_hashmap
 
 
@@ -45,7 +45,7 @@ def generate_output_coords(
         unique_indices, _ = unique_hashmap(discretized_coords)
         unique_coords = discretized_coords[unique_indices]
     elif backend == "ravel":
-        unique_indices = ravel_mult_index_auto_shape(discretized_coords)
+        unique_indices = ravel_multi_index_auto_shape(discretized_coords)
         unique_coords = discretized_coords[unique_indices]
     elif backend == "unique":
         unique_coords = torch.unique(discretized_coords, dim=0, sorted=True)

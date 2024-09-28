@@ -16,6 +16,8 @@ def ravel_multi_index(
         multi_index: A tensor of coordinate vectors, (*, D).
         dims: The source shape.
     """
+    # assert multi index is integer dtype
+    assert multi_index.dtype in [torch.int16, torch.int32, torch.int64]
     assert multi_index.shape[-1] == len(spatial_shape)
     # Convert dims to a list of tuples
     if isinstance(spatial_shape, torch.Tensor):
@@ -26,7 +28,7 @@ def ravel_multi_index(
     return (multi_index * strides).sum(dim=-1)
 
 
-def ravel_mult_index_auto_shape(
+def ravel_multi_index_auto_shape(
     x: Int[torch.Tensor, "* D"],  # noqa: F821
     dim: int = 0,
 ) -> Int[torch.Tensor, "*"]:

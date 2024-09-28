@@ -60,13 +60,13 @@ class ScanNetDataset(Dataset):
         # All to tensor
         if self.voxel_size is not None:
             # Use cpu for downsampling in dataloader. Should use multiple workers.
-            unique_coords, unique_indices = voxel_downsample_np(coords, self.voxel_size)
+            unique_coords, to_unique_indices = voxel_downsample_np(coords, self.voxel_size)
             if self.out_type == "point":
-                unique_coords = coords[unique_indices]
+                unique_coords = coords[to_unique_indices]
             return {
                 "coords": unique_coords,
-                "colors": colors[unique_indices],
-                "labels": labels[unique_indices],
+                "colors": colors[to_unique_indices],
+                "labels": labels[to_unique_indices],
             }
         else:
             return {

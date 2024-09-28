@@ -105,7 +105,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
     ):
         """
         Sort the points according to the ordering provided.
-        The voxel size defines the smalles descritization and points in the same voxel will have random order.
+        The voxel size defines the smallest descritization and points in the same voxel will have random order.
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
@@ -171,7 +171,7 @@ class PointCollection(BatchedSpatialFeatures):
     ):
         """
         Sort the points according to the ordering provided.
-        The voxel size defines the smalles discretization and points in the same voxel will have random order.
+        The voxel size defines the smallest discretization and points in the same voxel will have random order.
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
@@ -193,7 +193,7 @@ class PointCollection(BatchedSpatialFeatures):
         self,
         voxel_size: float,
         reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR] = REDUCTIONS.RANDOM,
-    ):
+    ) -> "PointCollection":
         """
         Voxel downsample the coordinates
         """
@@ -201,29 +201,40 @@ class PointCollection(BatchedSpatialFeatures):
         extra_args = self.extra_attributes
         extra_args["voxel_size"] = voxel_size
         if reduction == REDUCTIONS.RANDOM:
-            perm, down_offsets = voxel_downsample_random_indices(
+            to_unique_indicies, unique_offsets = voxel_downsample_random_indices(
                 batched_points=self.coordinate_tensor,
                 offsets=self.offsets,
                 voxel_size=voxel_size,
             )
             return self.__class__(
                 batched_coordinates=BatchedContinuousCoordinates(
-                    batched_tensor=self.coordinate_tensor[perm], offsets=down_offsets
+                    batched_tensor=self.coordinate_tensor[to_unique_indicies],
+                    offsets=unique_offsets,
                 ),
                 batched_features=BatchedFeatures(
-                    batched_tensor=self.feature_tensor[perm], offsets=down_offsets
+                    batched_tensor=self.feature_tensor[to_unique_indicies], offsets=unique_offsets
                 ),
                 **extra_args,
             )
 
-        perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
+        # perm, down_offsets, vox_inices, vox_offsets = voxel_downsample_csr_mapping(
+        #     batched_points=self.coordinate_tensor,
+        #     offsets=self.offsets,
+        #     voxel_size=voxel_size,
+        # )
+        (
+            batch_indexed_down_coords,
+            unique_offsets,
+            to_csr_indices,
+            to_csr_offsets,
+            to_unique,
+        ) = voxel_downsample_csr_mapping(
             batched_points=self.coordinate_tensor,
             offsets=self.offsets,
             voxel_size=voxel_size,
         )
 
-        neighbors = NeighborSearchResult(vox_inices, vox_offsets)
-        down_coords = self.coordinate_tensor[perm]
+        neighbors = NeighborSearchResult(to_csr_indices, to_csr_offsets)
         down_features = row_reduction(
             self.feature_tensor,
             neighbors.neighbors_row_splits,
@@ -232,9 +243,10 @@ class PointCollection(BatchedSpatialFeatures):
 
         return self.__class__(
             batched_coordinates=BatchedContinuousCoordinates(
-                batched_tensor=down_coords, offsets=down_offsets
+                batched_tensor=self.coordinates[to_unique.to_unique_indices],
+                offsets=unique_offsets,
             ),
-            batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
+            batched_features=BatchedFeatures(batched_tensor=down_features, offsets=unique_offsets),
             **extra_args,
         )
 

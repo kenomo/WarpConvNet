@@ -24,7 +24,7 @@ from warpconvnet.utils.ravel import ravel_multi_index
 class BatchedDiscreteCoordinates(BatchedCoordinates):
     voxel_size: float
     voxel_origin: Float[Tensor, "D"]  # noqa: F821
-    tensor_stride: Union[int, Tuple[int, ...]]
+    tensor_stride: Optional[Tuple[int, ...]]
     _hashmap: Optional[VectorHashTable]
 
     def __init__(
@@ -61,7 +61,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         self.voxel_origin = voxel_origin
         # Convert the tensor stride to ntuple
         if tensor_stride is not None:
-            self.tensor_stride = ntuple(tensor_stride, ndim=3)
+            self.tensor_stride = ntuple(tensor_stride, ndim=self.batched_tensor.shape[1])
         else:
             self.tensor_stride = None
 
@@ -112,6 +112,17 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
             self._hashmap = VectorHashTable.from_keys(bcoords)
         return self._hashmap
 
+    @property
+    def stride(self):
+        return self.tensor_stride
+
+    @property
+    def num_spatial_dims(self):
+        return self.batched_tensor.shape[1]
+
+    def set_tensor_stride(self, tensor_stride: Union[int, Tuple[int, ...]]):
+        self.tensor_stride = ntuple(tensor_stride, ndim=self.num_spatial_dims)
+
 
 class SpatiallySparseTensor(BatchedSpatialFeatures):
     batched_coordinates: BatchedDiscreteCoordinates
@@ -127,6 +138,9 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
         device: Optional[str] = None,
         **kwargs,
     ):
+        # extract tensor_stride/stride from kwargs
+        tensor_stride = kwargs.pop("tensor_stride", None) or kwargs.pop("stride", None)
+
         if isinstance(batched_coordinates, list):
             assert isinstance(
                 batched_features, list
@@ -134,16 +148,22 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             assert len(batched_coordinates) == len(batched_features)
             # Assert all elements in coords and features have same length
             assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
-            batched_coordinates = BatchedDiscreteCoordinates(batched_coordinates, device=device)
+            batched_coordinates = BatchedDiscreteCoordinates(
+                batched_coordinates, device=device, tensor_stride=tensor_stride
+            )
             batched_features = BatchedFeatures(batched_features, device=device)
         elif isinstance(batched_coordinates, Tensor):
             assert (
                 isinstance(batched_features, Tensor) and offsets is not None
             ), "If coordinate is a tensor, features must be a tensor and offsets must be provided."
             batched_coordinates = BatchedDiscreteCoordinates(
-                batched_coordinates, offsets=offsets, device=device
+                batched_coordinates, offsets=offsets, device=device, tensor_stride=tensor_stride
             )
             batched_features = BatchedFeatures(batched_features, offsets=offsets, device=device)
+        else:
+            # Input is a BatchedDiscreteCoordinates
+            if tensor_stride is not None:
+                batched_coordinates.set_tensor_stride(tensor_stride)
 
         BatchedSpatialFeatures.__init__(self, batched_coordinates, batched_features, **kwargs)
 
@@ -286,6 +306,27 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
             dense_tensor = dense_tensor.moveaxis(-1, channel_dim)
         return dense_tensor
 
+    def to_point(self, voxel_size: Optional[float] = None) -> "PointCollection":  # noqa: F821
+        if voxel_size is None:
+            assert (
+                self.voxel_size is not None
+            ), "Voxel size must be provided or the object must have been initialized with a voxel size to convert to point."
+            voxel_size = self.voxel_size
+
+        # tensor stride
+        if self.tensor_stride is not None:
+            tensor_stride = self.tensor_stride
+            # multiply voxel_size by tensor_stride
+            voxel_size = torch.Tensor([[voxel_size * s for s in tensor_stride]]).to(self.device)
+
+        from warpconvnet.geometry.point_collection import (
+            BatchedContinuousCoordinates,
+            PointCollection,
+        )
+
+        batched_points = BatchedContinuousCoordinates(self.coordinates * voxel_size, self.offsets)
+        return PointCollection(batched_points, self.batched_features)
+
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "SpatiallySparseTensor":
         if ordering == self.ordering:
             return self
@@ -322,7 +363,14 @@ class SpatiallySparseTensor(BatchedSpatialFeatures):
 
     @property
     def stride(self):
-        return self.extra_attributes.get("stride", None)
+        return self.tensor_stride
+
+    @property
+    def tensor_stride(self):
+        return self.batched_coordinates.tensor_stride
+
+    def set_tensor_stride(self, tensor_stride: Union[int, Tuple[int, ...]]):
+        self.batched_coordinates.set_tensor_stride(tensor_stride)
 
     @property
     def batch_indexed_coordinates(self) -> Tensor:

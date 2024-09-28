@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Literal, Tuple
 
 import torch
 import warp as wp
@@ -10,7 +10,10 @@ from warpconvnet.utils.ravel import ravel_multi_index
 
 
 def unique_torch(
-    x: Int[Tensor, "N C"], dim: int = 0, stable: bool = False
+    x: Int[Tensor, "N C"],
+    dim: int = 0,
+    stable: bool = False,
+    return_to_unique_indices: bool = False,
 ) -> Tuple[  # noqa: F821
     Int[Tensor, "M C"],  # noqa: F821
     Int[Tensor, "N"],  # noqa: F821
@@ -27,32 +30,35 @@ def unique_torch(
         stable: bool
 
     Returns:
-        unique: unique coordinates
-        to_orig_indices: indices to original coordinates. unique[to_orig_indices] == x
-        all_to_unique_indices: indices to unique coordinates. x[all_to_unique_indices] == unique
-        all_to_unique_offsets: offsets to unique coordinates.
-        perm: permutation to sort x to unique. x[perm] == unique
+        unique: M unique coordinates
+        to_orig_indices: N indices to original coordinates. unique[to_orig_indices] == x
+        all_to_csr_indices: N indices to unique coordinates. x[all_to_csr_indices] == torch.repeat_interleave(unique, counts).
+        all_to_csr_offsets: M+1 offsets to unique coordinates. counts = all_to_csr_offsets.diff()
+        to_unique_indices: M indices to sample x to unique. x[to_unique_indices] == unique
 
     from https://github.com/pytorch/pytorch/issues/36748
     """
     unique, to_orig_indices, counts = torch.unique(
         x, dim=dim, sorted=True, return_inverse=True, return_counts=True
     )
-    all_to_unique_indices = to_orig_indices.argsort(stable=stable)
-    all_to_unique_offsets = torch.cat((counts.new_zeros(1), counts.cumsum(dim=0)))
+    all_to_csr_indices = to_orig_indices.argsort(stable=stable)
+    all_to_csr_offsets = torch.cat((counts.new_zeros(1), counts.cumsum(dim=0)))
 
-    dtype_ind, device = to_orig_indices.dtype, to_orig_indices.device
-    perm = torch.arange(x.size(dim), dtype=dtype_ind, device=device)
-    perm = torch.empty(unique.size(dim), dtype=dtype_ind, device=device).scatter_(
-        dim, to_orig_indices, perm
-    )
+    if return_to_unique_indices:
+        dtype_ind, device = to_orig_indices.dtype, to_orig_indices.device
+        to_unique_indices = torch.arange(x.size(dim), dtype=dtype_ind, device=device)
+        to_unique_indices = torch.empty(unique.size(dim), dtype=dtype_ind, device=device).scatter_(
+            dim, to_orig_indices, to_unique_indices
+        )
+    else:
+        to_unique_indices = None
 
     return (
         unique,
         to_orig_indices,
-        all_to_unique_indices,
-        all_to_unique_offsets,
-        perm,
+        all_to_csr_indices,
+        all_to_csr_offsets,
+        to_unique_indices,
     )
 
 
@@ -81,7 +87,7 @@ def unique_hashmap(
         hash_method: Hash method.
 
     Returns:
-        unique_indices: Sorted unique indices.
+        unique_indices: bcoords[unique_indices] == unique
         hash_table: Hash table.
     """
     # Append batch index to the coordinates
