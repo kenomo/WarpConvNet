@@ -81,6 +81,14 @@ class ContinuousNeighborSearchArgs:
             grid_dim=grid_dim if grid_dim is not None else self._grid_dim,
         )
 
+    def __hash__(self):
+        return int(hash(self._mode) ^ hash(self._radius) ^ hash(self._k))
+
+    def __eq__(self, other):
+        if not isinstance(other, ContinuousNeighborSearchArgs):
+            return False
+        return self._mode == other._mode and self._radius == other._radius and self._k == other._k
+
 
 class NeighborSearchResult:
     """
@@ -128,6 +136,86 @@ class NeighborSearchResult:
 
     def __repr__(self):
         return f"{self.__class__.__name__}(neighbors_index={self._neighbors_index.shape}, neighbors_row_splits={self._neighbors_row_splits.shape})"
+
+
+def int_tensor_hash(arr: Int[Tensor, "N"]) -> int:  # noqa: F821
+    arr = arr.tolist()
+    x = hash(arr[0])
+    for i in range(1, len(arr)):
+        x = x * 31 + hash(arr[i])
+    return x
+
+
+class NeighborSearchCacheKey:
+    """
+    Key for neighbor search cache.
+    """
+
+    search_args: ContinuousNeighborSearchArgs
+    ref_offsets: Int[Tensor, "B+1"]  # noqa: F821
+    query_offsets: Int[Tensor, "B+1"]  # noqa: F821
+
+    def __init__(
+        self, search_args: ContinuousNeighborSearchArgs, ref_offsets: Tensor, query_offsets: Tensor
+    ):
+        self.search_args = search_args
+        self.ref_offsets = ref_offsets.detach().cpu().int()
+        self.query_offsets = query_offsets.detach().cpu().int()
+
+    def __hash__(self):
+        return int(
+            hash(self.search_args)
+            ^ int_tensor_hash(self.ref_offsets)
+            ^ int_tensor_hash(self.query_offsets)
+        )
+
+    def __eq__(self, other: "NeighborSearchCacheKey"):
+        if not isinstance(other, NeighborSearchCacheKey):
+            return False
+        return (
+            self.search_args == other.search_args
+            and torch.all(self.ref_offsets == other.ref_offsets).item()
+            and torch.all(self.query_offsets == other.query_offsets).item()
+        )
+
+
+class NeighborSearchCache:
+    """
+    Cache for neighbor search results.
+    """
+
+    def __init__(self):
+        self._search_cache = {}
+
+    def get(
+        self, search_args: ContinuousNeighborSearchArgs, ref_offsets: Tensor, query_offsets: Tensor
+    ):
+        key = NeighborSearchCacheKey(search_args, ref_offsets, query_offsets)
+        return self._search_cache.get(hash(key))
+
+    def put(
+        self,
+        search_args: ContinuousNeighborSearchArgs,
+        ref_offsets: Tensor,
+        query_offsets: Tensor,
+        result: NeighborSearchResult,
+    ):
+        key = NeighborSearchCacheKey(search_args, ref_offsets, query_offsets)
+        self._search_cache[hash(key)] = result
+
+    def __getstate__(self):
+        # Exclude the cache from being pickled
+        state = self.__dict__.copy()
+        state["_cache"] = None
+        return state
+
+    def __setstate__(self, state):
+        # Restore the cache as an empty dictionary
+        self.__dict__.update(state)
+        self._search_cache = {}
+
+    def __repr__(self):
+        return f"Cache({len(self._search_cache)} keys)"
 
 
 @wp.kernel

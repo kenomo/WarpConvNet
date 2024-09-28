@@ -35,7 +35,7 @@ class ScanNetDataset(Dataset):
     def prepare_data(self):
         # If data is not downloaded, download it
         if not os.path.exists(self.root):
-            os.makedirs(self.root)
+            os.makedirs(self.root, exist_ok=True)
             os.system(f"wget {SCANNET_URL} -O {self.root}/scannet_3d.zip")
             os.system(f"unzip {self.root}/scannet_3d.zip -d {self.root}")
             os.system(f"mv {self.root}/scannet_3d/* {self.root}")

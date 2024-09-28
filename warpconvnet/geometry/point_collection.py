@@ -11,6 +11,7 @@ from warpconvnet.geometry.base_geometry import (
 )
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
+    NeighborSearchCache,
     NeighborSearchResult,
     neighbor_search,
 )
@@ -280,13 +281,25 @@ class PointCollection(BatchedSpatialFeatures):
             query_coords, BatchedCoordinates
         ), "query_coords must be BatchedCoordinates"
 
-        return neighbor_search(
+        # cache the neighbor search result
+        if self.cache is not None:
+            neighbor_search_result = self.cache.get(
+                search_args, self.offsets, query_coords.offsets
+            )
+            if neighbor_search_result is not None:
+                return neighbor_search_result
+
+        neighbor_search_result = neighbor_search(
             self.coordinate_tensor,
             self.offsets,
             query_coords.batched_tensor,
             query_coords.offsets,
             search_args,
         )
+        if self.cache is None:
+            self._extra_attributes["_cache"] = NeighborSearchCache()
+        self.cache.put(search_args, self.offsets, query_coords.offsets, neighbor_search_result)
+        return neighbor_search_result
 
     @property
     def voxel_size(self):
@@ -295,6 +308,10 @@ class PointCollection(BatchedSpatialFeatures):
     @property
     def ordering(self):
         return self._extra_attributes.get("ordering", None)
+
+    @property
+    def cache(self):
+        return self._extra_attributes.get("_cache", None)
 
     @classmethod
     def from_list_of_coordinates(

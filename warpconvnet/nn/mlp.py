@@ -25,7 +25,11 @@ class FeatureResidualMLPBlock(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_channels)
         self.fc2 = nn.Linear(hidden_channels, out_channels, bias=bias)
         self.norm2 = nn.LayerNorm(out_channels)
-        self.shortcut = nn.Linear(in_channels, out_channels, bias=bias)
+        self.shortcut = (
+            nn.Linear(in_channels, out_channels, bias=bias)
+            if in_channels != out_channels
+            else nn.Identity()
+        )
         self.activation = activation()
 
     def forward(self, x):

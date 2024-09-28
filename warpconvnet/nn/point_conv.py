@@ -124,7 +124,7 @@ class PointConv(BaseSpatialModule):
         if provided_in_channels is None:
             provided_in_channels = in_channels
         if hidden_dim is None:
-            hidden_dim = channel_multiplier * out_channels
+            hidden_dim = channel_multiplier * max(out_channels, in_channels)
         if edge_transform_mlp is None:
             edge_in_channels = in_channels + provided_in_channels
             if use_rel_pos_encode:

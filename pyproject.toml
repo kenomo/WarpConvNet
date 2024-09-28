@@ -15,7 +15,7 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "torch-scatter"]
+dependencies = ["numpy", "torch", "warp-lang", "torch-scatter", "jaxtyping"]
 dynamic = ["version"]
 
 [project.urls]
@@ -23,9 +23,17 @@ GitLab = "https://gitlab.nvidia.com/3dmmllm/warpconvnet"
 
 [project.optional-dependencies]
 dev = ["pre-commit", "coverage[toml]"]
-convnet = [
-    "jaxtyping>=0.2.0",
-    "torch_scatter>=2.1",
+
+models = [
+    "h5py",
+    "wandb",
+    "hydra-core",
+    "omegaconf",
+]
+
+all = [
+    "warpconvnet[dev]",
+    "warpconvnet[models]",
 ]
 
 [tool.setuptools.packages.find]

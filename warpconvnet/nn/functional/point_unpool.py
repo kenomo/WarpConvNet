@@ -57,10 +57,4 @@ def point_unpool(
         unpooled_features = torch.cat(
             (unpooled_features, unpooled_pc.batched_features.batched_tensor), dim=-1
         )
-    return unpooled_pc.__class__(
-        batched_coordinates=unpooled_pc.batched_coordinates,
-        batched_features=unpooled_pc.batched_features.__class__(
-            batched_tensor=unpooled_features,
-            offsets=unpooled_pc.offsets,
-        ),
-    )
+    return unpooled_pc.replace(batched_features=unpooled_features)
