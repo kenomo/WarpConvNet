@@ -62,9 +62,9 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         self.assertTrue((bcoords[unique_index].unique(dim=0) == unique_coords).all())
 
         print(f"Coord size: {coords.batched_tensor.shape}, N unique: {len(unique_index)}")
-        print(f"Hashmap min time: {hash_timer.min_elapsed:.4e} s")
-        print(f"Torch min time: {torch_timer.min_elapsed:.4e} s")
-        print(f"Speedup: {torch_timer.min_elapsed / hash_timer.min_elapsed:.4e}")
+        print(f"Hashmap min time: {hash_timer.min_elapsed: .4e} s")
+        print(f"Torch min time: {torch_timer.min_elapsed: .4e} s")
+        print(f"Speedup: {torch_timer.min_elapsed / hash_timer.min_elapsed: .4e}")
 
     def test_sort(self):
         st = self.st
@@ -96,7 +96,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
 
     def test_sparse_to_dense_to_sparse(self):
         device = torch.device("cuda:0")
-        st = self.st.to(device=device)
+        st: SpatiallySparseTensor = self.st.to(device=device)
         dense_tensor = st.to_dense(channel_dim=1)
         # convolution on dense
         out_channels = 13
@@ -112,7 +112,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
 
     def test_to_point(self):
         device = torch.device("cuda:0")
-        st = self.st.to(device=device)
+        st: SpatiallySparseTensor = self.st.to(device=device)
         st.set_tensor_stride((2, 2, 2))
         pc = st.to_point(self.voxel_size)
         self.assertTrue(pc.features.shape[1] == self.C)

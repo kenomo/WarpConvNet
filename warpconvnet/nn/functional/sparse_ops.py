@@ -1,12 +1,8 @@
 from typing import Sequence
 
 import torch
-import warp as wp
 
-from warpconvnet.geometry.spatially_sparse_tensor import (
-    BatchedFeatures,
-    SpatiallySparseTensor,
-)
+from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
 
 def cat_spatially_sparse_tensors(
@@ -25,4 +21,4 @@ def cat_spatially_sparse_tensors(
     features_tensor = torch.cat(
         [sparse_tensor.feature_tensor for sparse_tensor in sparse_tensors], dim=-1
     )
-    return sparse_tensors[0].replace(batched_features=BatchedFeatures(features_tensor, offsets))
+    return sparse_tensors[0].replace(batched_features=features_tensor)

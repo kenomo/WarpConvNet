@@ -5,7 +5,10 @@ import warp as wp
 
 from warpconvnet.geometry.ops.neighbor_search_continuous import knn_search
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_mapping
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.point_collection import (
+    BatchedContinuousCoordinates,
+    PointCollection,
+)
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
 
@@ -43,7 +46,9 @@ class TestVoxelOps(unittest.TestCase):
 
         # Check the mapping
         up_coords = torch.floor(pc.coordinate_tensor[up_map] / self.voxel_size)
-        down_coords = torch.floor(downsampled_pc.coordinate_tensor[down_map] / self.voxel_size)
+        down_coords = torch.floor(
+            downsampled_pc.coordinate_tensor[down_map] / self.voxel_size
+        )
         self.assertTrue(torch.allclose(up_coords, down_coords))
 
     def test_voxel_down_mapping_sparse(self):
@@ -70,10 +75,13 @@ class TestVoxelOps(unittest.TestCase):
         new_coords = 2 * torch.randn(100, 3).to(device)
         random_indices = torch.randint(0, pc.offsets[-1], (100,)).to(device)
         coordinates = pc.coordinates
-        features = pc.features
         coordinates[random_indices] = new_coords
 
-        new_pc = PointCollection(coordinates, features, offsets=pc.offsets)
+        new_pc = pc.replace(
+            batched_coordinates=BatchedContinuousCoordinates(
+                coordinates, offsets=pc.offsets
+            )
+        )
         up_coords = torch.floor(new_pc.coordinate_tensor / voxel_size).int()
         # Find the mapping
         up_map, down_map, valid = voxel_downsample_mapping(
@@ -93,7 +101,9 @@ class TestVoxelOps(unittest.TestCase):
             curr_down_map = down_map[up_start:up_end]
 
             # knn
-            knn_indices = knn_search(curr_down_coords.float(), curr_up_coords.float(), k=1).view(-1)
+            knn_indices = knn_search(
+                curr_down_coords.float(), curr_up_coords.float(), k=1
+            ).view(-1)
             knn_indices += down_start
             knn_neq = curr_down_map != knn_indices
             self.assertTrue(not knn_neq.any())

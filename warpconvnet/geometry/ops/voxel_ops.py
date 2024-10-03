@@ -15,7 +15,7 @@ from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
     offsets_from_batch_index,
 )
-from warpconvnet.utils.list_to_batch import list_to_batched_tensor
+from warpconvnet.utils.list_to_batch import list_to_cat_tensor
 from warpconvnet.utils.ravel import ravel_multi_index, ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import unique_hashmap, unique_torch
 
@@ -183,7 +183,7 @@ def voxel_downsample_random_indices_list_of_coords(
         unique_indices: sorted indices of unique voxels.
         batch_offsets: Batch offsets.
     """
-    batched_coords, offsets, _ = list_to_batched_tensor(list_of_coords)
+    batched_coords, offsets, _ = list_to_cat_tensor(list_of_coords)
     return voxel_downsample_random_indices(batched_coords.to(device), offsets, voxel_size)
 
 

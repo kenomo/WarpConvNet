@@ -24,11 +24,11 @@ class TestGlobalPool(unittest.TestCase):
     def test_global_pool_pc(self):
         pooled_pc = global_pool(self.pc, reduce="max")
         self.assertEqual(pooled_pc.batch_size, self.B)
-        self.assertEqual(pooled_pc.features.shape[0], self.B)
-        self.assertEqual(pooled_pc.features.shape[1], self.C)
+        self.assertEqual(pooled_pc.batched_features.shape[0], self.B)
+        self.assertEqual(pooled_pc.batched_features.shape[1], self.C)
 
     def test_global_pool_st(self):
         pooled_st = global_pool(self.st, reduce="max")
         self.assertEqual(pooled_st.batch_size, self.B)
-        self.assertEqual(pooled_st.features.shape[0], self.B)
-        self.assertEqual(pooled_st.features.shape[1], self.C)
+        self.assertEqual(pooled_st.batched_features.shape[0], self.B)
+        self.assertEqual(pooled_st.batched_features.shape[1], self.C)

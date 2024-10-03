@@ -4,7 +4,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor, nn
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.transforms import apply_feature_transform
 
@@ -28,7 +28,7 @@ class NormalizationBase(BaseSpatialModule):
 
     def forward(
         self,
-        input: BatchedSpatialFeatures,
+        input: SpatialFeatures,
     ):
         return apply_feature_transform(input, self.norm)
 

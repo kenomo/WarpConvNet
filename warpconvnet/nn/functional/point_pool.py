@@ -5,7 +5,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     NeighborSearchResult,
     batched_knn_search,
@@ -28,11 +28,10 @@ def _to_return_type(
     down_indices: Int[Tensor, "M"],  # noqa: F821
     down_offsets: Int[Tensor, "B+1"],  # noqa: F821
     return_type: Literal["point", "sparse"] = "point",
-) -> BatchedSpatialFeatures:
+) -> SpatialFeatures:
     if return_type == "point":
         from warpconvnet.geometry.point_collection import (
             BatchedContinuousCoordinates,
-            BatchedFeatures,
             PointCollection,
         )
 
@@ -41,13 +40,12 @@ def _to_return_type(
                 batched_tensor=input_pc.coordinate_tensor[down_indices],
                 offsets=down_offsets,
             ),
-            batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
+            batched_features=down_features,
             voxel_size=downsample_voxel_size,
         )
     else:
         from warpconvnet.geometry.spatially_sparse_tensor import (
             BatchedDiscreteCoordinates,
-            BatchedFeatures,
             SpatiallySparseTensor,
         )
 
@@ -58,7 +56,7 @@ def _to_return_type(
             batched_coordinates=BatchedDiscreteCoordinates(
                 batched_tensor=discrete_coords, offsets=down_offsets
             ),
-            batched_features=BatchedFeatures(batched_tensor=down_features, offsets=down_offsets),
+            batched_features=down_features,
             voxel_size=downsample_voxel_size,
         )
 
@@ -72,7 +70,7 @@ def point_pool(
     return_neighbor_search_result: bool = False,
     return_to_unique: bool = False,
     unique_method: Literal["torch", "ravel"] = "torch",
-) -> BatchedSpatialFeatures:
+) -> SpatialFeatures:
     """
     Pool points in a point cloud.
     When downsample_max_num_points is provided, the point cloud will be downsampled to the number of points.
@@ -207,7 +205,7 @@ def point_pool(
     )
 
     down_features = row_reduction(
-        pc.features[to_csr_indices],
+        pc.feature_tensor[to_csr_indices],
         to_csr_offsets,
         reduction=reduction,
     )

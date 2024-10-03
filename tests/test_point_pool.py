@@ -35,7 +35,7 @@ class TestPointPool(unittest.TestCase):
             return_to_unique=True,
         )
         self.assertTrue(pooled_pc.batch_size == self.B)
-        self.assertTrue(pooled_pc.features.shape[1] == self.C)
+        self.assertTrue(pooled_pc.batched_features.shape[1] == self.C)
         # Assert pooled coords are smaller
         self.assertGreater(pc.coordinates.shape[0], pooled_pc.coordinates.shape[0])
 
@@ -51,7 +51,7 @@ class TestPointPool(unittest.TestCase):
 
         # Check if the unpooled features have the same shape
         N_tot = sum(self.Ns)
-        self.assertTrue(unpooled_pc.feature_shape == (N_tot, self.C))
+        self.assertTrue(unpooled_pc.feature_tensor.shape == (N_tot, self.C))
 
         unpooled_pc = point_unpool(
             pooled_pc,
@@ -60,7 +60,7 @@ class TestPointPool(unittest.TestCase):
             unpooling_mode=unpooling_mode,
             to_unique=to_unique,
         )
-        self.assertTrue(unpooled_pc.feature_shape == (N_tot, 2 * self.C))
+        self.assertTrue(unpooled_pc.feature_tensor.shape == (N_tot, 2 * self.C))
 
     def test_point_collection_to_sparse(self):
         device = torch.device("cuda:0")
@@ -71,7 +71,7 @@ class TestPointPool(unittest.TestCase):
         )
         self.assertTrue(isinstance(st, SpatiallySparseTensor))
         self.assertTrue(st.batch_size == self.B)
-        self.assertTrue(st.features.shape[1] == self.C)
+        self.assertTrue(st.batched_features.shape[1] == self.C)
 
     def test_point_pool_num_points(self):
         device = torch.device("cuda:0")
@@ -96,7 +96,7 @@ class TestPointPool(unittest.TestCase):
         )
 
         self.assertTrue(torch.all(pooled_pc.offsets.diff() <= 1000))
-        self.assertTrue(pooled_pc.features.shape[1] == self.C)
+        self.assertTrue(pooled_pc.batched_features.shape[1] == self.C)
 
     def test_point_to_sparse_wrapper(self):
         device = torch.device("cuda:0")
@@ -112,7 +112,7 @@ class TestPointPool(unittest.TestCase):
         out_pc = wrapper(pc)
         self.assertTrue(isinstance(out_pc, PointCollection))
         self.assertTrue(out_pc.num_channels == pc.num_channels)
-        self.assertTrue(torch.all(out_pc.features == pc.features))
+        self.assertTrue(torch.all(out_pc.feature_tensor == pc.feature_tensor))
 
 
 if __name__ == "__main__":

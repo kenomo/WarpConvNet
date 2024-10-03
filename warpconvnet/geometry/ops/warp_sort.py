@@ -1,10 +1,10 @@
 from enum import Enum
-from typing import Tuple
+from typing import Optional, Tuple
 
+import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
 
-import warp as wp
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
@@ -94,7 +94,7 @@ def _assign_order_discrete_20bit(
 
 def sorting_permutation(
     coords: Int[Tensor, "N 3"],  # noqa: F821
-    offsets: Int[Tensor, "B"] = None,  # noqa: F821
+    offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
     ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
 ) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
     """

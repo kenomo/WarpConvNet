@@ -8,11 +8,7 @@ from warpconvnet.geometry.ops.neighbor_search_continuous import (
     CONTINUOUS_NEIGHBOR_SEARCH_MODE,
     ContinuousNeighborSearchArgs,
 )
-from warpconvnet.geometry.point_collection import (
-    BatchedCoordinates,
-    BatchedFeatures,
-    PointCollection,
-)
+from warpconvnet.geometry.point_collection import BatchedCoordinates, PointCollection
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
@@ -242,9 +238,6 @@ class PointConv(BaseSpatialModule):
                 batched_tensor=query_pc.coordinate_tensor,
                 offsets=query_pc.offsets,
             ),
-            batched_features=BatchedFeatures(
-                batched_tensor=out_features,
-                offsets=query_pc.offsets,
-            ),
+            batched_features=out_features,
             **query_pc.extra_attributes,
         )

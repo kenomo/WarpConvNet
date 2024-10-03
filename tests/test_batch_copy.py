@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.ops.batch_copy import cat_to_batch
+from warpconvnet.ops.batch_copy import cat_to_pad
 from warpconvnet.utils.timer import Timer
 
 
@@ -26,7 +26,7 @@ def run_batch_copy_test(B, min_N, max_N):
                 for num_copy_per_thread in [None, 256]:
                     for _ in range(10):
                         with timer:
-                            out_features = cat_to_batch(
+                            out_features = cat_to_pad(
                                 features,
                                 offsets,
                                 backend=backend,
@@ -39,7 +39,7 @@ def run_batch_copy_test(B, min_N, max_N):
             else:
                 for _ in range(10):
                     with timer:
-                        out_features = cat_to_batch(features, offsets, backend=backend)
+                        out_features = cat_to_pad(features, offsets, backend=backend)
                         # synchronize
                         torch.cuda.synchronize()
                 print(

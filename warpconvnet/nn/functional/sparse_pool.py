@@ -9,7 +9,6 @@ from warpconvnet.geometry.ops.neighbor_search_discrete import (
 )
 from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
-    BatchedFeatures,
     SpatiallySparseTensor,
 )
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
@@ -83,7 +82,7 @@ def sparse_reduce(
             batch_indexed_out_coords[:, 1:],
             output_offsets,
         ),
-        batched_features=BatchedFeatures(out_features, output_offsets),
+        batched_features=out_features,
         stride=out_tensor_stride,
     )
 

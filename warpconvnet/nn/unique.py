@@ -4,7 +4,7 @@ from typing import Literal, Optional, Tuple
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.utils.ravel import ravel_multi_index
 from warpconvnet.utils.unique import unique_torch
 

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import BatchedFeatures, BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.nn.base_module import BaseSpatialModule
 
 __all__ = [
@@ -33,7 +33,7 @@ class Transform(BaseSpatialModule):
         super().__init__()
         self.feature_transform_fn = feature_transform_fn
 
-    def forward(self, *sfs: Tuple[BatchedSpatialFeatures, ...]) -> BatchedSpatialFeatures:
+    def forward(self, *sfs: Tuple[SpatialFeatures, ...]) -> SpatialFeatures:
         """
         Apply the feature transform to the input point collection
 
@@ -43,15 +43,11 @@ class Transform(BaseSpatialModule):
         Returns:
             Transformed point collection
         """
-        if isinstance(sfs, BatchedSpatialFeatures):
-            return sfs.replace(
-                batched_features=BatchedFeatures(
-                    self.feature_transform_fn(sfs.feature_tensor), sfs.offsets
-                )
-            )
+        if isinstance(sfs, SpatialFeatures):
+            return sfs.replace(batched_features=self.feature_transform_fn(sfs.feature_tensor))
 
         # When input is not a single BatchedSpatialFeatures, we assume the inputs are features
-        assert [isinstance(sf, BatchedSpatialFeatures) for sf in sfs] == [True] * len(sfs)
+        assert [isinstance(sf, SpatialFeatures) for sf in sfs] == [True] * len(sfs)
         # Assert that all spatial features have the same offsets
         assert all(torch.allclose(sf.offsets, sfs[0].offsets) for sf in sfs)
         sf = sfs[0]
@@ -59,7 +55,7 @@ class Transform(BaseSpatialModule):
 
         out_features = self.feature_transform_fn(*features)
         return sf.replace(
-            batched_features=BatchedFeatures(out_features, sf.offsets),
+            batched_features=out_features,
         )
 
 

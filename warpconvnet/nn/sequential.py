@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.nn.base_module import BaseSpatialModule
 
 
@@ -13,20 +13,16 @@ class Sequential(nn.Sequential, BaseSpatialModule):
     spatial features object and will become more efficient.
     """
 
-    def forward(self, x: BatchedSpatialFeatures):
-        assert isinstance(
-            x, BatchedSpatialFeatures
-        ), f"Expected BatchedSpatialFeatures, got {type(x)}"
+    def forward(self, x: SpatialFeatures):
+        assert isinstance(x, SpatialFeatures), f"Expected BatchedSpatialFeatures, got {type(x)}"
 
         in_sf = x
         for module in self:
-            if isinstance(module, BaseSpatialModule) and isinstance(x, BatchedSpatialFeatures):
+            if isinstance(module, BaseSpatialModule) and isinstance(x, SpatialFeatures):
                 x = module(x)
-            elif not isinstance(module, BaseSpatialModule) and isinstance(
-                x, BatchedSpatialFeatures
-            ):
+            elif not isinstance(module, BaseSpatialModule) and isinstance(x, SpatialFeatures):
                 in_sf = x
-                x = module(x.features)
+                x = module(x.feature_tensor)
             elif isinstance(x, torch.Tensor) and isinstance(module, BaseSpatialModule):
                 x = in_sf.replace(batched_features=x)
                 x = module(x)

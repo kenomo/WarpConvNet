@@ -6,12 +6,14 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
+from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING
+from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
-from warpconvnet.ops.batch_copy import batch_to_cat, cat_to_batch
+from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
 
 
 def zero_out_points(
@@ -73,21 +75,19 @@ class ToAttention(BaseSpatialModule):
         )
 
     def forward(
-        self, x: BatchedSpatialFeatures
+        self, x: SpatialFeatures
     ) -> Tuple[Float[Tensor, "B M C"], Float[Tensor, "B M C"], Float[Tensor, "B M M"]]:
-        features, offsets, num_points = x.features, x.offsets, x.offsets.diff()
-        features = cat_to_batch(features, offsets)
+        features, offsets, num_points = x.feature_tensor, x.offsets, x.offsets.diff()
+        features = cat_to_pad(features, offsets)
         pos_enc = self.sinusoidal_encoding(x.coordinate_tensor)
-        pos_enc = cat_to_batch(pos_enc, offsets)
+        pos_enc = cat_to_pad(pos_enc, offsets)
         mask = offset_to_mask(features, offsets, features.shape[1])
         return features, pos_enc, mask, num_points
 
 
 class ToSpatialFeatures(nn.Module):
-    def forward(
-        self, x: Float[Tensor, "B N C"], target: BatchedSpatialFeatures
-    ) -> BatchedSpatialFeatures:
-        feats = batch_to_cat(x, target.offsets)
+    def forward(self, x: Float[Tensor, "B N C"], target: SpatialFeatures) -> SpatialFeatures:
+        feats = pad_to_cat(x, target.offsets)
         return target.replace(batched_features=feats)
 
 
@@ -297,7 +297,7 @@ class SpatialFeaturesTransformer(Transformer):
         )
         self.from_attn = ToSpatialFeatures()
 
-    def forward(self, x: BatchedSpatialFeatures) -> BatchedSpatialFeatures:
+    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
         features, pos_enc, mask, num_points = self.to_attn(x)
         y = super().forward(features, pos_enc, mask, num_points)
         y = self.from_attn(y, x)

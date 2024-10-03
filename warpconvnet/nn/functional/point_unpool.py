@@ -54,7 +54,5 @@ def point_unpool(
         unpooling_mode=unpooling_mode,
     )
     if concat_unpooled_pc:
-        unpooled_features = torch.cat(
-            (unpooled_features, unpooled_pc.batched_features.batched_tensor), dim=-1
-        )
+        unpooled_features = torch.cat((unpooled_features, unpooled_pc.feature_tensor), dim=-1)
     return unpooled_pc.replace(batched_features=unpooled_features)

@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Literal, Optional, Sequence, Tuple
@@ -75,7 +76,10 @@ class DiscreteNeighborSearchResult:
         return self.in_maps[start:end], self.out_maps[start:end]
 
     def get_batch(
-        self, start_idx: int, end_idx: int, out_format: Literal["list", "tensor"] = "list"
+        self,
+        start_idx: int,
+        end_idx: int,
+        out_format: Literal["list", "tensor"] = "list",
     ) -> Tuple[List[Int[Tensor, "N"]], List[Int[Tensor, "N"]]]:  # noqa: F821
         in_maps = []
         out_maps = []
@@ -87,10 +91,16 @@ class DiscreteNeighborSearchResult:
         elif out_format == "tensor":
             max_num_maps = max(len(in_map) for in_map in in_maps)
             in_maps_tensor = -1 * torch.ones(
-                len(in_maps), max_num_maps, device=self.in_maps.device, dtype=torch.int64
+                len(in_maps),
+                max_num_maps,
+                device=self.in_maps.device,
+                dtype=torch.int64,
             )
             out_maps_tensor = -1 * torch.ones(
-                len(out_maps), max_num_maps, device=self.out_maps.device, dtype=torch.int64
+                len(out_maps),
+                max_num_maps,
+                device=self.out_maps.device,
+                dtype=torch.int64,
             )
             for i, (in_map, out_map) in enumerate(zip(in_maps, out_maps)):
                 in_maps_tensor[i, : len(in_map)] = in_map
@@ -522,6 +532,11 @@ def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821
     return x
 
 
+# Use a deterministic hash function for strings
+def string_hash(s: str) -> int:
+    return int(hashlib.md5(s.encode()).hexdigest(), 16)
+
+
 class KernelMapCacheKey:
     """
     Key for kernel map cache.
@@ -530,13 +545,26 @@ class KernelMapCacheKey:
     kernel_size: Tuple[int, ...]
     kernel_dilation: Tuple[int, ...]
     transposed: bool
+    generative: bool
+    stride_mode: str
     in_offsets: Int[Tensor, "B+1"]  # noqa: F821
     out_offsets: Int[Tensor, "B+1"]  # noqa: F821
 
-    def __init__(self, kernel_size, kernel_dilation, transposed, in_offsets, out_offsets):
+    def __init__(
+        self,
+        kernel_size,
+        kernel_dilation,
+        transposed,
+        generative,
+        stride_mode,
+        in_offsets,
+        out_offsets,
+    ):
         self.kernel_size = kernel_size
         self.kernel_dilation = kernel_dilation
         self.transposed = transposed
+        self.generative = generative
+        self.stride_mode = stride_mode
         self.in_offsets = in_offsets.detach().cpu().int()
         self.out_offsets = out_offsets.detach().cpu().int()
 
@@ -545,6 +573,8 @@ class KernelMapCacheKey:
             _int_sequence_hash(self.kernel_size)
             ^ _int_sequence_hash(self.kernel_dilation)
             ^ hash(self.transposed)
+            ^ hash(self.generative)
+            ^ string_hash(self.stride_mode)  # Use string_hash for stride_mode
             ^ _int_sequence_hash(self.in_offsets.tolist())
             ^ _int_sequence_hash(self.out_offsets.tolist())
         )
@@ -554,12 +584,14 @@ class KernelMapCacheKey:
             self.kernel_size == other.kernel_size
             and self.kernel_dilation == other.kernel_dilation
             and self.transposed == other.transposed
+            and self.generative == other.generative
+            and self.stride_mode == other.stride_mode
             and self.in_offsets.equal(other.in_offsets)
             and self.out_offsets.equal(other.out_offsets)
         )
 
     def __repr__(self):
-        return f"KernelMapCacheKey(kernel_size={self.kernel_size}, kernel_dilation={self.kernel_dilation}, transposed={self.transposed}, in_offsets={self.in_offsets}, out_offsets={self.out_offsets})"
+        return f"KernelMapCacheKey(kernel_size={self.kernel_size}, kernel_dilation={self.kernel_dilation}, transposed={self.transposed}, generative={self.generative}, stride_mode={self.stride_mode}, in_offsets={self.in_offsets}, out_offsets={self.out_offsets})"
 
 
 class KernelMapCache:

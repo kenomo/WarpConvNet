@@ -48,7 +48,7 @@ class TestSparsePool(unittest.TestCase):
             st_downsampled_first.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
         self.assertTrue(
-            st_downsampled_first.coordinate_shape[0] == st_downsampled.coordinate_shape[0]
+            st_downsampled_first.coordinate_tensor.shape[0] == st_downsampled.coordinate_tensor.shape[0]
         )
 
 

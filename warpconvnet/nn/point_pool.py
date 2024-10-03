@@ -2,7 +2,7 @@ from typing import Literal, Optional, Tuple, Union
 
 import torch.nn as nn
 
-from warpconvnet.geometry.base_geometry import BatchedSpatialFeatures
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.base_module import BaseSpatialModule
@@ -33,7 +33,7 @@ class PointPoolBase(BaseSpatialModule):
 
     def forward(
         self, pc: PointCollection
-    ) -> Union[BatchedSpatialFeatures, Tuple[BatchedSpatialFeatures, NeighborSearchResult]]:
+    ) -> Union[SpatialFeatures, Tuple[SpatialFeatures, NeighborSearchResult]]:
         return point_pool(
             pc=pc,
             reduction=self.reduction,

@@ -6,8 +6,10 @@ from torch import Tensor
 
 from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
-    BatchedFeatures,
-    BatchedSpatialFeatures,
+    CatBatchedFeatures,
+    PadBatchedFeatures,
+    SpatialFeatures,
+    to_batched_features,
 )
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
@@ -117,7 +119,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         )
 
 
-class PointCollection(BatchedSpatialFeatures):
+class PointCollection(SpatialFeatures):
     """
     Interface class for collections of points
 
@@ -131,7 +133,11 @@ class PointCollection(BatchedSpatialFeatures):
             List[Float[Tensor, "N 3"]] | Float[Tensor, "N 3"] | BatchedContinuousCoordinates
         ),  # noqa: F722,F821
         batched_features: (
-            List[Float[Tensor, "N C"]] | Float[Tensor, "N C"] | BatchedFeatures
+            List[Float[Tensor, "N C"]]
+            | Float[Tensor, "N C"]
+            | Float[Tensor, "B M C"]
+            | CatBatchedFeatures
+            | PadBatchedFeatures
         ),  # noqa: F722,F821
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
         device: Optional[str] = None,
@@ -146,9 +152,10 @@ class PointCollection(BatchedSpatialFeatures):
             ), "If coords is a list, features must be a list too."
             assert len(batched_coordinates) == len(batched_features)
             # Assert all elements in coords and features have same length
-            assert all(len(c) == len(f) for c, f in zip(batched_coordinates, batched_features))
+            assert all(
+                len(c) == len(f) for c, f in zip(batched_coordinates, batched_features)
+            ), "All elements in coords and features must have same length"
             batched_coordinates = BatchedContinuousCoordinates(batched_coordinates, device=device)
-            batched_features = BatchedFeatures(batched_features, device=device)
         elif isinstance(batched_coordinates, Tensor):
             assert (
                 isinstance(batched_features, Tensor) and offsets is not None
@@ -156,9 +163,15 @@ class PointCollection(BatchedSpatialFeatures):
             batched_coordinates = BatchedContinuousCoordinates(
                 batched_coordinates, offsets=offsets, device=device
             )
-            batched_features = BatchedFeatures(batched_features, offsets=offsets, device=device)
 
-        BatchedSpatialFeatures.__init__(
+        if isinstance(batched_features, list):
+            batched_features = CatBatchedFeatures(batched_features, device=device)
+        elif isinstance(batched_features, Tensor):
+            batched_features = to_batched_features(
+                batched_features, batched_coordinates.offsets, device=device
+            )
+
+        SpatialFeatures.__init__(
             self,
             batched_coordinates,
             batched_features,
@@ -186,7 +199,9 @@ class PointCollection(BatchedSpatialFeatures):
             batched_coordinates=BatchedContinuousCoordinates(
                 sorted_coords, offsets=self.batched_coordinates.offsets
             ),
-            batched_features=BatchedFeatures(sorted_feats, offsets=self.batched_features.offsets),
+            batched_features=CatBatchedFeatures(
+                sorted_feats, offsets=self.batched_features.offsets
+            ),
             **self.extra_attributes,
         )
 
@@ -201,6 +216,9 @@ class PointCollection(BatchedSpatialFeatures):
         assert self.device.type != "cpu", "Voxel downsample is only supported on GPU"
         extra_args = self.extra_attributes
         extra_args["voxel_size"] = voxel_size
+        assert isinstance(
+            self.batched_features, CatBatchedFeatures
+        ), "Voxel downsample is only supported for CatBatchedFeatures"
         if reduction == REDUCTIONS.RANDOM:
             to_unique_indicies, unique_offsets = voxel_downsample_random_indices(
                 batched_points=self.coordinate_tensor,
@@ -212,7 +230,7 @@ class PointCollection(BatchedSpatialFeatures):
                     batched_tensor=self.coordinate_tensor[to_unique_indicies],
                     offsets=unique_offsets,
                 ),
-                batched_features=BatchedFeatures(
+                batched_features=CatBatchedFeatures(
                     batched_tensor=self.feature_tensor[to_unique_indicies], offsets=unique_offsets
                 ),
                 **extra_args,
@@ -244,10 +262,12 @@ class PointCollection(BatchedSpatialFeatures):
 
         return self.__class__(
             batched_coordinates=BatchedContinuousCoordinates(
-                batched_tensor=self.coordinates[to_unique.to_unique_indices],
+                batched_tensor=self.coordinate_tensor[to_unique.to_unique_indices],
                 offsets=unique_offsets,
             ),
-            batched_features=BatchedFeatures(batched_tensor=down_features, offsets=unique_offsets),
+            batched_features=CatBatchedFeatures(
+                batched_tensor=down_features, offsets=unique_offsets
+            ),
             **extra_args,
         )
 
@@ -260,7 +280,7 @@ class PointCollection(BatchedSpatialFeatures):
             batched_coordinates=BatchedContinuousCoordinates(
                 batched_tensor=self.coordinate_tensor[sampled_indices], offsets=sample_offsets
             ),
-            batched_features=BatchedFeatures(
+            batched_features=CatBatchedFeatures(
                 batched_tensor=self.feature_tensor[sampled_indices], offsets=sample_offsets
             ),
             **self.extra_attributes,
@@ -336,8 +356,8 @@ class PointCollection(BatchedSpatialFeatures):
 
         # Create BatchedContinuousCoordinates
         batched_coordinates = BatchedContinuousCoordinates(coordinates)
-        # Create BatchedFeatures
-        batched_features = BatchedFeatures(features)
+        # Create CatBatchedFeatures
+        batched_features = CatBatchedFeatures(features)
 
         return cls(batched_coordinates, batched_features)
 

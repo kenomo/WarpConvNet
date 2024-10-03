@@ -8,7 +8,6 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.autograd import Function
 
-from warpconvnet.geometry.base_geometry import BatchedFeatures
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     KernelMapCache,
@@ -255,10 +254,7 @@ def spatially_sparse_conv(
         if bias is not None:
             out_feature_tensor += bias
         return input_sparse_tensor.replace(
-            batched_features=BatchedFeatures(
-                out_feature_tensor,
-                offsets=input_sparse_tensor.offsets,
-            ),
+            batched_features=out_feature_tensor,
         )
 
     if kernel_search_batch_size is None:
@@ -339,10 +335,7 @@ def spatially_sparse_conv(
             batch_indexed_out_coords[:, 1:],
             offsets=out_offsets,
         ),
-        batched_features=BatchedFeatures(
-            out_feature_tensor,
-            offsets=out_offsets,
-        ),
+        batched_features=out_feature_tensor,
         stride=out_tensor_stride,
     )
 
@@ -414,6 +407,8 @@ def generate_output_coords_and_kernel_map(
         kernel_size=kernel_size,
         kernel_dilation=kernel_dilation,
         transposed=transposed,
+        generative=generative,
+        stride_mode=str(stride_mode),
         in_offsets=input_sparse_tensor.offsets,
         out_offsets=out_offsets,
     )
@@ -424,25 +419,28 @@ def generate_output_coords_and_kernel_map(
 
     # Kernel map generation
     if transposed and not generative:
-        # Check if the kernel map for non transposed case exists
-        kernel_map_cache_key_non_transposed = KernelMapCacheKey(
-            kernel_size=kernel_size,
-            kernel_dilation=kernel_dilation,
-            transposed=False,
-            in_offsets=out_offsets,
-            out_offsets=input_sparse_tensor.offsets,
-        )
-        kernel_map_non_transposed = input_sparse_tensor.cache.get(
-            kernel_map_cache_key_non_transposed
-        )
-        if kernel_map_non_transposed is not None:
-            # Swap in and out maps for transposed kernel map generation and swap it back
-            kernel_map = DiscreteNeighborSearchResult(
-                in_maps=kernel_map_non_transposed.out_maps,
-                out_maps=kernel_map_non_transposed.in_maps,
-                offsets=kernel_map_non_transposed.offsets,
+        if input_sparse_tensor.cache is not None:
+            # Check if the kernel map for non transposed case exists
+            kernel_map_cache_key_non_transposed = KernelMapCacheKey(
+                kernel_size=kernel_size,
+                kernel_dilation=kernel_dilation,
+                transposed=False,
+                generative=generative,
+                stride_mode=str(stride_mode),
+                in_offsets=out_offsets,
+                out_offsets=input_sparse_tensor.offsets,
             )
-            return batch_indexed_out_coords, out_offsets, kernel_map
+            kernel_map_non_transposed = input_sparse_tensor.cache.get(
+                kernel_map_cache_key_non_transposed
+            )
+            if kernel_map_non_transposed is not None:
+                # Swap in and out maps for transposed kernel map generation and swap it back
+                kernel_map = DiscreteNeighborSearchResult(
+                    in_maps=kernel_map_non_transposed.out_maps,
+                    out_maps=kernel_map_non_transposed.in_maps,
+                    offsets=kernel_map_non_transposed.offsets,
+                )
+                return batch_indexed_out_coords, out_offsets, kernel_map
 
         # Swap in and out maps for transposed kernel map generation and swap it back
         kernel_map = kernel_map_from_size(
