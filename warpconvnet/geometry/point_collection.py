@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import torch
 from jaxtyping import Float, Int
@@ -345,11 +345,18 @@ class PointCollection(BatchedSpatialFeatures):
         self,
         voxel_size: Optional[float] = None,
         reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR] = REDUCTIONS.RANDOM,
+        unique_method: Literal["torch", "ravel"] = "torch",
+        return_to_unique: bool = False,
     ):
         """
         Convert the point collection to a spatially sparse tensor.
         """
         st = point_pool(
-            self, reduction=reduction, downsample_voxel_size=voxel_size, return_type="sparse"
+            self,
+            reduction=reduction,
+            downsample_voxel_size=voxel_size,
+            return_type="sparse",
+            unique_method=unique_method,
+            return_to_unique=return_to_unique,
         )
         return st

@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import torch
@@ -51,6 +51,7 @@ def voxel_downsample_csr_mapping(
     batched_points: Float[Tensor, "N 3"],  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F722,F821
     voxel_size: float,
+    unique_method: Literal["torch", "ravel"] = "torch",
 ) -> Tuple[
     Int[Tensor, "M 3"],  # noqa: F821
     Int[Tensor, "B+1"],  # noqa: F821
@@ -90,7 +91,7 @@ def voxel_downsample_csr_mapping(
         batch_index = batch_index_from_offset(offsets, device)
         voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
-    to_unique = ToUnique(unique_method="torch", return_to_unique_indices=True)
+    to_unique = ToUnique(unique_method=unique_method, return_to_unique_indices=True)
     unique_coords, to_csr_indices, to_csr_offsets = to_unique.to_unique_csr(voxel_coords, dim=0)
 
     if B == 1:

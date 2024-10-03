@@ -71,6 +71,7 @@ def point_pool(
     return_type: Literal["point", "sparse"] = "point",
     return_neighbor_search_result: bool = False,
     return_to_unique: bool = False,
+    unique_method: Literal["torch", "ravel"] = "torch",
 ) -> BatchedSpatialFeatures:
     """
     Pool points in a point cloud.
@@ -202,6 +203,7 @@ def point_pool(
         batched_points=pc.coordinate_tensor,
         offsets=pc.offsets,
         voxel_size=downsample_voxel_size,
+        unique_method=unique_method,
     )
 
     down_features = row_reduction(
