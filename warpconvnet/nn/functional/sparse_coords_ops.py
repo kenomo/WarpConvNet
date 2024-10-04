@@ -7,18 +7,19 @@ from jaxtyping import Int
 from torch import Tensor
 
 from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.core.serialization import morton_code
 from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_offsets_from_size
 from warpconvnet.utils.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
-from warpconvnet.utils.unique import unique_hashmap
+from warpconvnet.utils.unique import unique_hashmap, unique_inverse
 
 
 @torch.no_grad()
 def generate_output_coords(
     batch_indexed_coords: Int[Tensor, "N D+1"],
     stride: Tuple[int, ...],
-    backend: Literal["hashmap", "ravel", "unique"] = "unique",
+    backend: Literal["hashmap", "ravel", "unique", "morton"] = "unique",
 ) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Downsample the coordinates by the stride.
@@ -45,14 +46,19 @@ def generate_output_coords(
         unique_indices, _ = unique_hashmap(discretized_coords)
         unique_coords = discretized_coords[unique_indices]
     elif backend == "ravel":
-        unique_indices = ravel_multi_index_auto_shape(discretized_coords)
-        unique_coords = discretized_coords[unique_indices]
+        code = ravel_multi_index_auto_shape(discretized_coords)
+        to_unique_indices, to_orig_indices = unique_inverse(code)
+        unique_coords = discretized_coords[to_unique_indices]
     elif backend == "unique":
         unique_coords = torch.unique(discretized_coords, dim=0, sorted=True)
+    elif backend == "morton":
+        code = morton_code(discretized_coords, return_to_morton=False)
+        to_unique_indices, to_orig_indices = unique_inverse(code)
+        unique_coords = discretized_coords[to_unique_indices]
     else:
         raise ValueError(f"Invalid method: {backend}")
 
-    if backend != "unique":
+    if backend == "hashmap":
         # sort the batch index for the offset
         out_batch_index = unique_coords[:, 0]
         _, perm = torch.sort(out_batch_index)

@@ -4,7 +4,7 @@ import torch
 import warp as wp
 
 from warpconvnet.core.hashmap import HashMethod
-from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING
+from warpconvnet.core.serialization import POINT_ORDERING
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.timer import Timer

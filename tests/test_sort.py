@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
+from warpconvnet.core.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
@@ -25,20 +25,20 @@ class TestSorting(unittest.TestCase):
         device = torch.device("cuda:0")
         st = self.st.to(device)
         # Get the coordinates and test sorting_permutation
-        permutation, rank = sorting_permutation(
+        code, permutation = morton_code(
             coords=st.coordinate_tensor, offsets=st.offsets, ordering=POINT_ORDERING.Z_ORDER
         )
         # min max of the permutation between each offsets should not exceed offset boundaries
-        max_rank = 0
+        max_code = 0
         for i in range(len(st.offsets) - 1):
             offset = st.offsets[i]
             next_offset = st.offsets[i + 1]
             curr_perm = permutation[offset:next_offset]
-            curr_max_rank = rank[offset:next_offset].max()
-            self.assertTrue(curr_max_rank >= max_rank)
+            curr_max_code = code[offset:next_offset].max()
+            self.assertTrue(curr_max_code >= max_code)
             self.assertTrue(curr_perm.min() >= offset)
             self.assertTrue(curr_perm.max() < next_offset)
-            max_rank = curr_max_rank
+            max_code = curr_max_code
 
 
 if __name__ == "__main__":

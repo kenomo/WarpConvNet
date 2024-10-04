@@ -4,6 +4,7 @@ from typing import Literal, Optional, Tuple
 from jaxtyping import Int
 from torch import Tensor
 
+from warpconvnet.core.serialization import morton_code
 from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.utils.ravel import ravel_multi_index
 from warpconvnet.utils.unique import unique_torch
@@ -22,7 +23,7 @@ class ToUnique:
 
     def __init__(
         self,
-        unique_method: Literal["torch", "ravel"] = "torch",
+        unique_method: Literal["torch", "ravel", "morton"] = "torch",
         return_to_unique_indices: bool = False,
     ):
         # Ravel can be used only when the raveled coordinates is less than 2**31
@@ -35,6 +36,8 @@ class ToUnique:
             shifted_x = x - min_coords
             shape = shifted_x.max(dim=dim).values + 1
             unique_input = ravel_multi_index(shifted_x, shape)
+        elif self.unique_method == "morton":
+            unique_input = morton_code(x, return_to_morton=False)
         else:
             unique_input = x
 

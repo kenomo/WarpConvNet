@@ -4,6 +4,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
+from warpconvnet.core.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
     CatBatchedFeatures,
@@ -20,11 +21,6 @@ from warpconvnet.geometry.ops.neighbor_search_continuous import (
 from warpconvnet.geometry.ops.voxel_ops import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
-)
-from warpconvnet.geometry.ops.warp_sort import (
-    POINT_ORDERING,
-    sort_point_collection,
-    sorting_permutation,
 )
 from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 from warpconvnet.nn.functional.point_pool import point_pool
@@ -110,11 +106,14 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         Sort the points according to the ordering provided.
         The voxel size defines the smallest descritization and points in the same voxel will have random order.
         """
+        assert ordering == POINT_ORDERING.Z_ORDER, "Only Z-ordering is supported atm"
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
-        sorted_order = sorting_permutation(self.batched_tensor, self.offsets, ordering)
+        code, perm = morton_code(
+            torch.floor(self.batched_tensor / voxel_size).int(), self.offsets, ordering
+        )
         return self.__class__(
-            batched_tensor=self.batched_tensor[sorted_order],
+            batched_tensor=self.batched_tensor[perm],
             offsets=self.offsets,
         )
 
@@ -180,29 +179,34 @@ class PointCollection(SpatialFeatures):
 
     def sort(
         self,
+        voxel_size: float,
         ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
-        voxel_size: Optional[float] = None,
     ):
         """
         Sort the points according to the ordering provided.
         The voxel size defines the smallest discretization and points in the same voxel will have random order.
         """
+        assert ordering == POINT_ORDERING.Z_ORDER, "Only Z-ordering is supported atm"
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
-        sorted_coords, sorted_feats = sort_point_collection(
-            coords=self.batched_coordinates.batched_tensor,
-            features=self.batched_features.batched_tensor,
-            ordering=ordering,
-            offsets=self.batched_coordinates.offsets,
+        code, perm = morton_code(
+            torch.floor(self.coordinate_tensor / voxel_size).int(),
+            self.offsets,
+            ordering,
         )
+        kwargs = self.extra_attributes.copy()
+        kwargs["ordering"] = ordering
+        kwargs["code"] = code[perm]
         return self.__class__(
             batched_coordinates=BatchedContinuousCoordinates(
-                sorted_coords, offsets=self.batched_coordinates.offsets
+                batched_tensor=self.coordinate_tensor[perm],
+                offsets=self.offsets,
             ),
             batched_features=CatBatchedFeatures(
-                sorted_feats, offsets=self.batched_features.offsets
+                batched_tensor=self.feature_tensor[perm],
+                offsets=self.offsets,
             ),
-            **self.extra_attributes,
+            **kwargs,
         )
 
     def voxel_downsample(
@@ -231,7 +235,8 @@ class PointCollection(SpatialFeatures):
                     offsets=unique_offsets,
                 ),
                 batched_features=CatBatchedFeatures(
-                    batched_tensor=self.feature_tensor[to_unique_indicies], offsets=unique_offsets
+                    batched_tensor=self.feature_tensor[to_unique_indicies],
+                    offsets=unique_offsets,
                 ),
                 **extra_args,
             )
@@ -278,10 +283,12 @@ class PointCollection(SpatialFeatures):
         sampled_indices, sample_offsets = random_downsample(self.offsets, sample_points)
         return self.__class__(
             batched_coordinates=BatchedContinuousCoordinates(
-                batched_tensor=self.coordinate_tensor[sampled_indices], offsets=sample_offsets
+                batched_tensor=self.coordinate_tensor[sampled_indices],
+                offsets=sample_offsets,
             ),
             batched_features=CatBatchedFeatures(
-                batched_tensor=self.feature_tensor[sampled_indices], offsets=sample_offsets
+                batched_tensor=self.feature_tensor[sampled_indices],
+                offsets=sample_offsets,
             ),
             **self.extra_attributes,
         )

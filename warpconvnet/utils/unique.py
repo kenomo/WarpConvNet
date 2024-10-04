@@ -9,6 +9,20 @@ from warpconvnet.core.hashmap import HashMethod, VectorHashTable
 from warpconvnet.utils.ravel import ravel_multi_index
 
 
+def unique_inverse(
+    x: Tensor,
+    dim: int = 0,
+) -> Tuple[Int[Tensor, "M C"], Int[Tensor, "N"],]:  # noqa: F821  # noqa: F821  # noqa: F821
+    """
+    Get to_unique_indices and to_orig_indices.
+    """
+    unique, to_orig_indices = torch.unique(x, dim=dim, sorted=True, return_inverse=True)
+    to_unique_indices = torch.arange(x.size(dim), dtype=torch.int32, device=x.device).scatter_(
+        dim=0, index=to_orig_indices, src=unique
+    )
+    return to_unique_indices, to_orig_indices
+
+
 def unique_torch(
     x: Int[Tensor, "N C"],
     dim: int = 0,

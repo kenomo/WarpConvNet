@@ -5,6 +5,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.core.hashmap import VectorHashTable
+from warpconvnet.core.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.base_geometry import (
     BatchedCoordinates,
     CatBatchedFeatures,
@@ -13,7 +14,6 @@ from warpconvnet.geometry.base_geometry import (
     to_batched_features,
 )
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
-from warpconvnet.geometry.ops.warp_sort import POINT_ORDERING, sorting_permutation
 from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
     offsets_from_batch_index,
@@ -81,8 +81,8 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
     def sort(
         self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER
     ) -> "BatchedDiscreteCoordinates":
-        perm, rank = sorting_permutation(self.batched_tensor, self.offsets, ordering)  # noqa: F821
-        return self.__class__(tensors=self.batched_tensor[perm], offsets=self.offsets)
+        perm, rank = morton_code(self.batched_tensor, self.offsets, ordering)  # noqa: F821
+        return self.__class__(self.batched_tensor[perm], self.offsets)
 
     def neighbors(
         self,
@@ -346,14 +346,21 @@ class SpatiallySparseTensor(SpatialFeatures):
         if ordering == self.ordering:
             return self
 
-        perm, rank = sorting_permutation(
-            self.coordinate_tensor, self.offsets, ordering
-        )  # noqa: F821
-        coords = BatchedDiscreteCoordinates(self.coordinate_tensor[perm], self.offsets)
-        feats = CatBatchedFeatures(self.feature_tensor[perm], self.offsets)
+        assert isinstance(
+            self.batched_features, CatBatchedFeatures
+        ), "Features must be a CatBatchedFeatures to sort."
+
+        code, perm = morton_code(self.coordinate_tensor, self.offsets, ordering)  # noqa: F821
         kwargs = self.extra_attributes.copy()
         kwargs["ordering"] = ordering
-        return self.__class__(coords, feats, **kwargs)
+        kwargs["code"] = code[perm]
+        return self.__class__(
+            batched_coordinates=BatchedDiscreteCoordinates(
+                self.coordinate_tensor[perm], self.offsets
+            ),
+            batched_features=CatBatchedFeatures(self.feature_tensor[perm], self.offsets),
+            **kwargs,
+        )
 
     def unique(self) -> "SpatiallySparseTensor":
         unique_indices, batch_offsets = voxel_downsample_random_indices(
