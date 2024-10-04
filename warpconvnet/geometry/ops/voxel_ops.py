@@ -8,7 +8,6 @@ from torch import Tensor
 
 from warpconvnet.core.hashmap import VectorHashTable
 from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
-from warpconvnet.nn.unique import ToUnique
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
     batch_index_from_offset,
@@ -16,8 +15,8 @@ from warpconvnet.utils.batch_index import (
     offsets_from_batch_index,
 )
 from warpconvnet.utils.list_to_batch import list_to_cat_tensor
-from warpconvnet.utils.ravel import ravel_multi_index, ravel_multi_index_auto_shape
-from warpconvnet.utils.unique import unique_hashmap, unique_torch
+from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
+from warpconvnet.utils.unique import ToUnique, unique_hashmap, unique_torch
 
 __all__ = [
     "voxel_downsample_csr_mapping",

@@ -4,7 +4,6 @@ import torch
 import warp as wp
 
 from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.nn.unique import ToUnique
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
@@ -13,7 +12,7 @@ from warpconvnet.utils.batch_index import (
     offsets_from_batch_index,
 )
 from warpconvnet.utils.timer import Timer
-from warpconvnet.utils.unique import unique_torch
+from warpconvnet.utils.unique import ToUnique, unique_torch
 
 
 class TestUtils(unittest.TestCase):
@@ -95,7 +94,7 @@ class TestUtils(unittest.TestCase):
         for backend in backends:
             for input_type in ["torch", "warp"]:
                 print(
-                    f"Argsort sorting:{backend} input:{input_type} time: {backend_times[backend][input_type].min_elapsed}"
+                    f"Argsort sorting: {backend} input: {input_type} time: {backend_times[backend][input_type].min_elapsed}"
                 )
         # Argsort sorting:torch input:torch time: 6.461143493652344e-05
         # Argsort sorting:torch input:warp time: 7.987022399902344e-05

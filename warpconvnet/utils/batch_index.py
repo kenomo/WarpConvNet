@@ -210,3 +210,22 @@ def offsets_from_batch_index(
         raise NotImplementedError("warp backend not implemented")
     else:
         raise ValueError("backend must be torch")
+
+
+def offsets_from_offsets(
+    offsets: Int[Tensor, "B+1"],  # noqa: F821
+    sorted_indices: Int[Tensor, "N"],  # noqa: F821
+    device: Optional[str] = None,
+) -> Int[Tensor, "B+1"]:  # noqa: F821
+    """
+    Given a sorted indices, return a new offsets that selects batch indices using the indices.
+    """
+    B = offsets.shape[0] - 1
+    if B == 1:
+        new_offsets = torch.IntTensor([0, len(sorted_indices)])
+    else:
+        batch_index = batch_index_from_offset(offsets, device=device)
+        _, batch_counts = torch.unique_consecutive(batch_index[sorted_indices], return_counts=True)
+        batch_counts = batch_counts.cpu()
+        new_offsets = torch.cat((batch_counts.new_zeros(1), batch_counts.cumsum(dim=0)))
+    return new_offsets

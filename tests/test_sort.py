@@ -17,7 +17,9 @@ class TestSorting(unittest.TestCase):
         self.pc = PointCollection(self.coords, self.features)
 
         self.voxel_size = 0.01
-        self.st_coords = [torch.floor(coords / self.voxel_size).int() for coords in self.coords]
+        self.st_coords = [
+            torch.floor(coords / self.voxel_size).int() for coords in self.coords
+        ]
         self.st = SpatiallySparseTensor(self.st_coords, self.features)
 
     # Test point collection sorting
@@ -26,7 +28,8 @@ class TestSorting(unittest.TestCase):
         st = self.st.to(device)
         # Get the coordinates and test sorting_permutation
         code, permutation = morton_code(
-            coords=st.coordinate_tensor, offsets=st.offsets, ordering=POINT_ORDERING.Z_ORDER
+            coords=st.coordinate_tensor,
+            offsets=st.offsets,
         )
         # min max of the permutation between each offsets should not exceed offset boundaries
         max_code = 0

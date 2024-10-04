@@ -16,7 +16,8 @@ from warpconvnet.geometry.ops.voxel_ops import (
     voxel_downsample_random_indices,
 )
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
-from warpconvnet.utils.batch_index import batch_index_from_offset
+from warpconvnet.utils.batch_index import batch_index_from_offset, offsets_from_offsets
+from warpconvnet.utils.unique import ToUnique
 
 __all__ = ["point_pool"]
 
@@ -127,9 +128,7 @@ def _pool_by_max_num_points(
     ).squeeze()
     # argsort and get the number of points per down indices
     sorted_knn_down_indices, to_sorted_knn_down_indices = torch.sort(knn_down_indices)
-    unique_indices, counts = torch.unique_consecutive(
-        sorted_knn_down_indices, return_counts=True
-    )
+    unique_indices, counts = torch.unique_consecutive(sorted_knn_down_indices, return_counts=True)
     knn_offsets = torch.cat(
         [
             torch.zeros(1, dtype=counts.dtype, device=counts.device),
@@ -146,12 +145,8 @@ def _pool_by_max_num_points(
         # select survived indices
         unique_coords = unique_coords[unique_indices]
         unique_batch_indices = batch_index_from_offset(unique_offsets, backend="torch")
-        unique_batch_indices = unique_batch_indices.to(unique_indices.device)[
-            unique_indices
-        ]
-        _, unique_counts = torch.unique_consecutive(
-            unique_batch_indices, return_counts=True
-        )
+        unique_batch_indices = unique_batch_indices.to(unique_indices.device)[unique_indices]
+        _, unique_counts = torch.unique_consecutive(unique_batch_indices, return_counts=True)
         unique_offsets = torch.cat(
             [
                 torch.zeros(1, dtype=unique_counts.dtype),
@@ -245,9 +240,7 @@ def point_pool(
         )
 
     if reduction == REDUCTIONS.RANDOM:
-        assert (
-            not return_to_unique
-        ), "return_to_unique must be False when reduction is RANDOM."
+        assert not return_to_unique, "return_to_unique must be False when reduction is RANDOM."
         assert (
             not return_neighbor_search_result
         ), "return_neighbor_search_result must be False when reduction is RANDOM."
@@ -297,3 +290,53 @@ def point_pool(
     if return_to_unique:
         return out_sf, to_unique
     return out_sf
+
+
+def point_pool_by_code(
+    pc: "PointCollection",  # noqa: F821
+    code: Int[Tensor, "N"],  # noqa: F821
+    reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
+    average_pooled_coordinates: bool = False,
+    return_to_unique: bool = False,
+) -> "PointCollection":  # noqa: F821
+    from warpconvnet.geometry.point_collection import PointCollection
+
+    if isinstance(reduction, str):
+        reduction = REDUCTIONS(reduction)
+
+    # get the unique indices
+    to_unique = ToUnique(return_to_unique_indices=return_to_unique, unique_method="torch")
+    unique_code = to_unique.to_unique(code)
+
+    # get the coordinates
+    if average_pooled_coordinates:
+        coords = row_reduction(
+            pc.coordinate_tensor[to_unique.to_csr_indices],
+            to_unique.to_csr_offsets,
+            reduction=REDUCTIONS.MEAN,
+        )
+    else:
+        coords = pc.coordinate_tensor[to_unique.to_unique_indices]
+
+    # get the features
+    features = row_reduction(
+        pc.feature_tensor[to_unique.to_csr_indices],
+        to_unique.to_csr_offsets,
+        reduction=reduction,
+    )
+
+    # get the offsets
+    offsets = offsets_from_offsets(
+        pc.offsets,
+        to_unique.to_unique_indices,
+    )
+
+    out_pc = pc.replace(
+        coordinate_tensor=coords,
+        feature_tensor=features,
+        offsets=offsets,
+        code=unique_code,
+    )
+    if return_to_unique:
+        return out_pc, to_unique
+    return out_pc

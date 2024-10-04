@@ -5,11 +5,8 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    NeighborSearchResult,
-    batched_knn_search,
-)
-from warpconvnet.nn.unique import ToUnique
+from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
+from warpconvnet.utils.unique import ToUnique
 
 
 class FEATURE_UNPOOLING_MODE(Enum):
