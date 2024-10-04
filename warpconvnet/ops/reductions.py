@@ -38,6 +38,10 @@ def row_reduction(
     if isinstance(reduction, str):
         reduction = REDUCTIONS(reduction)
 
+    assert (
+        len(features) == neighbors_row_splits[-1].item()
+    ), f"Features length {len(features)} must match the last row split {neighbors_row_splits[-1].item()}"
+
     if reduction in [REDUCTIONS.MIN, REDUCTIONS.MAX, REDUCTIONS.MEAN, REDUCTIONS.SUM]:
         out_feature = segment_csr(features, neighbors_row_splits, reduce=str(reduction.value))
     elif reduction == REDUCTIONS.VAR:

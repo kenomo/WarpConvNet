@@ -21,44 +21,170 @@ from warpconvnet.utils.batch_index import batch_index_from_offset
 __all__ = ["point_pool"]
 
 
-def _to_return_type(
-    input_pc: "PointCollection",  # noqa: F821
-    down_features: Float[Tensor, "M C"],
+def _generate_batched_coords(
+    coordinate_tensor: Float[Tensor, "N 3"],
+    return_type: Literal["point", "sparse"],
+    csr_indices: Int[Tensor, "M"],  # noqa: F821
+    csr_offsets: Int[Tensor, "B+1"],  # noqa: F821
+    to_unique_indices: Int[Tensor, "M"],  # noqa: F821
+    unique_offsets: Int[Tensor, "B+1"],  # noqa: F821
     downsample_voxel_size: float,
-    down_indices: Int[Tensor, "M"],  # noqa: F821
-    down_offsets: Int[Tensor, "B+1"],  # noqa: F821
-    return_type: Literal["point", "sparse"] = "point",
-) -> SpatialFeatures:
-    if return_type == "point":
-        from warpconvnet.geometry.point_collection import (
-            BatchedContinuousCoordinates,
-            PointCollection,
-        )
+    avereage_pooled_coordinates: bool = False,
+) -> Union["BatchedContinuousCoordinates", "BatchedDiscreteCoordinates"]:  # noqa: F821
+    from warpconvnet.geometry.point_collection import BatchedContinuousCoordinates
+    from warpconvnet.geometry.spatially_sparse_tensor import BatchedDiscreteCoordinates
 
-        return PointCollection(
-            batched_coordinates=BatchedContinuousCoordinates(
-                batched_tensor=input_pc.coordinate_tensor[down_indices],
-                offsets=down_offsets,
-            ),
-            batched_features=down_features,
-            voxel_size=downsample_voxel_size,
+    if return_type == "point" and not avereage_pooled_coordinates:
+        return BatchedContinuousCoordinates(
+            batched_tensor=coordinate_tensor[to_unique_indices],
+            offsets=unique_offsets,
+        )
+    elif return_type == "point" and avereage_pooled_coordinates:
+        avg_coords = row_reduction(
+            coordinate_tensor[csr_indices],
+            csr_offsets,
+            reduction=REDUCTIONS.MEAN,
+        )
+        return BatchedContinuousCoordinates(
+            batched_tensor=avg_coords,
+            offsets=unique_offsets,
         )
     else:
-        from warpconvnet.geometry.spatially_sparse_tensor import (
-            BatchedDiscreteCoordinates,
-            SpatiallySparseTensor,
+        return BatchedDiscreteCoordinates(
+            batched_tensor=torch.floor(
+                coordinate_tensor[to_unique_indices] / downsample_voxel_size
+            ).int(),
+            offsets=unique_offsets,
         )
 
-        discrete_coords = torch.floor(
-            input_pc.coordinate_tensor[down_indices] / downsample_voxel_size
-        ).int()
-        return SpatiallySparseTensor(
-            batched_coordinates=BatchedDiscreteCoordinates(
-                batched_tensor=discrete_coords, offsets=down_offsets
-            ),
-            batched_features=down_features,
-            voxel_size=downsample_voxel_size,
+
+def _pool_by_random_sample(
+    pc: "PointCollection",  # noqa: F821
+    downsample_voxel_size: Optional[float] = None,
+    return_type: Literal["point", "sparse"] = "point",
+) -> SpatialFeatures:
+    from warpconvnet.geometry.point_collection import PointCollection
+    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+
+    if return_type == "sparse":
+        RETURN_CLS = SpatiallySparseTensor
+    else:
+        RETURN_CLS = PointCollection
+
+    to_unique_indices, unique_offsets = voxel_downsample_random_indices(
+        batched_points=pc.coordinate_tensor,
+        offsets=pc.offsets,
+        voxel_size=downsample_voxel_size,
+    )
+    down_features = pc.features[to_unique_indices]
+    down_coords = _generate_batched_coords(
+        pc.coordinate_tensor,
+        return_type,
+        None,
+        None,
+        to_unique_indices,
+        unique_offsets,
+        downsample_voxel_size,
+        avereage_pooled_coordinates=False,
+    )
+    out_sf = RETURN_CLS(
+        batched_coordinates=down_coords,
+        batched_features=down_features,
+        voxel_size=downsample_voxel_size,
+    )
+    return out_sf
+
+
+def _pool_by_max_num_points(
+    pc: "PointCollection",  # noqa: F821
+    reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
+    downsample_max_num_points: Optional[int] = None,
+    return_type: Literal["point", "sparse"] = "point",
+    return_neighbor_search_result: bool = False,
+) -> SpatialFeatures:
+    from warpconvnet.geometry.point_collection import PointCollection
+    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+
+    if isinstance(reduction, str):
+        reduction = REDUCTIONS(reduction)
+    if return_type == "sparse":
+        RETURN_CLS = SpatiallySparseTensor
+    else:
+        RETURN_CLS = PointCollection
+
+    sample_idx, unique_offsets = random_sample(
+        batch_offsets=pc.offsets,
+        num_samples_per_batch=downsample_max_num_points,
+    )
+    unique_coords = pc.coordinate_tensor[sample_idx]
+    # nearest neighbor of all points to down_coords
+    knn_down_indices = batched_knn_search(
+        ref_positions=unique_coords,
+        ref_offsets=unique_offsets,
+        query_positions=pc.coordinate_tensor,
+        query_offsets=pc.offsets,
+        k=1,
+    ).squeeze()
+    # argsort and get the number of points per down indices
+    sorted_knn_down_indices, to_sorted_knn_down_indices = torch.sort(knn_down_indices)
+    unique_indices, counts = torch.unique_consecutive(
+        sorted_knn_down_indices, return_counts=True
+    )
+    knn_offsets = torch.cat(
+        [
+            torch.zeros(1, dtype=counts.dtype, device=counts.device),
+            torch.cumsum(counts, dim=0),
+        ],
+        dim=0,
+    )
+    down_features = row_reduction(
+        pc.features[to_sorted_knn_down_indices],
+        knn_offsets,
+        reduction=reduction,
+    )
+    if len(unique_indices) != len(sample_idx):
+        # select survived indices
+        unique_coords = unique_coords[unique_indices]
+        unique_batch_indices = batch_index_from_offset(unique_offsets, backend="torch")
+        unique_batch_indices = unique_batch_indices.to(unique_indices.device)[
+            unique_indices
+        ]
+        _, unique_counts = torch.unique_consecutive(
+            unique_batch_indices, return_counts=True
         )
+        unique_offsets = torch.cat(
+            [
+                torch.zeros(1, dtype=unique_counts.dtype),
+                torch.cumsum(unique_counts.cpu(), dim=0),
+            ],
+            dim=0,
+        )
+        if return_neighbor_search_result:
+            # update the indices to the unique indices
+            warnings.warn(
+                "Neighbor search result requires remapping the indices to the unique indices. "
+                "This may incur additional overhead.",
+                stacklevel=2,
+            )
+            mapping = torch.zeros(
+                len(sample_idx),
+                dtype=unique_indices.dtype,
+                device=unique_indices.device,
+            )
+            mapping[unique_indices] = torch.arange(
+                len(unique_indices), device=unique_indices.device
+            )
+            knn_down_indices = mapping[knn_down_indices]
+
+    out_pc = RETURN_CLS(
+        batched_coordinates=unique_coords,
+        batched_features=down_features,
+        offsets=unique_offsets,
+        num_points=downsample_max_num_points,
+    )
+    if return_neighbor_search_result:
+        return out_pc, NeighborSearchResult(knn_down_indices, knn_offsets)
+    return out_pc
 
 
 def point_pool(
@@ -67,9 +193,10 @@ def point_pool(
     downsample_max_num_points: Optional[int] = None,
     downsample_voxel_size: Optional[float] = None,
     return_type: Literal["point", "sparse"] = "point",
+    avereage_pooled_coordinates: bool = False,
     return_neighbor_search_result: bool = False,
     return_to_unique: bool = False,
-    unique_method: Literal["torch", "ravel"] = "torch",
+    unique_method: Literal["torch", "ravel", "morton"] = "torch",
 ) -> SpatialFeatures:
     """
     Pool points in a point cloud.
@@ -88,107 +215,47 @@ def point_pool(
     Returns:
         PointCollection or SpatiallySparseTensor
     """
+    from warpconvnet.geometry.point_collection import PointCollection
+    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+
     if isinstance(reduction, str):
         reduction = REDUCTIONS(reduction)
     # assert at least one of the two is provided
     assert (
         downsample_max_num_points is not None or downsample_voxel_size is not None
     ), "Either downsample_num_points or downsample_voxel_size must be provided."
+    if return_type == "sparse":
+        assert (
+            not avereage_pooled_coordinates
+        ), "averaging pooled coordinates is not supported for sparse return type"
+        RETURN_CLS = SpatiallySparseTensor
+    else:
+        RETURN_CLS = PointCollection
 
     if downsample_max_num_points is not None:
         assert (
             not return_to_unique
         ), "return_to_unique must be False when downsample_max_num_points is provided."
-        from warpconvnet.geometry.point_collection import PointCollection
-
-        sample_idx, unique_offsets = random_sample(
-            batch_offsets=pc.offsets,
-            num_samples_per_batch=downsample_max_num_points,
+        return _pool_by_max_num_points(
+            pc,
+            reduction,
+            downsample_max_num_points,
+            return_type,
+            return_neighbor_search_result,
         )
-        unique_coords = pc.coordinate_tensor[sample_idx]
-        # nearest neighbor of all points to down_coords
-        knn_down_indices = batched_knn_search(
-            ref_positions=unique_coords,
-            ref_offsets=unique_offsets,
-            query_positions=pc.coordinate_tensor,
-            query_offsets=pc.offsets,
-            k=1,
-        ).squeeze()
-        # argsort and get the number of points per down indices
-        sorted_knn_down_indices, to_sorted_knn_down_indices = torch.sort(knn_down_indices)
-        unique_indices, counts = torch.unique_consecutive(
-            sorted_knn_down_indices, return_counts=True
-        )
-        knn_offsets = torch.cat(
-            [
-                torch.zeros(1, dtype=counts.dtype, device=counts.device),
-                torch.cumsum(counts, dim=0),
-            ],
-            dim=0,
-        )
-        down_features = row_reduction(
-            pc.features[to_sorted_knn_down_indices],
-            knn_offsets,
-            reduction=reduction,
-        )
-        if len(unique_indices) != len(sample_idx):
-            # select survived indices
-            unique_coords = unique_coords[unique_indices]
-            unique_batch_indices = batch_index_from_offset(unique_offsets, backend="torch")
-            unique_batch_indices = unique_batch_indices.to(unique_indices.device)[unique_indices]
-            _, unique_counts = torch.unique_consecutive(unique_batch_indices, return_counts=True)
-            unique_offsets = torch.cat(
-                [
-                    torch.zeros(1, dtype=unique_counts.dtype),
-                    torch.cumsum(unique_counts.cpu(), dim=0),
-                ],
-                dim=0,
-            )
-            if return_neighbor_search_result:
-                # update the indices to the unique indices
-                warnings.warn(
-                    "Neighbor search result requires remapping the indices to the unique indices. "
-                    "This may incur additional overhead.",
-                    stacklevel=2,
-                )
-                mapping = torch.zeros(
-                    len(sample_idx), dtype=unique_indices.dtype, device=unique_indices.device
-                )
-                mapping[unique_indices] = torch.arange(
-                    len(unique_indices), device=unique_indices.device
-                )
-                knn_down_indices = mapping[knn_down_indices]
-
-        out_pc = PointCollection(
-            batched_coordinates=unique_coords,
-            batched_features=down_features,
-            offsets=unique_offsets,
-            num_points=downsample_max_num_points,
-        )
-        if return_neighbor_search_result:
-            return out_pc, NeighborSearchResult(knn_down_indices, knn_offsets)
-        return out_pc
 
     if reduction == REDUCTIONS.RANDOM:
-        assert not return_to_unique, "return_to_unique must be False when reduction is RANDOM."
+        assert (
+            not return_to_unique
+        ), "return_to_unique must be False when reduction is RANDOM."
         assert (
             not return_neighbor_search_result
         ), "return_neighbor_search_result must be False when reduction is RANDOM."
-        to_unique_indices, unique_offsets = voxel_downsample_random_indices(
-            batched_points=pc.coordinate_tensor,
-            offsets=pc.offsets,
-            voxel_size=downsample_voxel_size,
+        return _pool_by_random_sample(
+            pc,
+            downsample_voxel_size,
+            return_type,
         )
-        down_features = pc.features[to_unique_indices]
-        out_sf = _to_return_type(
-            input_pc=pc,
-            down_features=down_features,
-            downsample_voxel_size=downsample_voxel_size,
-            down_indices=to_unique_indices,
-            down_offsets=unique_offsets,
-            return_type=return_type,
-        )
-        return out_sf
 
     # voxel downsample
     (
@@ -210,13 +277,21 @@ def point_pool(
         reduction=reduction,
     )
 
-    out_sf = _to_return_type(
-        input_pc=pc,
-        down_features=down_features,
-        downsample_voxel_size=downsample_voxel_size,
-        down_indices=to_unique.to_unique_indices,
-        down_offsets=unique_offsets,
-        return_type=return_type,
+    batched_coords = _generate_batched_coords(
+        pc.coordinate_tensor,
+        return_type,
+        to_csr_indices,
+        to_csr_offsets,
+        to_unique.to_unique_indices,
+        unique_offsets,
+        downsample_voxel_size,
+        avereage_pooled_coordinates,
+    )
+
+    out_sf = RETURN_CLS(
+        batched_coordinates=batched_coords,
+        batched_features=down_features,
+        voxel_size=downsample_voxel_size,
     )
 
     if return_to_unique:

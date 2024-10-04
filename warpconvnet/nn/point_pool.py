@@ -20,6 +20,8 @@ class PointPoolBase(BaseSpatialModule):
         downsample_max_num_points: Optional[int] = None,
         downsample_voxel_size: Optional[float] = None,
         return_type: Literal["point", "sparse"] = "point",
+        unique_method: Literal["torch", "ravel", "morton"] = "torch",
+        avereage_pooled_coordinates: bool = False,
         return_neighbor_search_result: bool = False,
     ):
         super().__init__()
@@ -30,6 +32,8 @@ class PointPoolBase(BaseSpatialModule):
         self.downsample_voxel_size = downsample_voxel_size
         self.return_type = return_type
         self.return_neighbor_search_result = return_neighbor_search_result
+        self.unique_method = unique_method
+        self.avereage_pooled_coordinates = avereage_pooled_coordinates
 
     def forward(
         self, pc: PointCollection
@@ -41,6 +45,8 @@ class PointPoolBase(BaseSpatialModule):
             downsample_voxel_size=self.downsample_voxel_size,
             return_type=self.return_type,
             return_neighbor_search_result=self.return_neighbor_search_result,
+            unique_method=self.unique_method,
+            avereage_pooled_coordinates=self.avereage_pooled_coordinates,
         )
 
 

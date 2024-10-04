@@ -67,11 +67,45 @@ class TestPointPool(unittest.TestCase):
         pc = self.pc.to(device)
         # Pool features
         st = point_pool(
-            pc, reduction=REDUCTIONS.MEAN, downsample_voxel_size=0.1, return_type="sparse"
+            pc,
+            reduction=REDUCTIONS.MEAN,
+            downsample_voxel_size=0.1,
+            return_type="sparse",
         )
         self.assertTrue(isinstance(st, SpatiallySparseTensor))
         self.assertTrue(st.batch_size == self.B)
         self.assertTrue(st.batched_features.shape[1] == self.C)
+
+    def test_point_collection_to_point(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        # Pool features
+        out_pc = point_pool(
+            pc,
+            reduction=REDUCTIONS.MEAN,
+            downsample_voxel_size=0.1,
+            return_type="point",
+            avereage_pooled_coordinates=True,
+        )
+        self.assertTrue(isinstance(out_pc, PointCollection))
+        self.assertTrue(out_pc.batch_size == self.B)
+        self.assertTrue(out_pc.batched_features.shape[1] == self.C)
+
+    def test_pool_unique_method(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        # Pool features
+        out_pc = point_pool(
+            pc,
+            reduction=REDUCTIONS.MEAN,
+            downsample_voxel_size=0.1,
+            return_type="point",
+            unique_method="morton",
+            avereage_pooled_coordinates=True,
+        )
+        self.assertTrue(isinstance(out_pc, PointCollection))
+        self.assertTrue(out_pc.batch_size == self.B)
+        self.assertTrue(out_pc.batched_features.shape[1] == self.C)
 
     def test_point_pool_num_points(self):
         device = torch.device("cuda:0")
@@ -103,12 +137,17 @@ class TestPointPool(unittest.TestCase):
         pc = self.pc.to(device)
 
         voxel_size = 0.1
-        raveled_values = ravel_multi_index_auto_shape(torch.floor(pc.batch_indexed_coordinates / voxel_size).int())
-        pc = pc.replace(
-            batched_features=raveled_values.view(-1, 1)
+        raveled_values = ravel_multi_index_auto_shape(
+            torch.floor(pc.batch_indexed_coordinates / voxel_size).int()
         )
+        pc = pc.replace(batched_features=raveled_values.view(-1, 1))
 
-        wrapper = PointToSparseWrapper(inner_module=nn.Identity(), voxel_size=voxel_size, reduction=REDUCTIONS.MEAN, concat_unpooled_pc=False)
+        wrapper = PointToSparseWrapper(
+            inner_module=nn.Identity(),
+            voxel_size=voxel_size,
+            reduction=REDUCTIONS.MEAN,
+            concat_unpooled_pc=False,
+        )
         out_pc = wrapper(pc)
         self.assertTrue(isinstance(out_pc, PointCollection))
         self.assertTrue(out_pc.num_channels == pc.num_channels)
