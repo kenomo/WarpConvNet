@@ -48,12 +48,14 @@ def sparse_reduce(
     batch_indexed_out_coords, output_offsets = generate_output_coords(
         batch_indexed_in_coords, stride, backend=out_code_backend
     )
+    from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE
+
     kernel_map_cache_key = KernelMapCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=ntuple(1, ndim=ndim),
         transposed=False,
         generative=False,
-        stride_mode="stride_only",
+        stride_mode=str(STRIDED_CONV_MODE.STRIDE_ONLY),
         in_offsets=spatially_sparse_tensor.offsets,
         out_offsets=output_offsets,
     )
@@ -70,7 +72,6 @@ def sparse_reduce(
             kernel_size=kernel_size,
             kernel_dilation=ntuple(1, ndim=ndim),
             kernel_search_batch_size=kernel_search_batch_size,
-            kernel_center_offset=ntuple(0, ndim=ndim),
         )
 
     if spatially_sparse_tensor.cache is None:
@@ -147,12 +148,14 @@ def sparse_unpool(
     kernel_size = ntuple(kernel_size, ndim=ndim)
 
     # use the cache for the transposed case to get the kernel map
+    from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE
+
     kernel_map_cache_key = KernelMapCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=ntuple(1, ndim=ndim),
         transposed=False,
         generative=False,
-        stride_mode="stride_only",
+        stride_mode=str(STRIDED_CONV_MODE.STRIDE_ONLY),
         in_offsets=unpooled_st.offsets,
         out_offsets=pooled_st.offsets,
     )

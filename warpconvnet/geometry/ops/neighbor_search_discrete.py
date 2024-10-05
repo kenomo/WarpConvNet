@@ -69,12 +69,14 @@ class DiscreteNeighborSearchResult:
         assert len(in_maps) == len(out_maps) == offsets[-1].item()
         self.in_maps = in_maps
         self.out_maps = out_maps
-        self.offsets = offsets
+        self.offsets = offsets.cpu()
 
+    @torch.no_grad()
     def __getitem__(self, idx: int) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
         start, end = self.offsets[idx], self.offsets[idx + 1]
         return self.in_maps[start:end], self.out_maps[start:end]
 
+    @torch.no_grad()
     def get_batch(
         self,
         start_idx: int,
@@ -119,6 +121,7 @@ class DiscreteNeighborSearchResult:
     def __repr__(self):
         return f"{self.__class__.__name__}(len={len(self)})"
 
+    @torch.no_grad()
     def to_csr(
         self,
     ) -> Tuple[Int[Tensor, "L"], Int[Tensor, "K"], Int[Tensor, "K + 1"]]:  # noqa: F821
