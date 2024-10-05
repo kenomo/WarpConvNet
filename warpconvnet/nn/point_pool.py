@@ -76,7 +76,7 @@ class PointAvgPool(PointPoolBase):
         return_neighbor_search_result: bool = False,
     ):
         super().__init__(
-            reduction=REDUCTIONS.AVG,
+            reduction=REDUCTIONS.MEAN,
             downsample_max_num_points=downsample_max_num_points,
             downsample_voxel_size=downsample_voxel_size,
             return_type=return_type,

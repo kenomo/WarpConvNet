@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -8,6 +8,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.autograd import Function
 
+from warpconvnet.geometry.base_geometry import SpatialFeatures
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     KernelMapCache,
@@ -216,7 +217,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
 
 
 def spatially_sparse_conv(
-    input_sparse_tensor: SpatiallySparseTensor,
+    input_sparse_tensor: SpatialFeatures,
     weight: Float[Tensor, "K C_out C_in"],
     kernel_size: Union[int, List[int], Tuple[int, ...]],
     stride: Union[int, List[int], Tuple[int, ...]] = 1,
@@ -225,12 +226,13 @@ def spatially_sparse_conv(
     kernel_search_batch_size: Optional[int] = None,
     kernel_matmul_batch_size: int = 2,
     generative: bool = False,
-    output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
+    output_spatially_sparse_tensor: Optional[SpatialFeatures] = None,
     transposed: bool = False,
     conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
     stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     stride_reduce: str = "max",
-) -> SpatiallySparseTensor:
+    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+) -> SpatialFeatures:
     """
     Perform spatially sparse convolution on the input tensor using the specified algorithm.
     Spatially sparse and feature sparse is not supported yet.
@@ -248,7 +250,6 @@ def spatially_sparse_conv(
     stride = ntuple(stride, ndim=num_spatial_dims)
 
     num_total_kernels = np.prod(kernel_size)
-
     if np.prod(kernel_size) == 1 and np.prod(stride) == 1:
         out_feature_tensor = input_sparse_tensor.feature_tensor @ weight[0]
         if bias is not None:
@@ -295,6 +296,7 @@ def spatially_sparse_conv(
         output_spatially_sparse_tensor=output_spatially_sparse_tensor,
         kernel_search_batch_size=kernel_search_batch_size,
         stride_mode=stride_mode,
+        out_code_backend=out_code_backend,
     )
 
     num_out_coords = batch_indexed_out_coords.shape[0]
@@ -341,18 +343,25 @@ def spatially_sparse_conv(
 
 
 def generate_output_coords_and_kernel_map(
-    input_sparse_tensor: SpatiallySparseTensor,
+    input_sparse_tensor: SpatialFeatures,
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     stride: Tuple[int, ...],
     generative: bool,
     transposed: bool,
-    output_spatially_sparse_tensor: Optional[SpatiallySparseTensor],
+    output_spatially_sparse_tensor: Optional[SpatialFeatures],
     kernel_search_batch_size: int,
     stride_mode: STRIDED_CONV_MODE,
+    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
 ):
     batch_indexed_in_coords = input_sparse_tensor.batch_indexed_coordinates
     in_to_out_stride_ratio = stride
+
+    if input_sparse_tensor.coordinates.dtype not in (torch.int32, torch.int64):
+        assert (
+            input_sparse_tensor.voxel_size is not None
+        ), "Voxel size is required for non-integer coordinates"
+        # TODO(cchoy): Implement a voxel size aware coordinate mapping
 
     # Out coords and offsets generation
     if output_spatially_sparse_tensor is not None:
@@ -371,7 +380,9 @@ def generate_output_coords_and_kernel_map(
         )
     elif any(s != 1 for s in stride):
         batch_indexed_out_coords, out_offsets = generate_output_coords(
-            batch_indexed_in_coords, stride
+            batch_indexed_in_coords,
+            stride,
+            backend=out_code_backend,
         )
         # if generative, we need to expand the coordinates in addition
         if generative and stride_mode == STRIDED_CONV_MODE.STRIDE_ONLY:

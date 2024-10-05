@@ -19,8 +19,9 @@ def unique_inverse(
     Get to_unique_indices and to_orig_indices.
     """
     unique, to_orig_indices = torch.unique(x, dim=dim, sorted=True, return_inverse=True)
-    to_unique_indices = torch.arange(x.size(dim), dtype=torch.int32, device=x.device).scatter_(
-        dim=0, index=to_orig_indices, src=unique
+    to_unique_indices = torch.arange(x.size(dim), dtype=x.dtype, device=x.device)
+    to_unique_indices = torch.empty(unique.size(dim), dtype=x.dtype, device=x.device).scatter_(
+        dim, to_orig_indices, to_unique_indices
     )
     return to_unique_indices, to_orig_indices
 

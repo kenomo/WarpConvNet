@@ -10,8 +10,7 @@ from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.global_pool import global_pool
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.point_unpool import point_unpool
-from warpconvnet.nn.functional.sparse_pool import sparse_reduce
-from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
+from warpconvnet.nn.functional.sparse_pool import sparse_reduce, sparse_unpool
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS
 
 
@@ -51,6 +50,23 @@ class GlobalPool(BaseSpatialModule):
 
     def forward(self, x: SpatialFeatures):
         return global_pool(x, self.reduce)
+
+
+class SparseUnpool(BaseSpatialModule):
+    def __init__(self, kernel_size: int, stride: int, concat_unpooled_st: bool = True):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.concat_unpooled_st = concat_unpooled_st
+
+    def forward(self, st: SpatiallySparseTensor, unpooled_st: SpatiallySparseTensor):
+        return sparse_unpool(
+            st,
+            unpooled_st,
+            self.kernel_size,
+            self.stride,
+            self.concat_unpooled_st,
+        )
 
 
 class PointToSparseWrapper(BaseSpatialModule):

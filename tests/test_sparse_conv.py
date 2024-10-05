@@ -31,7 +31,9 @@ class TestSparseConv(unittest.TestCase):
         self.voxel_size = 0.01
         self.coords = [(torch.rand((N, 3)) / self.voxel_size).int() for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.st = SpatiallySparseTensor(self.coords, self.features, device=device).unique()
+        self.st = SpatiallySparseTensor(
+            self.coords, self.features, device=device
+        ).unique()
         return super().setUp()
 
     def test_generate_output_coords(self):
@@ -39,7 +41,9 @@ class TestSparseConv(unittest.TestCase):
             self.st.coordinate_tensor,
             self.st.offsets,
         )
-        output_coords, offsets = generate_output_coords(batch_indexed_coords, stride=(2, 2, 2))
+        output_coords, offsets = generate_output_coords(
+            batch_indexed_coords, stride=(2, 2, 2)
+        )
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
@@ -144,7 +148,9 @@ class TestSparseConv(unittest.TestCase):
         features = [torch.rand((N, C)) for N in Ns]
         st = SpatiallySparseTensor(coords, features, device="cuda:0").unique()
 
-        batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
+        batch_indexed_in_coords = batch_indexed_coordinates(
+            st.coordinate_tensor, st.offsets
+        )
         batch_indexed_out_coords, offsets = generate_output_coords(
             batch_indexed_in_coords, stride=stride
         )
@@ -177,9 +183,9 @@ class TestSparseConv(unittest.TestCase):
         C_in, C_out = self.C, 13
         kernel_size = (3, 3, 3)
         stride = (2, 2, 2)
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, transposed=True).to(
-            self.st.device
-        )
+        conv = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, transposed=True
+        ).to(self.st.device)
         st: SpatiallySparseTensor = self.st
         st_downsampled = sparse_max_pool(st, (2, 2, 2), (2, 2, 2))
         out = conv(st_downsampled, st)
@@ -189,20 +195,26 @@ class TestSparseConv(unittest.TestCase):
         C_in, C_out = self.C, 13
         kernel_size = (3, 3, 3)
         stride = (1, 1, 1)
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, generative=True).to(
-            self.st.device
-        )
+        conv = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, generative=True
+        ).to(self.st.device)
         out = conv(self.st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
         # Check that the output is larger than the input
-        self.assertTrue(out.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0])
+        self.assertTrue(
+            out.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0]
+        )
 
     def test_sparse_conv_stride_mode(self):
         C_in, C_out = self.C, 13
         kernel_size = (3, 3, 3)
         stride = (2, 2, 2)
         conv = SpatiallySparseConv(
-            C_in, C_out, kernel_size, stride, stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE,
         ).to(self.st.device)
         out = conv(self.st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
@@ -268,7 +280,9 @@ class TestSparseConv(unittest.TestCase):
         features = [torch.rand((N, C)) for N in Ns]
         st = SpatiallySparseTensor(coords, features, device="cuda:0").unique()
 
-        batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
+        batch_indexed_in_coords = batch_indexed_coordinates(
+            st.coordinate_tensor, st.offsets
+        )
         batch_indexed_out_coords, offsets = generate_output_coords(
             batch_indexed_in_coords, stride=stride
         )
@@ -292,6 +306,20 @@ class TestSparseConv(unittest.TestCase):
             atol=1e-3,
             rtol=1e-3,
         )
+
+    def test_sparse_conv_out_code_backend(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        device = torch.device("cuda:0")
+        st: SpatiallySparseTensor = self.st.to(device)
+        # sort
+        st = st.sort()
+        conv = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, out_code_backend="morton"
+        ).to(device)
+        out = conv(st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
 
 if __name__ == "__main__":

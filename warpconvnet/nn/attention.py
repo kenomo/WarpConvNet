@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -6,10 +6,7 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.core.serialization import POINT_ORDERING
 from warpconvnet.geometry.base_geometry import SpatialFeatures
-from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
-from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
@@ -124,7 +121,11 @@ class Attention(nn.Module):
             .reshape(B, N, 3, self.num_heads, C // self.num_heads)
             .permute(2, 0, 3, 1, 4)
         )
-        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+        q, k, v = (
+            qkv[0],
+            qkv[1],
+            qkv[2],
+        )  # make torchscript happy (cannot use tensor as tuple)
 
         # Apply positional encoding to the query and key
         if pos_enc is not None:

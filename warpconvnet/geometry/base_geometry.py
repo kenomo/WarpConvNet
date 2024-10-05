@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
@@ -13,8 +14,8 @@ from warpconvnet.utils.list_to_batch import list_to_cat_tensor, list_to_pad_tens
 
 __all__ = [
     "BatchedObject",
-    "CatBatchedObject",
-    "PadBatchedObject",
+    "CatBatchedFeatures",
+    "PadBatchedFeatures",
     "BatchedCoordinates",
     "SpatialFeatures",
     "PadBatchedFeatures",
@@ -222,7 +223,21 @@ class BatchedIndices(BatchedObject):
         raise ValueError("Cannot convert indices to double")
 
 
-class CatBatchedObject(BatchedObject):
+class BatchedFeatures(BatchedObject, ABC):
+    @property
+    def num_channels(self):
+        return self.batched_tensor.shape[-1]
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(offsets={self.offsets}, shape={self.batched_tensor.shape}, device={self.device}, dtype={self.dtype})"
+
+    def __str__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(offsets={self.offsets}, shape={self.batched_tensor.shape})"
+        )
+
+
+class CatBatchedFeatures(BatchedFeatures):
     def check(self):
         super().check()
         assert self.batched_tensor.ndim == 2, "Batched tensor must be 2D"
@@ -230,35 +245,44 @@ class CatBatchedObject(BatchedObject):
             self.batched_tensor.shape[0] == self.offsets[-1]
         ), f"Offsets {self.offsets} does not match tensors {self.batched_tensor.shape}"
 
-    def from_pad(self, pad_to_multiple: Optional[int] = None) -> "PadBatchedObject":
-        return PadBatchedObject.from_cat(self, pad_to_multiple)
+    def from_pad(self, pad_multiple: Optional[int] = None) -> "PadBatchedFeatures":
+        return PadBatchedFeatures.from_cat(self, pad_multiple)
 
-    def to_pad(self, pad_to_multiple: Optional[int] = None) -> "PadBatchedObject":
-        batched_tensor = cat_to_pad(self.batched_tensor, self.offsets, pad_to_multiple)
-        return PadBatchedObject(batched_tensor, self.offsets, pad_to_multiple)
+    def to_pad(self, pad_multiple: Optional[int] = None) -> "PadBatchedFeatures":
+        batched_tensor = cat_to_pad(self.batched_tensor, self.offsets, pad_multiple=pad_multiple)
+        return PadBatchedFeatures(batched_tensor, self.offsets, pad_multiple)
+
+    def equal_shape(self, value: object) -> bool:
+        if not isinstance(value, CatBatchedFeatures):
+            return False
+        return (
+            (self.offsets == value.offsets).all()
+            and self.numel() == value.numel()
+            and self.num_channels == value.num_channels
+        )
 
 
 @dataclass
-class PadBatchedObject(BatchedObject):
+class PadBatchedFeatures(BatchedFeatures):
     batched_tensor: Float[Tensor, "B M C"]  # noqa: F722,F821
     offsets: Int[Tensor, "B+1"]  # noqa: F722,F821
-    pad_to_multiple: Optional[int] = None
+    pad_multiple: Optional[int] = None
 
     def __init__(
         self,
         batched_tensor: (List[Float[Tensor, "N C"]] | Float[Tensor, "B M C"]),  # noqa: F722,F821
         offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F722,F821
-        pad_to_multiple: Optional[int] = None,
+        pad_multiple: Optional[int] = None,
         device: Optional[str] = None,
     ):
         if isinstance(batched_tensor, list):
             assert offsets is None, "If batched_tensors is a list, offsets must be None"
-            batched_tensor, offsets, _ = list_to_pad_tensor(batched_tensor, pad_to_multiple)
+            batched_tensor, offsets, _ = list_to_pad_tensor(batched_tensor, pad_multiple)
 
         if isinstance(batched_tensor, torch.Tensor) and offsets is None:
             assert (
-                pad_to_multiple is not None
-            ), "pad_to_multiple must be provided if batched_tensor is a tensor"
+                pad_multiple is not None
+            ), "pad_multiple must be provided if batched_tensor is a tensor"
             if batched_tensor.ndim == 2:
                 batched_tensor = batched_tensor.unsqueeze(0)
             offsets = [0, batched_tensor.shape[1]]
@@ -267,7 +291,7 @@ class PadBatchedObject(BatchedObject):
 
         self.batched_tensor = batched_tensor
         self.offsets = offsets
-        self.pad_to_multiple = pad_to_multiple
+        self.pad_multiple = pad_multiple
         if device is not None:
             self.batched_tensor = self.batched_tensor.to(device)
 
@@ -286,19 +310,18 @@ class PadBatchedObject(BatchedObject):
     def max_num_points(self):
         return self.batched_tensor.shape[1]
 
-    @property
-    def num_channels(self):
-        return self.batched_tensor.shape[2]
+    def __getitem__(self, idx: int) -> Float[Tensor, "N C"]:  # noqa: F722,F821
+        return self.batched_tensor[idx]
 
-    def to(self, device: str) -> "PadBatchedObject":
-        return PadBatchedObject(
+    def to(self, device: str) -> "PadBatchedFeatures":
+        return PadBatchedFeatures(
             batched_tensor=self.batched_tensor.to(device),
             offsets=self.offsets.to(device),
-            pad_to_multiple=self.pad_to_multiple,
+            pad_multiple=self.pad_multiple,
         )
 
-    def equal_shape(self, value: "PadBatchedObject") -> bool:
-        if not isinstance(value, PadBatchedObject):
+    def equal_shape(self, value: "PadBatchedFeatures") -> bool:
+        if not isinstance(value, PadBatchedFeatures):
             return False
         return (
             (self.offsets == value.offsets).all()
@@ -306,48 +329,47 @@ class PadBatchedObject(BatchedObject):
             and self.num_channels == value.num_channels
         )
 
-    def equal_rigorous(self, value: "PadBatchedObject") -> bool:
-        if not isinstance(value, PadBatchedObject):
+    def equal_rigorous(self, value: "PadBatchedFeatures") -> bool:
+        if not isinstance(value, PadBatchedFeatures):
             return False
         return self.equal_shape(value) and (self.batched_tensor == value.batched_tensor).all()
 
-    def to_cat(self) -> CatBatchedObject:
+    def to_cat(self) -> CatBatchedFeatures:
         unpadded_features = pad_to_cat(self.batched_tensor, self.offsets)
-        return CatBatchedObject(unpadded_features, self.offsets)
+        return CatBatchedFeatures(unpadded_features, self.offsets)
 
     @classmethod
     def from_cat(
-        cls, batched_object: CatBatchedObject, pad_to_multiple: Optional[int] = None
-    ) -> "PadBatchedObject":
+        cls, batched_object: CatBatchedFeatures, pad_multiplier: Optional[int] = None
+    ) -> "PadBatchedFeatures":
         padded_tensor = cat_to_pad(
             batched_object.batched_tensor,
             batched_object.offsets,
-            pad_to_multiple=pad_to_multiple,
+            pad_multiple=pad_multiplier,
         )
-        return cls(padded_tensor, batched_object.offsets, pad_to_multiple)
+        return cls(padded_tensor, batched_object.offsets, pad_multiplier)
 
-    def clear_padding(self, clear_value: float = 0.0) -> None:
+    def clear_padding(self, clear_value: float = 0.0) -> "PadBatchedFeatures":
         """
         Clear the padded part of the tensor
         """
         num_points = self.offsets.diff()
         for i in range(self.batch_size):
             self.batched_tensor[i, num_points[i] :, :] = clear_value
+        return self
 
     def replace(
         self,
         batched_tensor: Optional[Float[Tensor, "B M C"]] = None,
         offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
-        pad_to_multiple: Optional[int] = None,
+        pad_multiple: Optional[int] = None,
         **kwargs,
     ):
         batched_tensor = batched_tensor if batched_tensor is not None else self.batched_tensor
-        if pad_to_multiple is not None:
+        if pad_multiple is not None:
             # pad the tensor to the same multiple as the original tensor
             new_num_points = (
-                (batched_tensor.shape[1] + pad_to_multiple - 1)
-                // pad_to_multiple
-                * pad_to_multiple
+                (batched_tensor.shape[1] + pad_multiple - 1) // pad_multiple * pad_multiple
             )
             if new_num_points > batched_tensor.shape[1]:
                 batched_tensor = F.pad(
@@ -356,33 +378,9 @@ class PadBatchedObject(BatchedObject):
         return self.__class__(
             batched_tensor=batched_tensor,
             offsets=(offsets if offsets is not None else self.offsets),
-            pad_to_multiple=pad_to_multiple,
+            pad_multiple=pad_multiple,
             **kwargs,
         )
-
-
-class CatBatchedFeatures(CatBatchedObject):
-    @property
-    def num_channels(self):
-        return self.batched_tensor.shape[-1]
-
-    def equal_shape(self, value: object) -> bool:
-        if not isinstance(value, CatBatchedFeatures):
-            return False
-        return (
-            (self.offsets == value.offsets).all()
-            and self.numel() == value.numel()
-            and self.num_channels == value.num_channels
-        )
-
-
-class PadBatchedFeatures(PadBatchedObject):
-    @property
-    def num_channels(self):
-        return self.batched_tensor.shape[-1]
-
-    def __getitem__(self, idx: int) -> Float[Tensor, "N C"]:  # noqa: F722,F821
-        return self.batched_tensor[idx]
 
 
 def to_batched_features(
@@ -398,7 +396,9 @@ def to_batched_features(
         else:
             raise ValueError(f"Invalid features tensor shape {features.shape}")
     else:
-        assert isinstance(features, (CatBatchedFeatures, PadBatchedFeatures))
+        assert isinstance(
+            features, (CatBatchedFeatures, PadBatchedFeatures)
+        ), f"Features must be a tensor or a CatBatchedFeatures or PadBatchedFeatures, got {type(features)}"
         if device is not None:
             features = features.to(device)
         return features
@@ -497,6 +497,19 @@ class SpatialFeatures:
             return PadBatchedFeatures(padded_tensor, self.offsets)
         else:
             raise ValueError(f"Unsupported features type: {type(self.batched_features)}")
+
+    def to_pad(self, pad_multiple: Optional[int] = None) -> "SpatialFeatures":
+        if (
+            isinstance(self.batched_features, PadBatchedFeatures)
+            and self.batched_features.pad_multiple == pad_multiple
+        ):
+            return self
+        return self.replace(batched_features=self.batched_features.to_pad(pad_multiple))
+
+    def to_cat(self) -> "SpatialFeatures":
+        if isinstance(self.batched_features, CatBatchedFeatures):
+            return self
+        return self.replace(batched_features=self.batched_features.to_cat())
 
     @property
     def offsets(self):

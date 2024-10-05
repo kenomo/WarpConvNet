@@ -94,15 +94,15 @@ def copy_batch_warp(
     in_features: Float[Tensor, "N F"],
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
     num_copy_per_thread: Optional[int] = None,  # constant
-    pad_to_multiple: Optional[int] = None,
+    pad_multiple: Optional[int] = None,
 ) -> Float[Tensor, "B M F"]:
     num_points = row_splits.diff()
     batch_size = row_splits.shape[0] - 1
     device = str(in_features.device)
     out_num_points = (
         num_points.max()
-        if pad_to_multiple is None
-        else ((num_points.max() + pad_to_multiple - 1) // pad_to_multiple) * pad_to_multiple
+        if pad_multiple is None
+        else ((num_points.max() + pad_multiple - 1) // pad_multiple) * pad_multiple
     )
     out_features_wp = wp.zeros(
         (batch_size, out_num_points, in_features.shape[1]),
@@ -133,14 +133,14 @@ def copy_batch_warp(
 def copy_batch_torch(
     in_features: Float[Tensor, "N F"],
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
-    pad_to_multiple: Optional[int] = None,
+    pad_multiple: Optional[int] = None,
 ) -> Float[Tensor, "B M F"]:
     num_points = row_splits.diff()
     device = in_features.device
     out_num_points = (
         num_points.max()
-        if pad_to_multiple is None
-        else ((num_points.max() + pad_to_multiple - 1) // pad_to_multiple) * pad_to_multiple
+        if pad_multiple is None
+        else ((num_points.max() + pad_multiple - 1) // pad_multiple) * pad_multiple
     )
     out_features = torch.zeros(
         (row_splits.shape[0] - 1, out_num_points, in_features.shape[1]),
@@ -159,7 +159,7 @@ def cat_to_pad(
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
     backend: Literal["torch", "warp"] = "torch",
     num_copy_per_thread: Optional[int] = 256,  # constant
-    pad_to_multiple: Optional[int] = None,
+    pad_multiple: Optional[int] = None,
 ) -> Float[Tensor, "B M F"]:
     """
     Convert a concatenated 2D tensor to a batched 3D tensor.
@@ -168,11 +168,9 @@ def cat_to_pad(
     """
     assert in_features.ndim == 2
     if backend == "torch":
-        out_features = copy_batch_torch(in_features, row_splits, pad_to_multiple)
+        out_features = copy_batch_torch(in_features, row_splits, pad_multiple)
     elif backend == "warp":
-        out_features = copy_batch_warp(
-            in_features, row_splits, num_copy_per_thread, pad_to_multiple
-        )
+        out_features = copy_batch_warp(in_features, row_splits, num_copy_per_thread, pad_multiple)
     else:
         raise ValueError(f"Invalid backend: {backend}")
 

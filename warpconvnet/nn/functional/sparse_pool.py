@@ -5,6 +5,8 @@ import torch
 
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
+    KernelMapCache,
+    KernelMapCacheKey,
     kernel_map_from_size,
 )
 from warpconvnet.geometry.spatially_sparse_tensor import (
@@ -14,6 +16,7 @@ from warpconvnet.geometry.spatially_sparse_tensor import (
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
 from warpconvnet.ops.reductions import REDUCTIONS, row_reduction
 from warpconvnet.utils.ntuple import ntuple
+from warpconvnet.utils.unique import unique_inverse
 
 
 def sparse_reduce(
@@ -44,16 +47,35 @@ def sparse_reduce(
     batch_indexed_out_coords, output_offsets = generate_output_coords(
         batch_indexed_in_coords, stride
     )
-    # Find mapping from in to out
-    kernel_map: DiscreteNeighborSearchResult = kernel_map_from_size(
-        batch_indexed_in_coords,
-        batch_indexed_out_coords,
-        in_to_out_stride_ratio=stride,
+    kernel_map_cache_key = KernelMapCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=ntuple(1, ndim=ndim),
-        kernel_search_batch_size=kernel_search_batch_size,
-        kernel_center_offset=ntuple(0, ndim=ndim),
+        transposed=False,
+        generative=False,
+        stride_mode="stride_only",
+        in_offsets=spatially_sparse_tensor.offsets,
+        out_offsets=output_offsets,
     )
+    kernel_map = None
+    if spatially_sparse_tensor.cache is not None:
+        kernel_map = spatially_sparse_tensor.cache.get(kernel_map_cache_key)
+
+    if kernel_map is None:
+        # Find mapping from in to out
+        kernel_map: DiscreteNeighborSearchResult = kernel_map_from_size(
+            batch_indexed_in_coords,
+            batch_indexed_out_coords,
+            in_to_out_stride_ratio=stride,
+            kernel_size=kernel_size,
+            kernel_dilation=ntuple(1, ndim=ndim),
+            kernel_search_batch_size=kernel_search_batch_size,
+            kernel_center_offset=ntuple(0, ndim=ndim),
+        )
+
+    if spatially_sparse_tensor.cache is None:
+        spatially_sparse_tensor._extra_attributes["_cache"] = KernelMapCache()
+    spatially_sparse_tensor.cache.put(kernel_map_cache_key, kernel_map)
+
     in_maps, unique_out_maps, map_offsets = kernel_map.to_csr()
     in_features = spatially_sparse_tensor.feature_tensor
     device = in_features.device
@@ -107,3 +129,43 @@ def sparse_avg_pool(
     Average pooling for spatially sparse tensors.
     """
     return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, reduction=REDUCTIONS.MEAN)
+
+
+def sparse_unpool(
+    pooled_st: SpatiallySparseTensor,
+    unpooled_st: SpatiallySparseTensor,
+    kernel_size: Union[int, Tuple[int, ...]],
+    stride: Union[int, Tuple[int, ...]],
+    concat_unpooled_st: bool = False,
+) -> SpatiallySparseTensor:
+    """
+    Unpooling for spatially sparse tensors.
+    """
+    ndim = pooled_st.num_spatial_dims
+    stride = ntuple(stride, ndim=ndim)
+    kernel_size = ntuple(kernel_size, ndim=ndim)
+
+    # use the cache for the transposed case to get the kernel map
+    kernel_map_cache_key = KernelMapCacheKey(
+        kernel_size=kernel_size,
+        kernel_dilation=ntuple(1, ndim=ndim),
+        transposed=False,
+        generative=False,
+        stride_mode="stride_only",
+        in_offsets=unpooled_st.offsets,
+        out_offsets=pooled_st.offsets,
+    )
+    assert pooled_st.cache is not None
+    kernel_map = pooled_st.cache.get(kernel_map_cache_key)
+    assert kernel_map is not None
+
+    # Switch
+    unpooled_maps = kernel_map.in_maps
+    pooled_maps = kernel_map.out_maps
+
+    perm = torch.argsort(unpooled_maps)
+    rep_feats = pooled_st.feature_tensor[pooled_maps[perm]]
+    if concat_unpooled_st:
+        rep_feats = torch.cat([unpooled_st.feature_tensor, rep_feats], dim=-1)
+
+    return unpooled_st.replace(batched_features=rep_feats)

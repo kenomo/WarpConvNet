@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
-from warpconvnet.nn.functional.sparse_pool import sparse_reduce
+from warpconvnet.nn.functional.sparse_pool import sparse_reduce, sparse_unpool
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
@@ -38,18 +38,19 @@ class TestSparsePool(unittest.TestCase):
             st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
 
-        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="max")
-        self.assertTrue(
-            st_downsampled.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
-        )
-
         st_downsampled_first = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="random")
+
         self.assertTrue(
             st_downsampled_first.coordinate_tensor.shape[0] < self.st.coordinate_tensor.shape[0]
         )
         self.assertTrue(
             st_downsampled_first.coordinate_tensor.shape[0] == st_downsampled.coordinate_tensor.shape[0]
         )
+
+    def test_sparse_unpool(self):
+        st_downsampled = sparse_reduce(self.st, (2, 2, 2), (2, 2, 2), reduction="max")
+        st_unpooled = sparse_unpool(st_downsampled, self.st, (2, 2, 2), (2, 2, 2), concat_unpooled_st=True)
+        self.assertTrue(st_unpooled.coordinate_tensor.shape[0] == self.st.coordinate_tensor.shape[0])
 
 
 if __name__ == "__main__":
