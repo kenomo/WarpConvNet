@@ -25,6 +25,7 @@ def sparse_reduce(
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
     reduction: Union[REDUCTIONS, str] = REDUCTIONS.MAX,
     kernel_search_batch_size: Optional[int] = None,
+    out_code_backend: str = "unique",
 ) -> SpatiallySparseTensor:
     """
     Max pooling for spatially sparse tensors.
@@ -45,7 +46,7 @@ def sparse_reduce(
 
     batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
     batch_indexed_out_coords, output_offsets = generate_output_coords(
-        batch_indexed_in_coords, stride
+        batch_indexed_in_coords, stride, backend=out_code_backend
     )
     kernel_map_cache_key = KernelMapCacheKey(
         kernel_size=kernel_size,

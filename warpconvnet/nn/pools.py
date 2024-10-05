@@ -20,26 +20,34 @@ class SparsePool(BaseSpatialModule):
         kernel_size: int,
         stride: int,
         reduce: Literal["max", "min", "mean", "sum", "random"] = "max",
+        out_code_backend: str = "morton",
     ):
         super().__init__()
         self.kernel_size = kernel_size
         self.stride = stride
         self.reduce = reduce
+        self.out_code_backend = out_code_backend
 
     def __repr__(self):
         return f"{self.__class__.__name__}(kernel_size={self.kernel_size}, stride={self.stride}, reduce={self.reduce})"
 
     def forward(self, st: SpatiallySparseTensor):
-        return sparse_reduce(st, self.kernel_size, self.stride, self.reduce)
+        return sparse_reduce(
+            st,
+            self.kernel_size,
+            self.stride,
+            self.reduce,
+            out_code_backend=self.out_code_backend,
+        )
 
 
 class SparseMaxPool(SparsePool):
-    def __init__(self, kernel_size: int, stride: int):
+    def __init__(self, kernel_size: int, stride: int, out_code_backend: str = "morton"):
         super().__init__(kernel_size, stride, "max")
 
 
 class SparseMinPool(SparsePool):
-    def __init__(self, kernel_size: int, stride: int):
+    def __init__(self, kernel_size: int, stride: int, out_code_backend: str = "morton"):
         super().__init__(kernel_size, stride, "min")
 
 
