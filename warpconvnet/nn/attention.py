@@ -6,10 +6,19 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base_geometry import (
+    CatBatchedFeatures,
+    CatPatchedFeatures,
+    SpatialFeatures,
+)
+from warpconvnet.nn.activations import GELU, DropPath
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
+from warpconvnet.nn.mlp import Linear
+from warpconvnet.nn.normalizations import LayerNorm
 from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
+from warpconvnet.nn.sequential import Sequential
+from warpconvnet.nn.sparse_conv import SparseConv3d
 from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
 
 
@@ -145,6 +154,169 @@ class Attention(nn.Module):
 
         if num_points is not None:
             x = zero_out_points(x, num_points)
+        return x
+
+
+class PatchAttention(BaseSpatialModule):
+    """
+    Attention proposed in OctFormer.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        patch_size: int,
+        num_heads: int = 8,
+        dilation: int = 1,
+        qkv_bias: bool = False,
+        qk_scale: Optional[float] = None,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        use_sdpa: bool = True,
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_heads = num_heads
+        self.dilation = dilation
+        assert patch_size % dilation == 0
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.use_sdpa = use_sdpa
+        if not use_sdpa:
+            self.attn_drop = nn.Dropout(attn_drop)
+        else:
+            self.attn_drop = attn_drop
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
+        # Assert that x is serialized
+        D, K, C = self.dilation, self.patch_size, x.num_channels
+        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K * D)
+        feats = patch_feats.batched_tensor  # MxC
+        M, C = feats.shape
+        if self.dilation > 1:
+            feats = feats.view(-1, K, D, C).transpose(1, 2).reshape(M, C)
+
+        qkv = (
+            self.qkv(feats)
+            .reshape(M // K, K, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+
+        # q: (M // K) x num_heads x K x C // num_heads
+        q, k, v = (
+            qkv[0],
+            qkv[1],
+            qkv[2],
+        )
+
+        mask = torch.ones(M // K, 1, K, 1, dtype=torch.bool, device=q.device)
+        patch_offsets = patch_feats.patch_offsets
+        num_points = patch_feats.offsets.diff()
+        for i in range(patch_feats.batch_size):
+            if num_points[i] % K != 0:
+                mask[patch_offsets[i + 1] // K - 1, :, num_points[i] % K :] = False
+        if self.dilation > 1:
+            mask = mask.view(-1, K, D, 1).transpose(1, 2).reshape(-1, 1, K, 1)
+        mask = mask.repeat(1, 1, 1, K).transpose(-2, -1)
+
+        if self.use_sdpa:
+            out_feat = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                dropout_p=self.attn_drop if self.training else 0,
+                scale=self.scale,
+            )
+            out_feat = out_feat.transpose(1, 2).reshape(M, C)
+        else:
+            # attn: (M // K) x num_heads x K x K
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            # mask out the attention weights for the padded points
+            attn = attn.masked_fill(mask.logical_not(), -torch.inf)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            out_feat = (attn @ v).transpose(1, 2).reshape(M, C)
+
+        if self.dilation > 1:
+            out_feat = out_feat.view(-1, D, K, C).transpose(1, 2).reshape(-1, C)
+
+        out_feat = self.proj(out_feat)
+        out_feat = self.proj_drop(out_feat)
+
+        out_patch_feats: CatBatchedFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
+
+        return x.replace(batched_features=out_patch_feats)
+
+
+class PatchAttentionBlock(BaseSpatialModule):
+    def __init__(
+        self,
+        in_channels: int,
+        attention_channels: int,
+        patch_size: int,
+        num_heads: int,
+        dilation: int = 1,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        qk_scale: Optional[float] = None,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        drop_path: float = 0.0,
+        norm_layer: nn.Module = LayerNorm,
+        act_layer: nn.Module = GELU,
+        use_sdpa: bool = True,
+        out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "morton",
+    ):
+        super().__init__()
+        self.conv = Sequential(
+            SparseConv3d(
+                in_channels,
+                attention_channels,
+                kernel_size=3,
+                stride=1,
+                bias=True,
+                out_code_backend=out_code_backend,
+            ),
+            norm_layer(attention_channels),
+            act_layer(),
+        )
+        self.conv_shortcut = (
+            nn.Identity()
+            if in_channels == attention_channels
+            else Linear(in_channels, attention_channels)
+        )
+        self.norm1 = norm_layer(attention_channels)
+        self.attention = PatchAttention(
+            attention_channels,
+            patch_size,
+            num_heads,
+            dilation=dilation,
+            qkv_bias=qkv_bias,
+            qk_scale=qk_scale,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            use_sdpa=use_sdpa,
+        )
+        self.norm2 = norm_layer(attention_channels)
+        self.mlp = Sequential(
+            FeedForward(
+                dim=attention_channels,
+                hidden_dim=int(attention_channels * mlp_ratio),
+            )
+        )
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+
+    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
+        x = self.conv(x) + self.conv_shortcut(x)
+        x = self.norm1(x)
+        x = self.drop_path(self.attention(x)) + x
+        x = self.norm2(x)
+        x = self.drop_path(self.mlp(x)) + x
         return x
 
 

@@ -6,6 +6,8 @@ import warp as wp
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.attention import (
     Attention,
+    PatchAttention,
+    PatchAttentionBlock,
     SpatialFeaturesTransformer,
     ToAttention,
     TransformerBlock,
@@ -102,6 +104,53 @@ class TestAttention(unittest.TestCase):
         features, pos_enc, mask, num_points = to_attn(pc)
         x = attn(features, pos_enc, mask)
         self.assertEqual(x.shape, (self.B, self.Ns.max(), dim))
+
+    def test_patch_attention(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        patch_size = 32
+        dim = self.C * 8
+        num_heads = 8
+        lift = Linear(self.C, dim).to(device)
+        patch_attn = PatchAttention(
+            dim=dim,
+            patch_size=patch_size,
+            num_heads=num_heads,
+            dilation=2,
+            qkv_bias=True,
+            use_sdpa=False,
+        ).to(device)
+
+        pc = lift(pc)
+        out = patch_attn(pc)
+
+        self.assertIsInstance(out, PointCollection)
+        self.assertEqual(out.feature_tensor.shape[-1], dim)
+
+        # Check that the number of points is preserved
+        self.assertEqual(len(out), len(pc))
+
+    def test_patch_attention_block(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        patch_size = 32
+        dim = self.C * 8
+        num_heads = 8
+        patch_attn = PatchAttentionBlock(
+            in_channels=self.C,
+            attention_channels=dim,
+            patch_size=patch_size,
+            num_heads=num_heads,
+            dilation=1,
+            mlp_ratio=4,
+            qkv_bias=True,
+            proj_drop=0.3,
+            drop_path=0.3,
+        ).to(device)
+        st = pc.to_sparse(voxel_size=0.02)
+        out = patch_attn(st)
+        self.assertEqual(out.feature_tensor.shape[-1], dim)
+        self.assertEqual(len(out), len(st))
 
 
 if __name__ == "__main__":
