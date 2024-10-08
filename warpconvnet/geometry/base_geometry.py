@@ -312,7 +312,7 @@ class CatPatchedFeatures(CatBatchedFeatures):
         patch_offsets = torch.cumsum(F.pad(num_points_padded, (1, 0)), dim=0)
         batch_tensor = torch.zeros(
             patch_offsets[-1],
-            features.num_channels,
+            features.shape[1],
             dtype=features.dtype,
             device=features.device,
         )

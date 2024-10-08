@@ -89,6 +89,7 @@ class PointToSparseWrapper(BaseSpatialModule):
         inner_module: BaseSpatialModule,
         voxel_size: float,
         reduction: Union[REDUCTIONS, REDUCTION_TYPES_STR] = REDUCTIONS.MEAN,
+        unique_method: Literal["morton", "ravel", "torch"] = "torch",
         concat_unpooled_pc: bool = True,
     ):
         super().__init__()
@@ -96,6 +97,7 @@ class PointToSparseWrapper(BaseSpatialModule):
         self.voxel_size = voxel_size
         self.reduction = reduction
         self.concat_unpooled_pc = concat_unpooled_pc
+        self.unique_method = unique_method
 
     def forward(self, pc: PointCollection):
         st, to_unique = point_pool(
@@ -104,6 +106,7 @@ class PointToSparseWrapper(BaseSpatialModule):
             downsample_voxel_size=self.voxel_size,
             return_type="sparse",
             return_to_unique=True,
+            unique_method=self.unique_method,
         )
         out_st = self.inner_module(st)
         unpooled_pc = point_unpool(

@@ -158,32 +158,26 @@ class Attention(nn.Module):
 
 
 class PatchAttention(BaseSpatialModule):
-    """
-    Attention proposed in OctFormer.
-    """
-
     def __init__(
         self,
         dim: int,
         patch_size: int,
         num_heads: int = 8,
-        dilation: int = 1,
         qkv_bias: bool = False,
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
         use_sdpa: bool = True,
+        rand_perm_patch: bool = False,
     ):
         super().__init__()
         self.patch_size = patch_size
         self.num_heads = num_heads
-        self.dilation = dilation
-        assert patch_size % dilation == 0
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim**-0.5
-
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.use_sdpa = use_sdpa
+        self.rand_perm_patch = rand_perm_patch
         if not use_sdpa:
             self.attn_drop = nn.Dropout(attn_drop)
         else:
@@ -193,13 +187,23 @@ class PatchAttention(BaseSpatialModule):
 
     def forward(self, x: SpatialFeatures) -> SpatialFeatures:
         # Assert that x is serialized
-        D, K, C = self.dilation, self.patch_size, x.num_channels
-        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K * D)
+        K = self.patch_size
+        skip = x
+
+        if self.rand_perm_patch:
+            # Create permutation that preserves batch boundaries
+            perm = []
+            offsets = x.offsets
+            for i in range(len(offsets) - 1):
+                start, end = offsets[i], offsets[i + 1]
+                perm.append(torch.randperm(end - start, device=x.device) + start)
+            perm = torch.cat(perm)
+            inverse_perm = torch.argsort(perm)
+            x = x.replace(batched_features=x.feature_tensor[perm])
+
+        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K)
         feats = patch_feats.batched_tensor  # MxC
         M, C = feats.shape
-        if self.dilation > 1:
-            feats = feats.view(-1, K, D, C).transpose(1, 2).reshape(M, C)
-
         qkv = (
             self.qkv(feats)
             .reshape(M // K, K, 3, self.num_heads, C // self.num_heads)
@@ -211,19 +215,15 @@ class PatchAttention(BaseSpatialModule):
             qkv[0],
             qkv[1],
             qkv[2],
-        )
-
-        mask = torch.ones(M // K, 1, K, 1, dtype=torch.bool, device=q.device)
-        patch_offsets = patch_feats.patch_offsets
-        num_points = patch_feats.offsets.diff()
-        for i in range(patch_feats.batch_size):
-            if num_points[i] % K != 0:
-                mask[patch_offsets[i + 1] // K - 1, :, num_points[i] % K :] = False
-        if self.dilation > 1:
-            mask = mask.view(-1, K, D, 1).transpose(1, 2).reshape(-1, 1, K, 1)
-        mask = mask.repeat(1, 1, 1, K).transpose(-2, -1)
+        )  # make torchscript happy (cannot use tensor as tuple)
 
         if self.use_sdpa:
+            mask = torch.ones(M // K, 1, K, K, dtype=torch.bool, device=q.device)
+            patch_offsets = patch_feats.patch_offsets
+            num_points = patch_feats.offsets.diff()
+            for i in range(patch_feats.batch_size):
+                if num_points[i] % K != 0:
+                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = False
             out_feat = F.scaled_dot_product_attention(
                 q,
                 k,
@@ -237,20 +237,25 @@ class PatchAttention(BaseSpatialModule):
             # attn: (M // K) x num_heads x K x K
             attn = (q @ k.transpose(-2, -1)) * self.scale
             # mask out the attention weights for the padded points
-            attn = attn.masked_fill(mask.logical_not(), -torch.inf)
+            patch_offsets = patch_feats.patch_offsets
+            num_points = patch_feats.offsets.diff()
+            for i in range(patch_feats.batch_size):
+                if num_points[i] % K != 0:
+                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
+
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             out_feat = (attn @ v).transpose(1, 2).reshape(M, C)
-
-        if self.dilation > 1:
-            out_feat = out_feat.view(-1, D, K, C).transpose(1, 2).reshape(-1, C)
 
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
         out_patch_feats: CatBatchedFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
 
-        return x.replace(batched_features=out_patch_feats)
+        if self.rand_perm_patch:
+            out_patch_feats = out_patch_feats.batched_tensor[inverse_perm]
+
+        return skip.replace(batched_features=out_patch_feats)
 
 
 class PatchAttentionBlock(BaseSpatialModule):
@@ -260,7 +265,6 @@ class PatchAttentionBlock(BaseSpatialModule):
         attention_channels: int,
         patch_size: int,
         num_heads: int,
-        dilation: int = 1,
         mlp_ratio: float = 4.0,
         qkv_bias: bool = True,
         qk_scale: Optional[float] = None,
@@ -269,8 +273,10 @@ class PatchAttentionBlock(BaseSpatialModule):
         drop_path: float = 0.0,
         norm_layer: nn.Module = LayerNorm,
         act_layer: nn.Module = GELU,
-        use_sdpa: bool = True,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "morton",
+        rand_perm_patch: bool = False,
+        use_sdpa: bool = True,
+        attention_block: nn.Module = PatchAttention,
     ):
         super().__init__()
         self.conv = Sequential(
@@ -291,15 +297,15 @@ class PatchAttentionBlock(BaseSpatialModule):
             else Linear(in_channels, attention_channels)
         )
         self.norm1 = norm_layer(attention_channels)
-        self.attention = PatchAttention(
+        self.attention = attention_block(
             attention_channels,
             patch_size,
             num_heads,
-            dilation=dilation,
             qkv_bias=qkv_bias,
             qk_scale=qk_scale,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
+            rand_perm_patch=rand_perm_patch,
             use_sdpa=use_sdpa,
         )
         self.norm2 = norm_layer(attention_channels)
