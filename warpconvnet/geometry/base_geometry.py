@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.nn.functional as F
@@ -44,12 +44,15 @@ class BatchedObject:
             offsets: List of offsets for each tensor in the batch. If None, the
             tensors are assumed to be a list.
         """
-        if isinstance(batched_tensor, list):
+        if isinstance(batched_tensor, Sequence):
             assert offsets is None, "If batched_tensors is a list, offsets must be None."
             batched_tensor, offsets, _ = list_to_cat_tensor(batched_tensor)
-
-        if isinstance(batched_tensor, torch.Tensor) and offsets is None:
-            offsets = [0, batched_tensor.shape[0]]
+        else:
+            assert isinstance(
+                batched_tensor, torch.Tensor
+            ), "Batched tensor must be a tensor or a list"
+            if offsets is None:
+                offsets = [0, batched_tensor.shape[0]]
 
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets)
@@ -183,6 +186,13 @@ class BatchedObject:
     def __repr__(self) -> str:
         """Detailed representation of the object."""
         return f"{self.__class__.__name__}(offsets={self.offsets}, shape={self.batched_tensor.shape}, device={self.device}, dtype={self.dtype})"
+
+    def to_nested(self) -> torch.Tensor:
+        return torch.nested.nested_tensor([self[i] for i in range(self.batch_size)])
+
+    @staticmethod
+    def from_nested(nested: torch.Tensor) -> "BatchedObject":
+        return BatchedObject(nested.unbind())
 
 
 class BatchedCoordinates(BatchedObject):
@@ -606,6 +616,14 @@ class SpatialFeatures:
             return PadBatchedFeatures(padded_tensor, self.offsets)
         else:
             raise ValueError(f"Unsupported features type: {type(self.batched_features)}")
+
+    @property
+    def nested_features(self) -> torch.Tensor:
+        return self.batched_features.to_nested()
+
+    @property
+    def nested_coordinates(self) -> torch.Tensor:
+        return self.batched_coordinates.to_nested()
 
     def to_pad(self, pad_multiple: Optional[int] = None) -> "SpatialFeatures":
         if (

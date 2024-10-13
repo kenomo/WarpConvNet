@@ -65,8 +65,10 @@ class ToAttention(BaseSpatialModule):
         num_heads: int = 1,
         concat_input: bool = True,
         num_spatial_features: int = 3,
+        out_type: Literal["nested", "cat"] = "nested",
     ):
         super().__init__()
+        self.out_type = out_type
         self.sinusoidal_encoding = nn.Sequential(
             SinusoidalEncoding(
                 num_channels=num_encoding_channels,
@@ -83,9 +85,15 @@ class ToAttention(BaseSpatialModule):
     def forward(
         self, x: SpatialFeatures
     ) -> Tuple[Float[Tensor, "B M C"], Float[Tensor, "B M C"], Float[Tensor, "B M M"]]:
-        features, offsets, num_points = x.feature_tensor, x.offsets, x.offsets.diff()
-        features = cat_to_pad(features, offsets)
-        pos_enc = self.sinusoidal_encoding(x.coordinate_tensor)
+        if self.out_type == "nested":
+            features = x.batched_features.to_nested()
+            coordinates = x.batched_coordinates.to_nested()
+        else:
+            features, offsets, num_points = x.feature_tensor, x.offsets, x.offsets.diff()
+            features = cat_to_pad(features, offsets)
+            coordinates = x.coordinate_tensor
+
+        pos_enc = self.sinusoidal_encoding(coordinates)
         pos_enc = cat_to_pad(pos_enc, offsets)
         mask = offset_to_mask(features, offsets, features.shape[1])
         return features, pos_enc, mask, num_points

@@ -1,13 +1,30 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 from jaxtyping import Float
 from torch import Tensor, nn
 
-from warpconvnet.geometry.ops.coord_ops import relative_coords
-from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
 from warpconvnet.nn.functional.encodings import get_freqs, sinusoidal_encoding
+
+
+def normalize_coordinates(
+    xyz: Float[Tensor, "N 3"],
+    min_coord: Float[Tensor, "3"],
+    max_coord: Float[Tensor, "3"],
+) -> Float[Tensor, "N 3"]:
+    """
+    Normalize coordinates with min to 0 and max to 1
+
+    xyz: N x 3
+    min_max: [[3], [3]] - min and max XYZ coords
+    """
+    assert min_coord.shape[-1] == xyz.shape[-1]
+    assert min_coord.shape == max_coord.shape
+
+    diff = max_coord - min_coord
+    normalized_xyz = (xyz - min_coord) / diff
+    return normalized_xyz
 
 
 class SinusoidalEncoding(nn.Module):
@@ -36,40 +53,37 @@ class SinusoidalEncoding(nn.Module):
         return sinusoidal_encoding(x, freqs=self.freqs, concat_input=self.concat_input)
 
 
-class RelativeCoordsEncoding(nn.Module):
+class FourierEncoding(nn.Module):
     def __init__(
         self,
-        use_sinusoidal: bool = True,
-        num_channels: Optional[int] = None,
-        data_range: Optional[float] = 2.0,
+        in_channels: int,
+        out_channels: int,
+        std: float = 1.0,
+        input_range: Optional[Tuple[Float[Tensor, "3"], Float[Tensor, "3"]]] = None,
+        learnable: bool = False,
     ):
-        """
-        Initialize a relative coordinates sinusoidal encoding layer.
-
-        Args:
-            num_channels: Number of channels to encode. Must be even.
-            data_range: The range of the data. For example, if the data is in the range [0, 1], then data_range=1.
-        """
         super().__init__()
-        if use_sinusoidal:
-            assert (
-                num_channels is not None
-            ), "num_channels must be provided when using sinusoidal encoding"
-            self.sinusoidal_encoding = SinusoidalEncoding(num_channels, data_range)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(use_sinusoidal={self.sinusoidal_encoding is not None})"
-
-    def forward(
-        self,
-        neighbor_coordinates: Float[Tensor, "N D"],
-        neighbor_search_result: NeighborSearchResult,
-        query_coordinates: Optional[Float[Tensor, "M D"]] = None,
-    ) -> Float[Tensor, "X D"]:
-        rel_coords = relative_coords(
-            neighbor_coordinates, neighbor_search_result, query_coordinates
-        )
-        if self.sinusoidal_encoding is None:
-            return rel_coords
+        assert out_channels % 2 == 0
+        to_gaussian = 2 * np.pi * torch.empty((in_channels, out_channels // 2)).normal_(std=std)
+        if learnable:
+            self.to_gaussian = nn.Parameter(to_gaussian)
         else:
-            return self.sinusoidal_encoding(rel_coords)
+            self.register_buffer("to_gaussian", to_gaussian)
+
+        self.normalize = input_range is not None
+        if input_range is not None:
+            # Convert the input range to a tensor if it's not None
+            if not isinstance(input_range, torch.Tensor):
+                input_range = torch.tensor(input_range, dtype=torch.float32)
+            self.register_buffer("input_range", input_range)
+
+    def forward(self, xyz: Float[Tensor, "N 3"]):
+        assert self.to_gaussian.shape[0] == xyz.shape[-1]
+
+        if self.normalize:
+            xyz = normalize_coordinates(
+                xyz, min_coord=self.input_range[0], max_coord=self.input_range[1]
+            )
+
+        xyz_proj = xyz @ self.to_gaussian
+        return torch.cat([xyz_proj.sin(), xyz_proj.cos()], dim=-1)

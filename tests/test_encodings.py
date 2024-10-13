@@ -2,8 +2,8 @@ import unittest
 
 import torch
 
-from warpconvnet.nn.encodings import RelativeCoordsEncoding, SinusoidalEncoding
-from warpconvnet.nn.functional.encodings import get_freqs, sinusoidal_encoding
+from warpconvnet.nn.encodings import FourierEncoding, SinusoidalEncoding
+from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 
 
 class TestSinusoidalEncoding(unittest.TestCase):
@@ -29,9 +29,18 @@ class TestSinusoidalEncoding(unittest.TestCase):
 
     def test_sinusoidal_encoding_module(self):
         x = torch.rand(self.B, self.N, self.D)
-        encoding = SinusoidalEncoding(num_channels=10, data_range=2.0, concat_input=True)
+        encoding = SinusoidalEncoding(
+            num_channels=10, data_range=2.0, concat_input=True
+        )
         encoded = encoding(x)
         self.assertEqual(encoded.shape, (self.B, self.N, self.D * 10 + self.D))
+
+    def test_fourier_encoding(self):
+        x = torch.rand(self.B, self.N, self.D)
+        encoding = FourierEncoding(in_channels=self.D, out_channels=10)
+        encoded = encoding(x)
+        print(encoded)
+        self.assertEqual(encoded.shape, (self.B, self.N, 10))
 
 
 if __name__ == "__main__":
