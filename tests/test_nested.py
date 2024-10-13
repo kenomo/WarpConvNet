@@ -3,7 +3,11 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.base_geometry import BatchedCoordinates, CatBatchedFeatures
+from warpconvnet.geometry.base_geometry import (
+    BatchedCoordinates,
+    CatBatchedFeatures,
+    NestBatchedObject,
+)
 
 
 class TestBaseGeometry(unittest.TestCase):
@@ -24,6 +28,12 @@ class TestBaseGeometry(unittest.TestCase):
     def test_base_to_nested(self):
         cat_features = CatBatchedFeatures(self.features)
         nested_features = cat_features.to_nested()
+        for i in range(self.B):
+            self.assertTrue((nested_features[i] == self.features[i]).all())
+
+    def test_nest_batched_object(self):
+        cat_features = CatBatchedFeatures(self.features)
+        nested_features = NestBatchedObject(cat_features.to_nested())
         for i in range(self.B):
             self.assertTrue((nested_features[i] == self.features[i]).all())
 

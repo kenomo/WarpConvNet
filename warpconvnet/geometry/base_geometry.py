@@ -190,9 +190,38 @@ class BatchedObject:
     def to_nested(self) -> torch.Tensor:
         return torch.nested.nested_tensor([self[i] for i in range(self.batch_size)])
 
-    @staticmethod
-    def from_nested(nested: torch.Tensor) -> "BatchedObject":
-        return BatchedObject(nested.unbind())
+    @classmethod
+    def from_nested(cls, nested: torch.Tensor) -> "BatchedObject":
+        return cls(nested.unbind())
+
+
+class NestBatchedObject(BatchedObject):
+    def __init__(self, nested: torch.Tensor):
+        assert nested.is_nested, "Nested tensor expected"
+        self.batched_tensor = nested
+        self.offsets = None
+
+    def check(self):
+        assert self.batched_tensor.is_nested, "Nested tensor expected"
+        assert self.batched_tensor.ndim == 3, "Nested tensor must have 3 dimensions"
+
+    @property
+    def batch_size(self):
+        return self.batched_tensor.size(0)
+
+    @property
+    def num_spatial_dims(self):
+        return self.batched_tensor.size(-1)
+
+    @property
+    def num_channels(self):
+        return self.batched_tensor.size(-1)
+
+    def to_batched(self) -> BatchedObject:
+        return BatchedObject.from_nested(self.batched_tensor)
+
+    def __getitem__(self, idx: int) -> Float[Tensor, "N C"]:  # noqa: F722,F821
+        return self.batched_tensor[idx]
 
 
 class BatchedCoordinates(BatchedObject):
@@ -590,6 +619,10 @@ class SpatialFeatures:
         return self.batched_coordinates.batched_tensor
 
     @property
+    def nested_coordinates(self) -> Tensor:
+        return self.batched_coordinates.to_nested()
+
+    @property
     def batch_indexed_coordinates(self) -> Tensor:
         return batch_indexed_coordinates(self.coordinate_tensor, self.offsets)
 
@@ -600,6 +633,10 @@ class SpatialFeatures:
     @property
     def features(self) -> Tensor:
         return self.batched_features.batched_tensor
+
+    @property
+    def nested_features(self) -> Tensor:
+        return self.batched_features.to_nested()
 
     @property
     def padded_features(self) -> PadBatchedFeatures:
@@ -616,14 +653,6 @@ class SpatialFeatures:
             return PadBatchedFeatures(padded_tensor, self.offsets)
         else:
             raise ValueError(f"Unsupported features type: {type(self.batched_features)}")
-
-    @property
-    def nested_features(self) -> torch.Tensor:
-        return self.batched_features.to_nested()
-
-    @property
-    def nested_coordinates(self) -> torch.Tensor:
-        return self.batched_coordinates.to_nested()
 
     def to_pad(self, pad_multiple: Optional[int] = None) -> "SpatialFeatures":
         if (

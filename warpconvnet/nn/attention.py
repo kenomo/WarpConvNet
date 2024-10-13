@@ -44,15 +44,17 @@ def offset_to_mask(
     x: Float[Tensor, "B M C"],  # noqa: F821
     offsets: Float[Tensor, "B+1"],  # noqa: F821
     max_num_points: int,  # noqa: F821
-) -> Float[Tensor, "B M M"]:  # noqa: F821
+) -> Float[Tensor, "B 1 M M"]:  # noqa: F821
     """
     Create a mask for the points in the batch.
     """
     B = x.shape[0]
     assert B == offsets.shape[0] - 1
-    mask = torch.zeros((B, max_num_points, max_num_points), dtype=torch.float32, device=x.device)
+    mask = torch.zeros(
+        (B, 1, max_num_points, max_num_points), dtype=torch.float32, device=x.device
+    )
     for b in range(B):
-        mask[b, : offsets[b], : offsets[b]] = -torch.inf
+        mask[b, :, : offsets[b], : offsets[b]] = -torch.inf
     return mask
 
 
@@ -65,7 +67,7 @@ class ToAttention(BaseSpatialModule):
         num_heads: int = 1,
         concat_input: bool = True,
         num_spatial_features: int = 3,
-        out_type: Literal["nested", "cat"] = "nested",
+        out_type: Literal["nested", "cat"] = "cat",
     ):
         super().__init__()
         self.out_type = out_type
@@ -86,10 +88,14 @@ class ToAttention(BaseSpatialModule):
         self, x: SpatialFeatures
     ) -> Tuple[Float[Tensor, "B M C"], Float[Tensor, "B M C"], Float[Tensor, "B M M"]]:
         if self.out_type == "nested":
-            features = x.batched_features.to_nested()
-            coordinates = x.batched_coordinates.to_nested()
+            features = x.nested_features
+            coordinates = x.nested_coordinates
         else:
-            features, offsets, num_points = x.feature_tensor, x.offsets, x.offsets.diff()
+            features, offsets, num_points = (
+                x.features,
+                x.offsets,
+                x.offsets.diff(),
+            )
             features = cat_to_pad(features, offsets)
             coordinates = x.coordinate_tensor
 
@@ -114,6 +120,7 @@ class Attention(nn.Module):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
+        use_sdpa: bool = True,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -124,6 +131,7 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.use_sdpa = use_sdpa
 
     def forward(
         self,
@@ -149,20 +157,105 @@ class Attention(nn.Module):
             q = q + pos_enc.unsqueeze(1)
             k = k + pos_enc.unsqueeze(1)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        if mask is not None:
-            attn = attn + mask.unsqueeze(1)
+        if self.use_sdpa:
+            x = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=mask,
+                dropout_p=self.attn_drop.p,
+                scale=self.scale,
+            )
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            if mask is not None:
+                attn = attn + mask
 
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            x = attn @ v
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
 
         if num_points is not None:
             x = zero_out_points(x, num_points)
         return x
+
+
+class NestedAttention(BaseSpatialModule):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        qk_scale: Optional[float] = None,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        pos_enc: Optional[nn.Module] = None,
+        **kwargs,
+    ):
+        super().__init__()
+
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim**-0.5
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        self.pos_enc = pos_enc
+
+    def forward(
+        self,
+        query: SpatialFeatures,
+        key: Optional[SpatialFeatures] = None,
+        value: Optional[SpatialFeatures] = None,
+        query_pos: Optional[Float[Tensor, "B N C"]] = None,
+        key_pos: Optional[Float[Tensor, "B N C"]] = None,
+    ) -> SpatialFeatures:
+        query_feats = query.nested_features
+        key_feats = key.nested_features if key is not None else query_feats
+        value_feats = value.nested_features if value is not None else key_feats
+        if self.pos_enc is not None:
+            query_pos = self.pos_enc(query.nested_coordinates)
+            key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
+
+        if query_pos is not None:
+            query_feats = query_feats + query_pos
+
+        if key_pos is not None:
+            key_feats = key_feats + key_pos
+
+        # Reshape for heads
+        C = query_feats.size(-1)
+        query_feats = torch.nested.nested_tensor(
+            [
+                q.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
+                for q in query_feats
+            ]
+        )
+        key_feats = torch.nested.nested_tensor(
+            [
+                k.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
+                for k in key_feats
+            ]
+        )
+        value_feats = torch.nested.nested_tensor(
+            [
+                v.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
+                for v in value_feats
+            ]
+        )
+        # Reshape for heads
+        x = F.scaled_dot_product_attention(
+            query_feats,
+            key_feats,
+            value_feats,
+            dropout_p=self.attn_drop.p,
+            scale=self.scale,
+        )
+        x = torch.nested.nested_tensor([x_.permute(1, 0, 2).flatten(1) for x_ in x])
+        return query.replace(batched_features=CatBatchedFeatures.from_nested(x))
 
 
 class PatchAttention(BaseSpatialModule):
@@ -307,8 +400,8 @@ class PatchAttentionBlock(BaseSpatialModule):
         self.norm1 = norm_layer(attention_channels)
         self.attention = attention_block(
             attention_channels,
-            patch_size,
-            num_heads,
+            patch_size=patch_size,
+            num_heads=num_heads,
             qkv_bias=qkv_bias,
             qk_scale=qk_scale,
             attn_drop=attn_drop,

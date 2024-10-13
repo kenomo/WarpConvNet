@@ -6,6 +6,7 @@ import warp as wp
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.nn.attention import (
     Attention,
+    NestedAttention,
     PatchAttention,
     PatchAttentionBlock,
     SpatialFeaturesTransformer,
@@ -13,6 +14,7 @@ from warpconvnet.nn.attention import (
     TransformerBlock,
     ZeroOutPoints,
 )
+from warpconvnet.nn.encodings import FourierEncoding
 from warpconvnet.nn.mlp import Linear
 
 
@@ -50,7 +52,7 @@ class TestAttention(unittest.TestCase):
         features, pos_enc, mask, num_points = to_attn(pc)
         self.assertEqual(features.shape, (self.B, self.Ns.max(), self.C))
         self.assertEqual(pos_enc.shape, (self.B, self.Ns.max(), 17))
-        self.assertEqual(mask.shape, (self.B, self.Ns.max(), self.Ns.max()))
+        self.assertEqual(mask.shape, (self.B, 1, self.Ns.max(), self.Ns.max()))
         self.assertEqual(len(num_points), self.B)
 
     def test_attention(self):
@@ -116,7 +118,6 @@ class TestAttention(unittest.TestCase):
             dim=dim,
             patch_size=patch_size,
             num_heads=num_heads,
-            dilation=2,
             qkv_bias=True,
             use_sdpa=False,
         ).to(device)
@@ -141,7 +142,6 @@ class TestAttention(unittest.TestCase):
             attention_channels=dim,
             patch_size=patch_size,
             num_heads=num_heads,
-            dilation=1,
             mlp_ratio=4,
             qkv_bias=True,
             proj_drop=0.3,
@@ -151,6 +151,20 @@ class TestAttention(unittest.TestCase):
         out = patch_attn(st)
         self.assertEqual(out.feature_tensor.shape[-1], dim)
         self.assertEqual(len(out), len(st))
+
+    def test_nested_attention(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        dim = self.C * 8
+        lift = Linear(self.C, dim).to(device)
+        pc = lift(pc)
+        attn = NestedAttention(
+            dim=dim,
+            num_heads=8,
+            pos_enc=FourierEncoding(3, dim),
+        ).to(device)
+        out = attn(pc)
+        self.assertEqual(out.features.shape, (self.Ns.sum(), dim))
 
 
 if __name__ == "__main__":

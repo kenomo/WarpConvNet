@@ -64,11 +64,11 @@ class FourierEncoding(nn.Module):
     ):
         super().__init__()
         assert out_channels % 2 == 0
-        to_gaussian = 2 * np.pi * torch.empty((in_channels, out_channels // 2)).normal_(std=std)
-        if learnable:
-            self.to_gaussian = nn.Parameter(to_gaussian)
-        else:
-            self.register_buffer("to_gaussian", to_gaussian)
+        self.to_gaussian = nn.Linear(in_channels, out_channels // 2, bias=False)
+        self.to_gaussian.weight.data.normal_(std=2 * np.pi * std)
+
+        if not learnable:
+            self.to_gaussian.requires_grad = False
 
         self.normalize = input_range is not None
         if input_range is not None:
@@ -78,12 +78,15 @@ class FourierEncoding(nn.Module):
             self.register_buffer("input_range", input_range)
 
     def forward(self, xyz: Float[Tensor, "N 3"]):
-        assert self.to_gaussian.shape[0] == xyz.shape[-1]
-
         if self.normalize:
             xyz = normalize_coordinates(
                 xyz, min_coord=self.input_range[0], max_coord=self.input_range[1]
             )
 
-        xyz_proj = xyz @ self.to_gaussian
-        return torch.cat([xyz_proj.sin(), xyz_proj.cos()], dim=-1)
+        xyz_proj = self.to_gaussian(xyz)
+        if xyz_proj.is_nested:
+            return torch.nested.nested_tensor(
+                [torch.cat([x.sin(), x.cos()], dim=-1) for x in xyz_proj.unbind()]
+            )
+        else:
+            return torch.cat([xyz_proj.sin(), xyz_proj.cos()], dim=-1)
