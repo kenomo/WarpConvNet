@@ -321,6 +321,21 @@ class TestSparseConv(unittest.TestCase):
         out = conv(st)
         self.assertTrue(out.feature_tensor.shape[1] == C_out)
 
+    def test_spconv_amp(self):
+        C_in, C_out = self.C, 13
+        kernel_size = (3, 3, 3)
+        stride = (2, 2, 2)
+        device = torch.device("cuda:0")
+        st: SpatiallySparseTensor = self.st.to(device)
+        # sort
+        st = st.sort()
+        conv = SpatiallySparseConv(
+            C_in, C_out, kernel_size, stride, out_code_backend="morton"
+        ).to(device)
+        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            out = conv(st)
+        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+
 
 if __name__ == "__main__":
     unittest.main()

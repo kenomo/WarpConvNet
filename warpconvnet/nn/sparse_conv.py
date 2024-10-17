@@ -34,6 +34,7 @@ class SpatiallySparseConv(BaseSpatialModule):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+        compute_dtype: torch.dtype = torch.float32,
     ):
         super().__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
@@ -49,6 +50,7 @@ class SpatiallySparseConv(BaseSpatialModule):
         self.kernel_matmul_batch_size = kernel_matmul_batch_size
         self.conv_algo = conv_algo
         self.out_code_backend = out_code_backend
+        self.compute_dtype = compute_dtype
         self.weight = nn.Parameter(torch.randn(np.prod(kernel_size), in_channels, out_channels))
 
         self.bias = None
@@ -125,6 +127,7 @@ class SpatiallySparseConv(BaseSpatialModule):
             conv_algo=self.conv_algo,
             stride_mode=self.stride_mode,
             out_code_backend=self.out_code_backend,
+            compute_dtype=self.compute_dtype,
         )
 
 
@@ -144,6 +147,7 @@ class SparseConv2d(SpatiallySparseConv):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+        compute_dtype: torch.dtype = torch.float32,
     ):
         super().__init__(
             in_channels=in_channels,
@@ -160,6 +164,7 @@ class SparseConv2d(SpatiallySparseConv):
             conv_algo=conv_algo,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
+            compute_dtype=compute_dtype,
         )
 
 
@@ -179,6 +184,7 @@ class SparseConv3d(SpatiallySparseConv):
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+        compute_dtype: torch.dtype = torch.float32,
     ):
         super().__init__(
             in_channels=in_channels,
@@ -195,4 +201,5 @@ class SparseConv3d(SpatiallySparseConv):
             conv_algo=conv_algo,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
+            compute_dtype=compute_dtype,
         )
