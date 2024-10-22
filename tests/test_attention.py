@@ -166,6 +166,19 @@ class TestAttention(unittest.TestCase):
         out = attn(pc)
         self.assertEqual(out.features.shape, (self.Ns.sum(), dim))
 
+    def test_cross_nested_attention(self):
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        dim = self.C * 8
+        lift = Linear(self.C, dim).to(device)
+        pc = lift(pc)
+        # Initialize nested tensor with 100 queries per batch
+        B, N = self.B, 100
+        queries = torch.randn(B, N, dim).to(device)
+        attn = NestedAttention(dim=dim, num_heads=8).to(device)
+        out = attn(queries, pc)
+        self.assertEqual(out.shape, (B, N, dim))
+
 
 if __name__ == "__main__":
     unittest.main()

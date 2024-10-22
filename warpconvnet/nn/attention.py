@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple, TypeVar, Union
 
 import torch
 import torch.nn as nn
@@ -20,6 +20,7 @@ from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
 from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv3d
 from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
+from warpconvnet.types import NestedTensor
 
 
 def zero_out_points(
@@ -207,23 +208,35 @@ class NestedAttention(BaseSpatialModule):
 
     def forward(
         self,
-        query: SpatialFeatures,
+        query: Union[SpatialFeatures, Tensor, NestedTensor],
         key: Optional[SpatialFeatures] = None,
         value: Optional[SpatialFeatures] = None,
-        query_pos: Optional[Float[Tensor, "B N C"]] = None,
-        key_pos: Optional[Float[Tensor, "B N C"]] = None,
-    ) -> SpatialFeatures:
-        query_feats = query.nested_features
+        query_pos: Optional[Tensor] = None,
+        key_pos: Optional[Tensor] = None,
+    ) -> Union[SpatialFeatures, Tensor, NestedTensor]:
+        if isinstance(query, SpatialFeatures):
+            query_feats = query.nested_features
+        elif query.is_nested:
+            query_feats = query
+        elif isinstance(query, Tensor):
+            query_feats = torch.nested.as_nested_tensor([q for q in query])
+
+        # All computations are done on nested tensors
         key_feats = key.nested_features if key is not None else query_feats
         value_feats = value.nested_features if value is not None else key_feats
         if self.pos_enc is not None:
+            assert isinstance(query, SpatialFeatures)
             query_pos = self.pos_enc(query.nested_coordinates)
             key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
 
         if query_pos is not None:
+            if not query_pos.is_nested:
+                query_pos = torch.nested.as_nested_tensor([q for q in query_pos])
             query_feats = query_feats + query_pos
 
         if key_pos is not None:
+            if not key_pos.is_nested:
+                key_pos = torch.nested.as_nested_tensor([k for k in key_pos])
             key_feats = key_feats + key_pos
 
         # Reshape for heads
@@ -255,7 +268,13 @@ class NestedAttention(BaseSpatialModule):
             scale=self.scale,
         )
         x = torch.nested.nested_tensor([x_.permute(1, 0, 2).flatten(1) for x_ in x])
-        return query.replace(batched_features=CatBatchedFeatures.from_nested(x))
+        # Return based on the type of query
+        if isinstance(query, SpatialFeatures):
+            return query.replace(batched_features=CatBatchedFeatures.from_nested(x))
+        elif query.is_nested:
+            return x
+        else:
+            return torch.stack([x_ for x_ in x])
 
 
 class PatchAttention(BaseSpatialModule):
