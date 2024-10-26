@@ -9,14 +9,10 @@ from warpconvnet.geometry.base_geometry import SpatialFeatures
 class BaseSpatialModule(nn.Module):
     """Base module for spatial features. The input must be an instance of `BatchedSpatialFeatures`."""
 
-    def __init__(self):
-        super().__init__()
-        self.device_indicator_param = nn.Parameter(torch.empty(0))
-
     @property
     def device(self):
         """Returns the device that the model is on."""
-        return self.device_indicator_param.device
+        return next(self.parameters()).device
 
     def forward(self, x: SpatialFeatures):
         """Forward pass."""
