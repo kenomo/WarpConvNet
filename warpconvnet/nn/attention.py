@@ -1,4 +1,5 @@
-from typing import Literal, Optional, Tuple, TypeVar, Union
+import functools
+from typing import Any, Callable, Literal, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -11,12 +12,9 @@ from warpconvnet.geometry.base_geometry import (
     CatPatchedFeatures,
     SpatialFeatures,
 )
-from warpconvnet.nn.activations import GELU, DropPath
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.mlp import Linear
-from warpconvnet.nn.normalizations import LayerNorm
-from warpconvnet.nn.normalizations import _RMSNorm as RMSNorm
+from warpconvnet.nn.normalizations import RMSNorm, _RMSNorm
 from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv3d
 from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
@@ -378,98 +376,32 @@ class PatchAttention(BaseSpatialModule):
         return skip.replace(batched_features=out_patch_feats)
 
 
-class PatchAttentionBlock(BaseSpatialModule):
-    def __init__(
-        self,
-        in_channels: int,
-        attention_channels: int,
-        patch_size: int,
-        num_heads: int,
-        mlp_ratio: float = 4.0,
-        qkv_bias: bool = True,
-        qk_scale: Optional[float] = None,
-        attn_drop: float = 0.0,
-        proj_drop: float = 0.0,
-        drop_path: float = 0.0,
-        norm_layer: nn.Module = LayerNorm,
-        act_layer: nn.Module = GELU,
-        out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "morton",
-        rand_perm_patch: bool = False,
-        use_sdpa: bool = True,
-        attention_block: nn.Module = PatchAttention,
-    ):
-        super().__init__()
-        self.conv = Sequential(
-            SparseConv3d(
-                in_channels,
-                attention_channels,
-                kernel_size=3,
-                stride=1,
-                bias=True,
-                out_code_backend=out_code_backend,
-            ),
-            norm_layer(attention_channels),
-            act_layer(),
-        )
-        self.conv_shortcut = (
-            nn.Identity()
-            if in_channels == attention_channels
-            else Linear(in_channels, attention_channels)
-        )
-        self.norm1 = norm_layer(attention_channels)
-        self.attention = attention_block(
-            attention_channels,
-            patch_size=patch_size,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop=attn_drop,
-            proj_drop=proj_drop,
-            rand_perm_patch=rand_perm_patch,
-            use_sdpa=use_sdpa,
-        )
-        self.norm2 = norm_layer(attention_channels)
-        self.mlp = Sequential(
-            FeedForward(
-                dim=attention_channels,
-                hidden_dim=int(attention_channels * mlp_ratio),
-            )
-        )
-        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-
-    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
-        x = self.conv(x) + self.conv_shortcut(x)
-        x = self.norm1(x)
-        x = self.drop_path(self.attention(x)) + x
-        x = self.norm2(x)
-        x = self.drop_path(self.mlp(x)) + x
-        return x
-
-
-class FeedForward(nn.Module):
+class FeedForward(BaseSpatialModule):
     def __init__(
         self,
         dim: int,
         hidden_dim: int,
-        multiple_of: int = 2,  # make hidden_dim multiple of this
-        ffn_dim_multiplier: Optional[float] = None,
+        multiple_of: int = 2,
     ):
         super().__init__()
         hidden_dim = int(2 * hidden_dim / 3)
-        # Custom dimension factor multiplier
-        if ffn_dim_multiplier is not None:
-            hidden_dim = int(ffn_dim_multiplier * hidden_dim)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
         self.w1 = nn.Linear(dim, hidden_dim, bias=False)
         self.w2 = nn.Linear(hidden_dim, dim, bias=False)
         self.w3 = nn.Linear(dim, hidden_dim, bias=False)
 
-    def forward(self, x: Float[Tensor, "B N D"]) -> Float[Tensor, "B N D"]:
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+    def forward(
+        self, x: Union[Float[Tensor, "B N D"], SpatialFeatures]
+    ) -> Union[Float[Tensor, "B N D"], SpatialFeatures]:
+        feat = x.features if isinstance(x, SpatialFeatures) else x
+        # Apply feed forward
+        feat = self.w2(F.silu(self.w1(feat)) * self.w3(feat))
+        # Return based on the type of x
+        return x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
 
 
-class TransformerBlock(nn.Module):
+class TransformerBlock(BaseSpatialModule):
     def __init__(
         self,
         dim: int,
@@ -478,13 +410,16 @@ class TransformerBlock(nn.Module):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
-        hidden_dim_multiplier: int = 4,
-        ffn_dim_multiplier: Optional[float] = None,
+        ffn_multiplier: int = 4,
         norm_eps: float = 1e-5,
+        attn_fn: Optional[Callable[..., nn.Module]] = None,
+        norm_fn: Optional[Callable[..., nn.Module]] = RMSNorm,
     ):
         super().__init__()
+        if attn_fn is None:
+            attn_fn = functools.partial(PatchAttention, patch_size=1024)
         self.dim = dim
-        self.attention = Attention(
+        self.attention = attn_fn(
             dim=dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
@@ -494,110 +429,17 @@ class TransformerBlock(nn.Module):
         )
         self.feed_forward = FeedForward(
             dim=dim,
-            hidden_dim=hidden_dim_multiplier * dim,
-            ffn_dim_multiplier=ffn_dim_multiplier,
+            hidden_dim=ffn_multiplier * dim,
         )
-        self.attention_norm = RMSNorm(dim, eps=norm_eps)
-        self.ffn_norm = RMSNorm(dim, eps=norm_eps)
+        self.attention_norm = norm_fn(dim, eps=norm_eps)
+        self.ffn_norm = norm_fn(dim, eps=norm_eps)
 
     def forward(
         self,
-        x: Float[Tensor, "B N D"],  # noqa: F821
-        pos: Float[Tensor, "B N 3"],  # noqa: F821
-        mask: Optional[Float[Tensor, "B N N"]] = None,  # noqa: F821
-        num_points: Optional[Int[Tensor, "B"]] = None,  # noqa: F821
-    ) -> Float[Tensor, "B N D"]:  # noqa: F821
-        h = x + self.attention(self.attention_norm(x), pos, mask)
+        x: SpatialFeatures,
+        *args: Any,
+        **kwargs: Any,
+    ) -> SpatialFeatures:
+        h = x + self.attention(self.attention_norm(x), *args, **kwargs)
         out = h + self.feed_forward(self.ffn_norm(h))
-        if num_points is not None:
-            out = zero_out_points(out, num_points)
         return out
-
-
-class Transformer(nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 8,
-        qkv_bias: bool = False,
-        qk_scale: Optional[float] = None,
-        attn_drop: float = 0.0,
-        proj_drop: float = 0.0,
-        hidden_dim_multiplier: int = 4,
-        ffn_dim_multiplier: Optional[float] = None,
-        num_layers: int = 1,
-        norm_eps: float = 1e-5,
-    ):
-        super().__init__()
-        self.blocks = nn.ModuleList()
-        for _ in range(num_layers):
-            self.blocks.append(
-                TransformerBlock(
-                    dim,
-                    num_heads,
-                    qkv_bias,
-                    qk_scale,
-                    attn_drop,
-                    proj_drop,
-                    hidden_dim_multiplier,
-                    ffn_dim_multiplier,
-                    norm_eps,
-                )
-            )
-        self.norm = RMSNorm(dim, eps=norm_eps)
-
-    def forward(
-        self,
-        x: Float[Tensor, "B N D"],
-        pos: Float[Tensor, "B N 3"],
-        mask: Optional[Float[Tensor, "B N N"]] = None,
-        num_points: Optional[Int[Tensor, "B"]] = None,  # noqa: F821
-    ) -> Float[Tensor, "B N D"]:
-        for block in self.blocks:
-            x = block(x, pos, mask, num_points)
-        return self.norm(x)
-
-
-class SpatialFeaturesTransformer(Transformer):
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 8,
-        num_layers: int = 1,
-        qkv_bias: bool = False,
-        qk_scale: Optional[float] = None,
-        attn_drop: float = 0.0,
-        proj_drop: float = 0.0,
-        num_encoding_channels: int = 32,
-        encoding_range: float = 1.0,
-        hidden_dim_multiplier: int = 4,
-        ffn_dim_multiplier: Optional[float] = None,
-        norm_eps: float = 1e-5,
-    ):
-        super().__init__(
-            dim,
-            num_heads,
-            qkv_bias,
-            qk_scale,
-            attn_drop,
-            proj_drop,
-            hidden_dim_multiplier,
-            ffn_dim_multiplier,
-            num_layers,
-            norm_eps,
-        )
-        self.to_attn = ToAttention(
-            dim,
-            num_encoding_channels,
-            encoding_range,
-            num_heads,
-            concat_input=True,
-            num_spatial_features=3,
-        )
-        self.from_attn = ToSpatialFeatures()
-
-    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
-        features, pos_enc, mask, num_points = self.to_attn(x)
-        y = super().forward(features, pos_enc, mask, num_points)
-        y = self.from_attn(y, x)
-        return y
