@@ -150,6 +150,11 @@ class DiscreteNeighborSearchResult:
         offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
         return in_maps_sorted, unique_out_maps_sorted, offsets
 
+    def clone(self):
+        return DiscreteNeighborSearchResult(
+            self.in_maps.clone(), self.out_maps.clone(), self.offsets.clone()
+        )
+
 
 @wp.kernel
 def conv_kernel_map(

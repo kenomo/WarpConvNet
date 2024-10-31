@@ -14,9 +14,7 @@ from warpconvnet.geometry.base_geometry import (
 )
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.normalizations import RMSNorm, LayerNorm
-from warpconvnet.nn.sequential import Sequential
-from warpconvnet.nn.sparse_conv import SparseConv3d
+from warpconvnet.nn.normalizations import LayerNorm, RMSNorm
 from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
 from warpconvnet.types import NestedTensor
 
@@ -105,9 +103,7 @@ class ToAttention(BaseSpatialModule):
 
 
 class ToSpatialFeatures(nn.Module):
-    def forward(
-        self, x: Float[Tensor, "B N C"], target: SpatialFeatures
-    ) -> SpatialFeatures:
+    def forward(self, x: Float[Tensor, "B N C"], target: SpatialFeatures) -> SpatialFeatures:
         feats = pad_to_cat(x, target.offsets)
         return target.replace(batched_features=feats)
 
@@ -185,6 +181,45 @@ class Attention(nn.Module):
         return x
 
 
+class SpatialFeatureAttention(Attention):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        num_layers: int = 1,
+        qkv_bias: bool = False,
+        qk_scale: Optional[float] = None,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        num_encoding_channels: int = 32,
+        encoding_range: float = 1.0,
+    ):
+        super().__init__(
+            dim,
+            num_heads,
+            qkv_bias,
+            qk_scale,
+            attn_drop,
+            proj_drop,
+            use_sdpa=True,
+        )
+        self.to_attn = ToAttention(
+            dim,
+            num_encoding_channels,
+            encoding_range,
+            num_heads,
+            concat_input=True,
+            num_spatial_features=3,
+        )
+        self.from_attn = ToSpatialFeatures()
+
+    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
+        features, pos_enc, mask, num_points = self.to_attn(x)
+        y = super().forward(features, pos_enc, mask, num_points)
+        y = self.from_attn(y, x)
+        return y
+
+
 class NestedAttention(BaseSpatialModule):
     """
     Warning: does not support gradient
@@ -218,8 +253,6 @@ class NestedAttention(BaseSpatialModule):
         query_pos: Optional[Tensor] = None,
         key_pos: Optional[Tensor] = None,
     ) -> Union[SpatialFeatures, Tensor, NestedTensor]:
-        # Assert this is not training mode
-        assert not self.training, "NestedAttention does not support gradient"
         if isinstance(query, SpatialFeatures):
             query_feats = query.nested_features
         elif query.is_nested:
@@ -227,15 +260,16 @@ class NestedAttention(BaseSpatialModule):
         elif isinstance(query, Tensor):
             query_feats = torch.nested.as_nested_tensor([q for q in query])
 
+        # Assert query does not require gradient
+        assert not query_feats.requires_grad, "NestedAttention does not support gradient"
+
         # All computations are done on nested tensors
         key_feats = key.nested_features if key is not None else query_feats
         value_feats = value.nested_features if value is not None else key_feats
         if self.pos_enc is not None:
             assert isinstance(query, SpatialFeatures)
             query_pos = self.pos_enc(query.nested_coordinates)
-            key_pos = (
-                self.pos_enc(key.nested_coordinates) if key is not None else query_pos
-            )
+            key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
 
         if query_pos is not None:
             if not query_pos.is_nested:
@@ -334,9 +368,7 @@ class PatchAttention(BaseSpatialModule):
             inverse_perm = torch.argsort(perm)
             x = x.replace(batched_features=x.feature_tensor[perm])
 
-        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(
-            x.batched_features, K
-        )
+        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K)
         feats = patch_feats.batched_tensor  # MxC
         M, C = feats.shape
         qkv = (
@@ -358,9 +390,7 @@ class PatchAttention(BaseSpatialModule):
             num_points = patch_feats.offsets.diff()
             for i in range(patch_feats.batch_size):
                 if num_points[i] % K != 0:
-                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = (
-                        False
-                    )
+                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = False
             out_feat = F.scaled_dot_product_attention(
                 q,
                 k,
@@ -378,9 +408,7 @@ class PatchAttention(BaseSpatialModule):
             num_points = patch_feats.offsets.diff()
             for i in range(patch_feats.batch_size):
                 if num_points[i] % K != 0:
-                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = (
-                        -torch.inf
-                    )
+                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
 
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
@@ -389,9 +417,7 @@ class PatchAttention(BaseSpatialModule):
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
-        out_patch_feats: CatBatchedFeatures = patch_feats.replace(
-            batched_tensor=out_feat
-        ).to_cat()
+        out_patch_feats: CatBatchedFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
 
         if self.rand_perm_patch:
             out_patch_feats = out_patch_feats.batched_tensor[inverse_perm]
@@ -421,9 +447,7 @@ class FeedForward(BaseSpatialModule):
         # Apply feed forward
         feat = self.w2(F.silu(self.w1(feat)) * self.w3(feat))
         # Return based on the type of x
-        return (
-            x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
-        )
+        return x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
 
 
 class TransformerBlock(BaseSpatialModule):

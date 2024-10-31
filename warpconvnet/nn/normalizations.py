@@ -39,8 +39,18 @@ class BatchNorm(NormalizationBase):
 
 
 class LayerNorm(NormalizationBase):
-    def __init__(self, normalized_shape: List[int], eps: float = 1e-5):
-        super().__init__(nn.LayerNorm(normalized_shape, eps=eps))
+    def __init__(
+        self,
+        normalized_shape: List[int],
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+        bias: bool = True,
+    ):
+        super().__init__(
+            nn.LayerNorm(
+                normalized_shape, eps=eps, elementwise_affine=elementwise_affine, bias=bias
+            )
+        )
 
 
 class InstanceNorm(NormalizationBase):

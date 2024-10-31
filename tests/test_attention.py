@@ -9,6 +9,7 @@ from warpconvnet.nn.attention import (
     Attention,
     NestedAttention,
     PatchAttention,
+    SpatialFeatureAttention,
     ToAttention,
     TransformerBlock,
     ZeroOutPoints,
@@ -124,6 +125,7 @@ class TestAttention(unittest.TestCase):
         self.assertIsNotNone(patch_attn.attention_norm.norm.weight.grad)
         self.assertIsNotNone(lift.block.weight.grad)
 
+    @torch.inference_mode()
     def test_nested_transformer_block(self):
         device = torch.device("cuda:0")
         dim = self.C * 8
@@ -138,17 +140,10 @@ class TestAttention(unittest.TestCase):
         ).to(device)
 
         pc = self.pc.to(device)
-        pc.batched_features.batched_tensor.requires_grad_(True)
         pc = lift(pc)
-        out = transf(pc)
-        loss = out.feature_tensor.sum()
-        loss.backward()
+        _ = transf(pc)
 
-        # Note: This does not work since sdpa does not support autograd for nested tensors
-        # self.assertIsNotNone(transf.attention.proj.weight.grad)
-        # self.assertIsNotNone(transf.attention_norm.norm.weight.grad)
-        # self.assertIsNotNone(lift.block.weight.grad)
-
+    @torch.inference_mode()
     def test_nested_attention(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
@@ -163,6 +158,7 @@ class TestAttention(unittest.TestCase):
         out = attn(pc)
         self.assertEqual(out.features.shape, (self.Ns.sum(), dim))
 
+    @torch.inference_mode()
     def test_cross_nested_attention(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
@@ -175,6 +171,14 @@ class TestAttention(unittest.TestCase):
         attn = NestedAttention(dim=dim, num_heads=8).to(device)
         out = attn(queries, pc)
         self.assertEqual(out.shape, (B, N, dim))
+
+    def test_spatial_feature_attention(self):
+        device = torch.device("cuda:0")
+        lift = Linear(self.C, self.C * 8).to(device)
+        attn = SpatialFeatureAttention(dim=self.C * 8, num_heads=8).to(device)
+        pc = self.pc.to(device)
+        pc = lift(pc)
+        out = attn(pc)
 
 
 if __name__ == "__main__":
