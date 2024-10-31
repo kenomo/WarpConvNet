@@ -188,11 +188,12 @@ class BatchedObject:
         return f"{self.__class__.__name__}(offsets={self.offsets}, shape={self.batched_tensor.shape}, device={self.device}, dtype={self.dtype})"
 
     def to_nested(self) -> torch.Tensor:
-        return torch.nested.nested_tensor([self[i] for i in range(self.batch_size)])
+        return torch.nested.nested_tensor([self[i] for i in range(self.batch_size)], requires_grad=self.batched_tensor.requires_grad)
 
     @classmethod
     def from_nested(cls, nested: torch.Tensor) -> "BatchedObject":
-        return cls(nested.unbind())
+        rg = nested.requires_grad
+        return cls([t.requires_grad_(rg) for t in nested.unbind()])
 
 
 class NestBatchedObject(BatchedObject):

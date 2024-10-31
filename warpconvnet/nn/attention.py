@@ -14,7 +14,7 @@ from warpconvnet.geometry.base_geometry import (
 )
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.normalizations import RMSNorm, _RMSNorm
+from warpconvnet.nn.normalizations import RMSNorm, LayerNorm
 from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv3d
 from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
@@ -105,7 +105,9 @@ class ToAttention(BaseSpatialModule):
 
 
 class ToSpatialFeatures(nn.Module):
-    def forward(self, x: Float[Tensor, "B N C"], target: SpatialFeatures) -> SpatialFeatures:
+    def forward(
+        self, x: Float[Tensor, "B N C"], target: SpatialFeatures
+    ) -> SpatialFeatures:
         feats = pad_to_cat(x, target.offsets)
         return target.replace(batched_features=feats)
 
@@ -184,6 +186,10 @@ class Attention(nn.Module):
 
 
 class NestedAttention(BaseSpatialModule):
+    """
+    Warning: does not support gradient
+    """
+
     def __init__(
         self,
         dim: int,
@@ -212,6 +218,8 @@ class NestedAttention(BaseSpatialModule):
         query_pos: Optional[Tensor] = None,
         key_pos: Optional[Tensor] = None,
     ) -> Union[SpatialFeatures, Tensor, NestedTensor]:
+        # Assert this is not training mode
+        assert not self.training, "NestedAttention does not support gradient"
         if isinstance(query, SpatialFeatures):
             query_feats = query.nested_features
         elif query.is_nested:
@@ -225,7 +233,9 @@ class NestedAttention(BaseSpatialModule):
         if self.pos_enc is not None:
             assert isinstance(query, SpatialFeatures)
             query_pos = self.pos_enc(query.nested_coordinates)
-            key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
+            key_pos = (
+                self.pos_enc(key.nested_coordinates) if key is not None else query_pos
+            )
 
         if query_pos is not None:
             if not query_pos.is_nested:
@@ -266,6 +276,11 @@ class NestedAttention(BaseSpatialModule):
             scale=self.scale,
         )
         x = torch.nested.nested_tensor([x_.permute(1, 0, 2).flatten(1) for x_ in x])
+
+        # apply proj and proj_drop
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
         # Return based on the type of query
         if isinstance(query, SpatialFeatures):
             return query.replace(batched_features=CatBatchedFeatures.from_nested(x))
@@ -319,7 +334,9 @@ class PatchAttention(BaseSpatialModule):
             inverse_perm = torch.argsort(perm)
             x = x.replace(batched_features=x.feature_tensor[perm])
 
-        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K)
+        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(
+            x.batched_features, K
+        )
         feats = patch_feats.batched_tensor  # MxC
         M, C = feats.shape
         qkv = (
@@ -341,7 +358,9 @@ class PatchAttention(BaseSpatialModule):
             num_points = patch_feats.offsets.diff()
             for i in range(patch_feats.batch_size):
                 if num_points[i] % K != 0:
-                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = False
+                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = (
+                        False
+                    )
             out_feat = F.scaled_dot_product_attention(
                 q,
                 k,
@@ -359,7 +378,9 @@ class PatchAttention(BaseSpatialModule):
             num_points = patch_feats.offsets.diff()
             for i in range(patch_feats.batch_size):
                 if num_points[i] % K != 0:
-                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
+                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = (
+                        -torch.inf
+                    )
 
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
@@ -368,7 +389,9 @@ class PatchAttention(BaseSpatialModule):
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
-        out_patch_feats: CatBatchedFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
+        out_patch_feats: CatBatchedFeatures = patch_feats.replace(
+            batched_tensor=out_feat
+        ).to_cat()
 
         if self.rand_perm_patch:
             out_patch_feats = out_patch_feats.batched_tensor[inverse_perm]
@@ -398,7 +421,9 @@ class FeedForward(BaseSpatialModule):
         # Apply feed forward
         feat = self.w2(F.silu(self.w1(feat)) * self.w3(feat))
         # Return based on the type of x
-        return x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
+        return (
+            x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
+        )
 
 
 class TransformerBlock(BaseSpatialModule):
@@ -413,7 +438,7 @@ class TransformerBlock(BaseSpatialModule):
         ffn_multiplier: int = 4,
         norm_eps: float = 1e-5,
         attn_fn: Optional[Callable[..., nn.Module]] = None,
-        norm_fn: Optional[Callable[..., nn.Module]] = RMSNorm,
+        norm_fn: Optional[Callable[..., nn.Module]] = LayerNorm,
     ):
         super().__init__()
         if attn_fn is None:

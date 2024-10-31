@@ -92,7 +92,7 @@ class TestAttention(unittest.TestCase):
         # Check that the number of points is preserved
         self.assertEqual(len(out), len(pc))
 
-    def test_patch_attention_block(self):
+    def test_patch_transformer_block(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
         patch_size = 32
@@ -111,6 +111,43 @@ class TestAttention(unittest.TestCase):
         out = patch_attn(st)
         self.assertEqual(out.feature_tensor.shape[-1], dim)
         self.assertEqual(len(out), len(st))
+
+        # Test backward pass and gradient
+        pc = self.pc.to(device)
+        pc.batched_features.batched_tensor.requires_grad_(True)
+        pc = lift(pc)
+        out = patch_attn(pc)
+        loss = out.feature_tensor.sum()
+        loss.backward()
+
+        self.assertIsNotNone(patch_attn.attention.qkv.weight.grad)
+        self.assertIsNotNone(patch_attn.attention_norm.norm.weight.grad)
+        self.assertIsNotNone(lift.block.weight.grad)
+
+    def test_nested_transformer_block(self):
+        device = torch.device("cuda:0")
+        dim = self.C * 8
+        num_heads = 8
+        lift = Linear(self.C, dim).to(device)
+        transf = TransformerBlock(
+            dim=dim,
+            num_heads=num_heads,
+            ffn_multiplier=4,
+            qkv_bias=True,
+            attn_fn=NestedAttention,
+        ).to(device)
+
+        pc = self.pc.to(device)
+        pc.batched_features.batched_tensor.requires_grad_(True)
+        pc = lift(pc)
+        out = transf(pc)
+        loss = out.feature_tensor.sum()
+        loss.backward()
+
+        # Note: This does not work since sdpa does not support autograd for nested tensors
+        # self.assertIsNotNone(transf.attention.proj.weight.grad)
+        # self.assertIsNotNone(transf.attention_norm.norm.weight.grad)
+        # self.assertIsNotNone(lift.block.weight.grad)
 
     def test_nested_attention(self):
         device = torch.device("cuda:0")
