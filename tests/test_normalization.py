@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
-from warpconvnet.nn.normalizations import RMSNorm, LayerNorm
+from warpconvnet.nn.normalizations import LayerNorm, RMSNorm
 
 
 class TestNormalization(unittest.TestCase):
@@ -37,6 +37,7 @@ class TestNormalization(unittest.TestCase):
         # Test the gradient
         normed_pc.features.sum().backward()
         self.assertIsNotNone(layer_norm.norm.weight.grad)
+
 
 if __name__ == "__main__":
     unittest.main()

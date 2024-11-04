@@ -41,6 +41,7 @@ def offset_to_mask(
     x: Float[Tensor, "B M C"],  # noqa: F821
     offsets: Float[Tensor, "B+1"],  # noqa: F821
     max_num_points: int,  # noqa: F821
+    dtype: torch.dtype = torch.bool,
 ) -> Float[Tensor, "B 1 M M"]:  # noqa: F821
     """
     Create a mask for the points in the batch.
@@ -48,10 +49,16 @@ def offset_to_mask(
     B = x.shape[0]
     assert B == offsets.shape[0] - 1
     mask = torch.zeros(
-        (B, 1, max_num_points, max_num_points), dtype=torch.float32, device=x.device
+        (B, 1, max_num_points, max_num_points),
+        dtype=dtype,
+        device=x.device,
     )
-    for b in range(B):
-        mask[b, :, : offsets[b], : offsets[b]] = -torch.inf
+    num_points = offsets.diff()
+    if dtype == torch.bool:
+        for b in range(B):
+            mask[b, :, : num_points[b], : num_points[b]] = True
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
     return mask
 
 

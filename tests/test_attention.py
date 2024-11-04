@@ -27,22 +27,6 @@ class TestAttention(unittest.TestCase):
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
         self.pc = PointCollection(self.coords, self.features)
 
-    def test_to_attention(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        to_attn = ToAttention(
-            out_channels=17,
-            num_encoding_channels=32,
-            encoding_range=1.0,
-            concat_input=True,
-            num_spatial_features=3,
-        ).to(device)
-        features, pos_enc, mask, num_points = to_attn(pc)
-        self.assertEqual(features.shape, (self.B, self.Ns.max(), self.C))
-        self.assertEqual(pos_enc.shape, (self.B, self.Ns.max(), 17))
-        self.assertEqual(mask.shape, (self.B, 1, self.Ns.max(), self.Ns.max()))
-        self.assertEqual(len(num_points), self.B)
-
     def test_attention(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
@@ -68,6 +52,39 @@ class TestAttention(unittest.TestCase):
         x = attn(features, pos_enc, mask)
         x = zero_out(x, num_points)
         self.assertEqual(x.shape, (self.B, self.Ns.max(), dim))
+
+    def test_to_attention(self):
+        # Test the to_attention mask output
+        device = torch.device("cuda:0")
+        pc = self.pc.to(device)
+        dim = self.C * 8
+        num_heads = 8
+        lift = Linear(self.C, dim).to(device)
+        to_attn = ToAttention(
+            out_channels=dim,
+            num_heads=num_heads,
+            num_encoding_channels=32,
+            encoding_range=1.0,
+            concat_input=True,
+            num_spatial_features=3,
+        ).to(device)
+        pc = lift(pc)
+        features, pos_enc, mask, num_points = to_attn(pc)
+        # B, MaxN, C
+        max_N = self.Ns.max()
+        self.assertEqual(features.shape, (self.B, max_N, dim))
+        # B, MaxN, dim / num_heads
+        self.assertEqual(pos_enc.shape, (self.B, max_N, dim // num_heads))
+        # B, 1, MaxN, MaxN
+        self.assertEqual(mask.shape, (self.B, 1, max_N, max_N))
+        for b in range(self.B):
+            self.assertEqual(
+                torch.all(mask[b, :, : num_points[b], : num_points[b]]).item(), True
+            )
+            # Rows
+            self.assertEqual(torch.any(mask[b, :, num_points[b] :]).item(), False)
+            # Cols
+            self.assertEqual(torch.any(mask[b, :, :, num_points[b] :]).item(), False)
 
     def test_patch_attention(self):
         device = torch.device("cuda:0")
