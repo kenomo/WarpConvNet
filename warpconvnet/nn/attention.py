@@ -56,7 +56,8 @@ def offset_to_mask(
     num_points = offsets.diff()
     if dtype == torch.bool:
         for b in range(B):
-            mask[b, :, : num_points[b], : num_points[b]] = True
+            # mask[b, :, : num_points[b], : num_points[b]] = True
+            mask[b, :, :, : num_points[b]] = True
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
     return mask
@@ -66,8 +67,9 @@ class ToAttention(BaseSpatialModule):
     def __init__(
         self,
         out_channels: int,
-        num_encoding_channels: Optional[int],
-        encoding_range: Optional[float],
+        use_encoding: bool = False,
+        num_encoding_channels: Optional[int] = None,
+        encoding_range: Optional[float] = None,
         num_heads: int = 1,
         concat_input: bool = True,
         num_spatial_features: int = 3,
@@ -75,18 +77,20 @@ class ToAttention(BaseSpatialModule):
     ):
         super().__init__()
         self.out_type = out_type
-        self.sinusoidal_encoding = nn.Sequential(
-            SinusoidalEncoding(
-                num_channels=num_encoding_channels,
-                data_range=encoding_range,
-                concat_input=concat_input,
-            ),
-            nn.Linear(
-                num_encoding_channels * num_spatial_features
-                + (num_spatial_features if concat_input else 0),
-                out_channels // num_heads,
-            ),
-        )
+        self.use_encoding = use_encoding
+        if use_encoding:
+            self.encoding = nn.Sequential(
+                SinusoidalEncoding(
+                    num_channels=num_encoding_channels,
+                    data_range=encoding_range,
+                    concat_input=concat_input,
+                ),
+                nn.Linear(
+                    num_encoding_channels * num_spatial_features
+                    + (num_spatial_features if concat_input else 0),
+                    out_channels // num_heads,
+                ),
+            )
 
     def forward(
         self, x: SpatialFeatures
@@ -103,8 +107,11 @@ class ToAttention(BaseSpatialModule):
             features = cat_to_pad(features, offsets)
             coordinates = x.coordinate_tensor
 
-        pos_enc = self.sinusoidal_encoding(coordinates)
-        pos_enc = cat_to_pad(pos_enc, offsets)
+        if self.use_encoding:
+            pos_enc = self.encoding(coordinates)
+            pos_enc = cat_to_pad(pos_enc, offsets)
+        else:
+            pos_enc = None
         mask = offset_to_mask(features, offsets, features.shape[1])
         return features, pos_enc, mask, num_points
 
@@ -193,13 +200,14 @@ class SpatialFeatureAttention(Attention):
         self,
         dim: int,
         num_heads: int = 8,
-        num_layers: int = 1,
         qkv_bias: bool = False,
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
         num_encoding_channels: int = 32,
         encoding_range: float = 1.0,
+        use_encoding: bool = False,
+        **kwargs,
     ):
         super().__init__(
             dim,
@@ -212,9 +220,10 @@ class SpatialFeatureAttention(Attention):
         )
         self.to_attn = ToAttention(
             dim,
-            num_encoding_channels,
-            encoding_range,
-            num_heads,
+            use_encoding=use_encoding,
+            num_encoding_channels=num_encoding_channels,
+            encoding_range=encoding_range,
+            num_heads=num_heads,
             concat_input=True,
             num_spatial_features=3,
         )
