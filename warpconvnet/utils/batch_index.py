@@ -66,7 +66,7 @@ def _find_bin(offsets: wp.array(dtype=Any), tid: int) -> int:
 def _batch_index(
     offsets: wp.array(dtype=wp.int32),
     batch_index_wp: wp.array(dtype=wp.int32),
-) -> None:
+):
     tid = wp.tid()
     if offsets.shape[0] > 256:
         batch_index_wp[tid] = _find_bin(offsets, tid)
@@ -81,7 +81,7 @@ def _batch_index_from_indicies(
     indices: wp.array(dtype=wp.int32),
     offsets: wp.array(dtype=wp.int32),
     batch_index_wp: wp.array(dtype=wp.int32),
-) -> None:
+):
     tid = wp.tid()
     index = indices[tid]
     _find_bin_native(
