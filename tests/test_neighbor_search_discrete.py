@@ -41,7 +41,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         # Use the st.coordinate_tensor as the query_coords
         batch_query_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         batch_query_coords = wp.from_torch(batch_query_coords)
-        scratch_coords = wp.empty_like(batch_query_coords)
 
         # Create the num_neighbors tensor
         num_neighbors = wp.zeros(len(st.coordinate_tensor), dtype=int, device=str(device))
@@ -54,7 +53,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
             inputs=[
                 hashmap._hash_struct,
                 batch_query_coords,
-                scratch_coords,
                 neighbor_distance_threshold,
                 num_neighbors,
             ],

@@ -28,13 +28,28 @@ def atomicCAS(address: wp.array2d(dtype=int), slot: int, compare: int, val: int)
 
 # Hash function to convert an array of int32 to int32
 @wp.func
-def hash_fnv1a(key: wp.array(dtype=int), capacity: int) -> int:
-    # Simple hash function for demonstration
+def _hash_fnv1a_impl(hash_val: int, key: int) -> int:
+    """Internal implementation of FNV-1a hash update step"""
+    hash_val ^= key
+    hash_val *= 16777619
+    return hash_val
+
+
+@wp.func
+def hash_fnv1a_array(key: wp.array(dtype=int), capacity: int) -> int:
+    """Hash function for array input"""
     hash_val = int(2166136261)
     for i in range(key.shape[0]):
-        hash_val ^= key[i]
-        hash_val *= 16777619
-    # Make sure the hash value is positive
+        hash_val = _hash_fnv1a_impl(hash_val, key[i])
+    return ((hash_val % capacity) + capacity) % capacity
+
+
+@wp.func
+def hash_fnv1a_vec4i(coord: wp.vec4i, capacity: int) -> int:
+    """Hash function for vec4i input"""
+    hash_val = int(2166136261)
+    for i in range(4):
+        hash_val = _hash_fnv1a_impl(hash_val, coord[i])
     return ((hash_val % capacity) + capacity) % capacity
 
 
@@ -47,60 +62,120 @@ def murmur_32_scramble(k: int) -> int:
 
 
 @wp.func
-def hash_murmur(key: wp.array(dtype=int), capacity: int) -> int:
-    h = int(0x9747B28C)
+def _hash_murmur_impl(h: int, k: int) -> int:
+    """Internal implementation of Murmur hash update step"""
+    h ^= murmur_32_scramble(k)
+    h = (h << 13) | (h >> 19)
+    h = h * 5 + 0xE6546B64
+    return h
 
-    # Process each of the integers in the key
-    for i in range(key.shape[0]):
-        k = key[i]
-        h ^= murmur_32_scramble(k)
-        h = (h << 13) | (h >> 19)
-        h = h * 5 + 0xE6546B64
 
-    # Finalize
-    h ^= 16  # Length of the key in bytes (4 ints * 4 bytes each)
+@wp.func
+def _hash_murmur_finalize(h: int, length: int) -> int:
+    """Finalize step for Murmur hash"""
+    h ^= length  # Length of the key in bytes
     h ^= h >> 16
     h *= 0x85EBCA6B
     h ^= h >> 13
     h *= 0xC2B2AE35
     h ^= h >> 16
+    return h
 
-    # Ensure the hash value is positive
+
+@wp.func
+def hash_murmur_array(key: wp.array(dtype=int), capacity: int) -> int:
+    """Murmur hash function for array input"""
+    h = int(0x9747B28C)
+
+    # Process each of the integers in the key
+    for i in range(key.shape[0]):
+        h = _hash_murmur_impl(h, key[i])
+
+    # Finalize
+    h = _hash_murmur_finalize(h, 16)  # 16 = 4 ints * 4 bytes each
     return ((h % capacity) + capacity) % capacity
 
 
 @wp.func
-def hash_city(key: wp.array(dtype=int), capacity: int) -> int:
+def _hash_city_impl(hash_val: int, key: int) -> int:
+    """Internal implementation of City hash update step"""
+    hash_val += key * 0x9E3779B9
+    hash_val ^= hash_val >> 16
+    hash_val *= 0x85EBCA6B
+    hash_val ^= hash_val >> 13
+    hash_val *= 0xC2B2AE35
+    hash_val ^= hash_val >> 16
+    return hash_val
+
+
+@wp.func
+def hash_city_array(key: wp.array(dtype=int), capacity: int) -> int:
+    """City hash function for array input"""
     hash_val = int(0)
     for i in range(key.shape[0]):
-        hash_val += key[i] * 0x9E3779B9
-        hash_val ^= hash_val >> 16
-        hash_val *= 0x85EBCA6B
-        hash_val ^= hash_val >> 13
-        hash_val *= 0xC2B2AE35
-        hash_val ^= hash_val >> 16
-
+        hash_val = _hash_city_impl(hash_val, key[i])
     return (hash_val % capacity + capacity) % capacity
 
 
 @wp.func
-def hash_selection(hash_method: int, key: wp.array(dtype=int), capacity: int) -> int:
-    if hash_method == 0:
-        return hash_fnv1a(key, capacity)
-    elif hash_method == 1:
-        return hash_city(key, capacity)
-    elif hash_method == 2:
-        return hash_murmur(key, capacity)
-    else:
-        return hash_fnv1a(key, capacity)
+def hash_city_vec4i(coord: wp.vec4i, capacity: int) -> int:
+    """City hash function for vec4i input"""
+    hash_val = int(0)
+    for i in range(4):
+        hash_val = _hash_city_impl(hash_val, coord[i])
+    return (hash_val % capacity + capacity) % capacity
 
 
 @wp.func
-def vec_equal(a: wp.array(dtype=int), b: wp.array(dtype=int)) -> bool:
+def hash_murmur_vec4i(coord: wp.vec4i, capacity: int) -> int:
+    """Murmur hash function for vec4i input"""
+    h = int(0x9747B28C)
+    for i in range(4):
+        h = _hash_murmur_impl(h, coord[i])
+
+    # Finalize
+    h = _hash_murmur_finalize(h, 16)  # 16 = 4 ints * 4 bytes each
+    return ((h % capacity) + capacity) % capacity
+
+
+@wp.func
+def hash_selection(hash_method: int, key: wp.array(dtype=int), capacity: int) -> int:  # noqa: F811
+    """Hash selection for array input"""
+    if hash_method == 0:
+        return hash_fnv1a_array(key, capacity)
+    elif hash_method == 1:
+        return hash_city_array(key, capacity)
+    elif hash_method == 2:
+        return hash_murmur_array(key, capacity)
+    else:
+        return hash_fnv1a_array(key, capacity)
+
+
+@wp.func
+def hash_selection(hash_method: int, coord: wp.vec4i, capacity: int) -> int:  # noqa: F811
+    """Hash selection for vec4i input"""
+    if hash_method == 0:
+        return hash_fnv1a_vec4i(coord, capacity)
+    elif hash_method == 1:
+        return hash_city_vec4i(coord, capacity)
+    elif hash_method == 2:
+        return hash_murmur_vec4i(coord, capacity)
+    else:
+        return hash_fnv1a_vec4i(coord, capacity)
+
+
+@wp.func
+def vec_equal(a: wp.array(dtype=int), b: wp.array(dtype=int)) -> bool:  # noqa: F811
     for i in range(a.shape[0]):
         if a[i] != b[i]:
             return False
     return True
+
+
+@wp.func
+def vec_equal(vec: wp.array(dtype=int), coord: wp.vec4i) -> bool:  # noqa: F811
+    """Compare a vector with a vec4i coordinate"""
+    return vec[0] == coord[0] and vec[1] == coord[1] and vec[2] == coord[2] and vec[3] == coord[3]
 
 
 @wp.struct
@@ -192,7 +267,7 @@ def insert_kernel(
 
 
 @wp.func
-def search_func(
+def search_func(  # noqa: F811
     table_kvs: wp.array2d(dtype=int),
     vec_keys: wp.array2d(dtype=int),
     query_key: wp.array(dtype=int),
@@ -202,12 +277,35 @@ def search_func(
     slot = hash_selection(hash_method, query_key, table_capacity)
     initial_slot = slot
     while True:
-        current_key = table_kvs[slot, 0]  # Updated indexing
+        current_key = table_kvs[slot, 0]
         if current_key == -1:
             return -1
         else:
-            vec_val = table_kvs[slot, 1]  # Updated indexing
+            vec_val = table_kvs[slot, 1]
             if vec_equal(vec_keys[vec_val], query_key):
+                return vec_val
+        slot = (slot + 1) % table_capacity
+        if slot == initial_slot:
+            return -1
+
+
+@wp.func
+def search_func(  # noqa: F811
+    table_kvs: wp.array2d(dtype=int),
+    vec_keys: wp.array2d(dtype=int),
+    coord: wp.vec4i,
+    table_capacity: int,
+    hash_method: int,
+) -> int:
+    slot = hash_selection(hash_method, coord, table_capacity)
+    initial_slot = slot
+    while True:
+        current_key = table_kvs[slot, 0]
+        if current_key == -1:
+            return -1
+        else:
+            vec_val = table_kvs[slot, 1]
+            if vec_equal(vec_keys[vec_val], coord):
                 return vec_val
         slot = (slot + 1) % table_capacity
         if slot == initial_slot:

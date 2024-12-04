@@ -191,28 +191,28 @@ def conv_kernel_map(
 def num_neighbors_kernel(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
-    scratch_coords: wp.array2d(dtype=int),
     neighbor_distance_threshold: int,
     num_neighbors: wp.array(dtype=int),
 ):
     idx = wp.tid()
-
     curr_num_neighbors = int(0)
     center = neighbor_distance_threshold // 2
+    b = query_coords[idx][0]
+
     # Loop over the neighbors
     for i in range(neighbor_distance_threshold):
         for j in range(neighbor_distance_threshold):
             for k in range(neighbor_distance_threshold):
                 # Compute query coord
-                query_coord = scratch_coords[idx]
-                query_coord[0] = query_coords[idx][0]
-                query_coord[1] = query_coords[idx][1] + i - center
-                query_coord[2] = query_coords[idx][2] + j - center
-                query_coord[3] = query_coords[idx][3] + k - center
+                x = query_coords[idx][1] + i - center
+                y = query_coords[idx][2] + j - center
+                z = query_coords[idx][3] + k - center
+
+                coord = wp.vec4i(b, x, y, z)
                 index = search_func(
                     in_hashmap.table_kvs,
                     in_hashmap.vector_keys,
-                    query_coord,
+                    coord,
                     in_hashmap.capacity,
                     in_hashmap.hash_method,
                 )
@@ -226,7 +226,6 @@ def num_neighbors_kernel(
 def fill_neighbors_kernel(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
-    scratch_coords: wp.array2d(dtype=int),
     neighbor_distance_threshold: int,
     neighbor_offset_inclusive: wp.array(dtype=int),
     in_coords_index: wp.array(dtype=int),
@@ -239,20 +238,20 @@ def fill_neighbors_kernel(
         neighbor_offset = neighbor_offset_inclusive[idx - 1]
     curr_num_neighbors = int(neighbor_offset)
     center = neighbor_distance_threshold // 2
+    b = query_coords[idx][0]
     # Loop over the neighbors
     for i in range(neighbor_distance_threshold):
         for j in range(neighbor_distance_threshold):
             for k in range(neighbor_distance_threshold):
                 # Compute query coord
-                query_coord = scratch_coords[idx]
-                query_coord[0] = query_coords[idx][0]
-                query_coord[1] = query_coords[idx][1] + i - center
-                query_coord[2] = query_coords[idx][2] + j - center
-                query_coord[3] = query_coords[idx][3] + k - center
+                x = query_coords[idx][1] + i - center
+                y = query_coords[idx][2] + j - center
+                z = query_coords[idx][3] + k - center
+                coord = wp.vec4i(b, x, y, z)
                 index = search_func(
                     in_hashmap.table_kvs,
                     in_hashmap.vector_keys,
-                    query_coord,
+                    coord,
                     in_hashmap.capacity,
                     in_hashmap.hash_method,
                 )
@@ -273,7 +272,6 @@ def neighbor_search_hashmap(
 
     # Compute the number of neighbors for each query point
     num_neighbors = wp.empty(len(batched_query_coords), dtype=int, device=device)
-    scratch_coords = wp.empty_like(batched_query_coords)
 
     # Launch num neighbor kernel
     wp.launch(
@@ -282,7 +280,6 @@ def neighbor_search_hashmap(
         inputs=[
             in_hashmap,
             batched_query_coords,
-            scratch_coords,
             neighbor_distance_threshold,
             num_neighbors,
         ],
@@ -298,7 +295,6 @@ def neighbor_search_hashmap(
     # Allocate outputs
     in_coords_index = wp.empty(tot, dtype=int, device=device)
     query_coords_index = wp.empty(tot, dtype=int, device=device)
-    scratch_coords = wp.empty_like(batched_query_coords)
 
     # Launch the kernel
     wp.launch(
@@ -307,7 +303,6 @@ def neighbor_search_hashmap(
         inputs=[
             in_hashmap,
             batched_query_coords,
-            scratch_coords,
             neighbor_distance_threshold,
             num_neighbors_scan_inclusive,
             in_coords_index,
