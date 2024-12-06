@@ -266,6 +266,25 @@ def kernel_offsets_from_size(
     return torch.stack(offsets, dim=1)
 
 
+@wp.kernel
+def map_found_indices_to_maps(
+    found_in_coord_index: wp.array2d(dtype=int),
+    mapped_indicies: wp.array2d(dtype=int),
+    offsets: wp.array(dtype=int),
+    in_maps: wp.array(dtype=int),
+    out_maps: wp.array(dtype=int),
+):
+    idx = wp.tid()
+    # K = found_in_coord_index.shape[0]
+    M = found_in_coord_index.shape[1]
+
+    k = idx // M
+    m = idx % M
+    if found_in_coord_index[k][m] >= 0:
+        in_maps[mapped_indicies[k][m] + offsets[k]] = found_in_coord_index[k][m]
+        out_maps[mapped_indicies[k][m] + offsets[k]] = m
+
+
 @torch.no_grad()
 def _kernel_map_search_to_result(
     found_in_coord_index_wp: wp.array2d(dtype=int),
@@ -275,24 +294,54 @@ def _kernel_map_search_to_result(
     # assert found_in_coord_index_wp.shape[0] == kernel_offsets.shape[0]
     # assert found_in_coord_index_wp.shape[1] == batched_query_coords.shape[0]
     found_in_coord_index = wp.to_torch(found_in_coord_index_wp)
-    device = found_in_coord_index.device
+    str_device = str(found_in_coord_index.device)
     K, M = found_in_coord_index.shape
     if return_type == "indices":
         return found_in_coord_index
 
     assert return_type == "offsets"
-    # Return the kernel map
     found_in_coord_index_bool = found_in_coord_index >= 0
-    in_maps = found_in_coord_index[found_in_coord_index_bool]
+    # Debug only
+    if False:
+        num_valid_maps = found_in_coord_index_bool.sum(1)
 
-    out_indices = torch.arange(M, device=device).repeat(K, 1)
-    out_maps = out_indices[found_in_coord_index_bool]
-    num_valid_maps = found_in_coord_index_bool.sum(1)
-
-    # convert the num_valid_maps to an offset
-    offsets = torch.cumsum(num_valid_maps.cpu(), dim=0)
-    # prepend 0 to the num_valid_maps
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
+        out_indices = torch.arange(M, device=str_device).repeat(K, 1)
+        in_maps = found_in_coord_index[found_in_coord_index_bool]
+        out_maps = out_indices[found_in_coord_index_bool]
+        # convert the num_valid_maps to an offset
+        offsets = torch.cumsum(num_valid_maps.cpu(), dim=0)
+        # prepend 0 to the num_valid_maps
+        offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
+    else:
+        # get the index of the non zero elements
+        mapped_indices = (
+            torch.cumsum(found_in_coord_index_bool.to(torch.int32), dim=1, dtype=torch.int32) - 1
+        )
+        num_valid_maps = mapped_indices[:, -1].cpu() + 1
+        # convert the num_valid_maps to an offset
+        offsets = torch.cumsum(num_valid_maps.cpu(), dim=0, dtype=torch.int32)
+        # prepend 0 to the num_valid_maps
+        offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
+        num_total_maps = offsets[-1].item()
+        in_maps_wp = wp.empty(num_total_maps, device=str_device, dtype=wp.int32)
+        out_maps_wp = wp.empty(num_total_maps, device=str_device, dtype=wp.int32)
+        mapped_indices_wp = wp.from_torch(mapped_indices)  # wp.array2d(dtype=int)
+        found_in_coord_index_wp = wp.from_torch(found_in_coord_index)
+        offsets_wp = wp.from_torch(offsets).to(device=str_device)
+        wp.launch(
+            kernel=map_found_indices_to_maps,
+            dim=found_in_coord_index.numel(),
+            inputs=[
+                found_in_coord_index_wp,
+                mapped_indices_wp,
+                offsets_wp,
+                in_maps_wp,
+                out_maps_wp,
+            ],
+            device=str_device,
+        )
+        in_maps = wp.to_torch(in_maps_wp)
+        out_maps = wp.to_torch(out_maps_wp)
 
     return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
 
@@ -384,7 +433,6 @@ def _kernel_map_from_size(
 def _kernel_map_from_direct_queries(
     in_hashmap: HashStruct,
     batch_indexed_out_coords: Int[Tensor, "M 4"],
-    in_to_out_stride_ratio: Tuple[int, ...],
     kernel_size: Tuple[int, ...],
     kernel_dilation: Optional[Tuple[int, ...]] = None,
     kernel_search_batch_size: Optional[int] = None,
@@ -397,22 +445,12 @@ def _kernel_map_from_direct_queries(
 
     assert len(kernel_size) == num_spatial_dims
     assert len(kernel_dilation) == num_spatial_dims
-    assert len(in_to_out_stride_ratio) == num_spatial_dims
     assert str_device == str(batch_indexed_out_coords.device)
 
     num_total_kernels = np.prod(kernel_size)
     if kernel_search_batch_size is None:
         kernel_search_batch_size = num_total_kernels // kernel_size[0]
 
-    # multiply output coordinates by in_to_out_stride_ratio if it is not all ones
-    if not all(s == 1 for s in in_to_out_stride_ratio):
-        batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
-            [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
-            dtype=torch.int32,
-            device=str_device,
-        )
-    else:
-        batch_indexed_out_coords = batch_indexed_out_coords
     N_out = batch_indexed_out_coords.shape[0]
 
     # Found indices and offsets for each kernel offset
@@ -478,7 +516,7 @@ def _kernel_map_from_direct_queries(
 
 
 @torch.no_grad()
-def kernel_map_from_size(
+def generate_kernel_map(
     batch_indexed_in_coords: Int[Tensor, "N 4"],
     batch_indexed_out_coords: Int[Tensor, "M 4"],
     in_to_out_stride_ratio: Tuple[int, ...],
@@ -486,101 +524,62 @@ def kernel_map_from_size(
     kernel_dilation: Optional[Tuple[int, ...]] = None,
     kernel_search_batch_size: Optional[int] = None,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
+    method: Literal["query", "size", "offset"] = "size",
 ) -> DiscreteNeighborSearchResult:
     """
     Generate the kernel map for the spatially sparse convolution.
 
     in_to_out_stride_ratio: the ratio of the input stride to the output stride. This will be multiplied to output coordinates to find matching input coordinates.
     """
-    num_spatial_dims = batch_indexed_in_coords.shape[1] - 1
-    if kernel_dilation is None:
-        kernel_dilation = (1,) * num_spatial_dims
-
-    assert len(kernel_size) == num_spatial_dims
-    assert len(kernel_dilation) == num_spatial_dims
-    assert len(in_to_out_stride_ratio) == num_spatial_dims
-
-    num_total_kernels = np.prod(kernel_size)
-    if kernel_search_batch_size is None:
-        kernel_search_batch_size = num_total_kernels // kernel_size[0]
-
-    # convert to wp array
-    device = batch_indexed_in_coords.device
+    # Create a vector hashtable for the batched coordinates
     batch_indexed_in_coords_wp = wp.from_torch(batch_indexed_in_coords)
+    hashtable = VectorHashTable.from_keys(batch_indexed_in_coords_wp)
+
+    str_device = str(batch_indexed_out_coords.device)
+    num_spatial_dims = batch_indexed_out_coords.shape[1] - 1
+
     # multiply output coordinates by in_to_out_stride_ratio if it is not all ones
     if not all(s == 1 for s in in_to_out_stride_ratio):
         batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
             [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
             dtype=torch.int32,
-            device=device,
+            device=str_device,
         )
     else:
         batch_indexed_out_coords = batch_indexed_out_coords
-    N_out = batch_indexed_out_coords.shape[0]
 
-    # Create a vector hashtable for the batched coordinates
-    hashtable = VectorHashTable.from_keys(batch_indexed_in_coords_wp)
-
-    # Found indices and offsets for each kernel offset
-    in_maps = []
-    out_maps = []
-    num_valid_maps = []
-
-    # Query the hashtable for all kernel offsets
-    all_out_indices = (
-        torch.arange(N_out, device=device).repeat(kernel_search_batch_size, 1).view(-1)
-    )
-
-    # Generate kernel offsets
-    offsets = kernel_offsets_from_size(
-        kernel_size, kernel_dilation, center_offset=kernel_center_offset
-    ).to(device)
-
-    for batch_start in range(0, num_total_kernels, kernel_search_batch_size):
-        batch_end = min(batch_start + kernel_search_batch_size, num_total_kernels)
-        num_kernels_in_batch = batch_end - batch_start
-        curr_offsets = offsets[batch_start:batch_end]
-
-        # Apply offsets in batch and query output + offsets. Add the offsets in the expanded dimension
-        # KND + K1D -> KND
-        new_batch_indexed_out_coords = batch_indexed_out_coords.unsqueeze(
-            0
-        ) + curr_offsets.unsqueeze(1)
-        new_batch_indexed_out_coords = new_batch_indexed_out_coords.view(-1, num_spatial_dims + 1)
-        new_batch_indexed_out_coords_wp = wp.from_torch(new_batch_indexed_out_coords)
-
-        # Query the hashtable for all new coordinates at once
-        in_indices_wp = hashtable.search(new_batch_indexed_out_coords_wp)
-        in_indices = wp.to_torch(in_indices_wp)
-
-        # Get the valid indices and offsets.
-        # valid indices are all >= 0 and offsets [0, N1, N1+N2, N1+N2+N3, ..., N1+...+N_kernel_batch] for N1, N2, N3 being the number of valid indices for each kernel offset
-        valid_in_indices_bool = in_indices >= 0
-        # Reshape valid indices to [kernel_batch, N_out] to get the number of valid indices for each kernel offset
-        num_valid_in_indices = valid_in_indices_bool.view(num_kernels_in_batch, -1).sum(dim=1)
-        # Compress indices to the valid indices
-        valid_in_indices_int = in_indices[valid_in_indices_bool]
-        if num_kernels_in_batch < kernel_search_batch_size:
-            valid_out_indices_int = all_out_indices[: len(valid_in_indices_bool)][
-                valid_in_indices_bool
-            ]
-        else:
-            valid_out_indices_int = all_out_indices[valid_in_indices_bool]
-
-        in_maps.append(valid_in_indices_int)
-        out_maps.append(valid_out_indices_int)
-        num_valid_maps.append(num_valid_in_indices)
-
-    # Concatenate all the maps
-    in_maps = torch.cat(in_maps, dim=0)
-    out_maps = torch.cat(out_maps, dim=0)
-    num_valid_maps = torch.cat(num_valid_maps, dim=0)
-    # convert the num_valid_maps to an offset
-    offsets = torch.cumsum(num_valid_maps, dim=0)
-    # prepend 0 to the num_valid_maps
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int32, device=device), offsets], dim=0)
-
-    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
+    if method == "query":
+        return _kernel_map_from_direct_queries(
+            hashtable._hash_struct,
+            batch_indexed_out_coords,
+            kernel_size,
+            kernel_dilation=kernel_dilation,
+            kernel_search_batch_size=kernel_search_batch_size,
+            kernel_center_offset=kernel_center_offset,
+        )
+    elif method == "size":
+        assert kernel_dilation is None or all(s == 1 for s in kernel_dilation), "Not supported yet"
+        assert kernel_center_offset is None, "Not supported yet"
+        return _kernel_map_from_size(
+            hashtable._hash_struct,
+            batch_indexed_out_coords,
+            kernel_size,
+            return_type="offsets",
+        )
+    elif method == "offset":
+        assert kernel_dilation is None or all(s == 1 for s in kernel_dilation), "Not supported yet"
+        assert kernel_center_offset is None, "Not supported yet"
+        kernel_offsets = kernel_offsets_from_size(
+            kernel_size, kernel_dilation, center_offset=kernel_center_offset
+        ).to(batch_indexed_out_coords.device)
+        return _kernel_map_from_offsets(
+            hashtable._hash_struct,
+            batch_indexed_out_coords,
+            kernel_offsets,
+            return_type="offsets",
+        )
+    else:
+        raise ValueError(f"Invalid method: {method}")
 
 
 def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821

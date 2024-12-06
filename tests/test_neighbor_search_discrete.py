@@ -9,7 +9,7 @@ from warpconvnet.geometry.ops.neighbor_search_discrete import (
     _kernel_map_from_direct_queries,
     _kernel_map_from_offsets,
     _kernel_map_from_size,
-    kernel_map_from_size,
+    generate_kernel_map,
     kernel_offsets_from_size,
 )
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
@@ -103,7 +103,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         kernel_map_direct = _kernel_map_from_direct_queries(
             st_hashmap._hash_struct,
             bcoords,
-            in_to_out_stride_ratio=in_to_out_stride_ratio,
+            # in_to_out_stride_ratio=in_to_out_stride_ratio,
             kernel_size=kernel_size,
             kernel_dilation=kernel_dilation,
         )
@@ -148,7 +148,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         print("N", len(bcoords))
         for kernel_size in [(3, 3, 3), (5, 5, 5), (7, 7, 7), (9, 9, 9)]:
             kernel_dilation = (1, 1, 1)
-            in_to_out_stride_ratio = (1, 1, 1)
 
             kernel_offsets = kernel_offsets_from_size(
                 kernel_size,
@@ -176,7 +175,6 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
                     _ = _kernel_map_from_direct_queries(
                         st_hashmap._hash_struct,
                         bcoords,
-                        in_to_out_stride_ratio=in_to_out_stride_ratio,
                         kernel_size=kernel_size,
                         kernel_dilation=kernel_dilation,
                     )

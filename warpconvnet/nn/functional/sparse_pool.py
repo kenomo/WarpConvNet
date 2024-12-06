@@ -7,7 +7,7 @@ from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     KernelMapCache,
     KernelMapCacheKey,
-    kernel_map_from_size,
+    generate_kernel_map,
 )
 from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
@@ -65,7 +65,7 @@ def sparse_reduce(
 
     if kernel_map is None:
         # Find mapping from in to out
-        kernel_map: DiscreteNeighborSearchResult = kernel_map_from_size(
+        kernel_map: DiscreteNeighborSearchResult = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             in_to_out_stride_ratio=stride,

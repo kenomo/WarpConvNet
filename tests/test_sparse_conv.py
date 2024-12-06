@@ -4,7 +4,7 @@ import torch
 import warp as wp
 
 from warpconvnet.core.hashmap import VectorHashTable
-from warpconvnet.geometry.ops.neighbor_search_discrete import kernel_map_from_size
+from warpconvnet.geometry.ops.neighbor_search_discrete import generate_kernel_map
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
@@ -61,7 +61,7 @@ class TestSparseConv(unittest.TestCase):
         kernel_size = (3, 3, 3)
         kernel_dilation = (1, 1, 1)
         kernel_batch = 8
-        kernel_map = kernel_map_from_size(  # noqa: F841
+        kernel_map = generate_kernel_map(  # noqa: F841
             batch_indexed_in_coords,
             batch_indexed_output_coords,
             in_to_out_stride_ratio,
@@ -154,7 +154,7 @@ class TestSparseConv(unittest.TestCase):
         batch_indexed_out_coords, offsets = generate_output_coords(
             batch_indexed_in_coords, stride=stride
         )
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             stride,
@@ -286,7 +286,7 @@ class TestSparseConv(unittest.TestCase):
         batch_indexed_out_coords, offsets = generate_output_coords(
             batch_indexed_in_coords, stride=stride
         )
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             stride,

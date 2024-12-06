@@ -13,7 +13,7 @@ from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     KernelMapCache,
     KernelMapCacheKey,
-    kernel_map_from_size,
+    generate_kernel_map,
 )
 from warpconvnet.geometry.spatially_sparse_tensor import (
     BatchedDiscreteCoordinates,
@@ -474,7 +474,7 @@ def generate_output_coords_and_kernel_map(
                 return batch_indexed_out_coords, out_offsets, kernel_map
 
         # Swap in and out maps for transposed kernel map generation and swap it back
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_out_coords,
             batch_indexed_in_coords,
             in_to_out_stride_ratio,
@@ -488,7 +488,7 @@ def generate_output_coords_and_kernel_map(
             offsets=kernel_map.offsets,
         )
     elif stride_mode == STRIDED_CONV_MODE.STRIDE_ONLY:
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             in_to_out_stride_ratio,
@@ -498,7 +498,7 @@ def generate_output_coords_and_kernel_map(
         )
     elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and not generative:
         # Compute mapping from output to output since it will be reduced
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_out_coords,
             batch_indexed_out_coords,
             ntuple(1, ndim=input_sparse_tensor.num_spatial_dims),
@@ -507,7 +507,7 @@ def generate_output_coords_and_kernel_map(
             kernel_search_batch_size,
         )
     elif stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and generative:
-        kernel_map = kernel_map_from_size(
+        kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             ntuple(1, ndim=input_sparse_tensor.num_spatial_dims),
