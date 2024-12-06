@@ -157,12 +157,12 @@ class DiscreteNeighborSearchResult:
 
 
 @wp.kernel
-def conv_kernel_map(
+def conv_kernel_map_arr(
     in_hashmap: HashStruct,
     query_coords: wp.array2d(dtype=int),
     scratch_coords: wp.array2d(dtype=int),
     kernel_offsets: wp.array2d(dtype=int),
-    found_in_coord_index: wp.array(dtype=int),
+    found_in_coord_index: wp.array2d(dtype=int),
 ):
     """
     Compute whether query + offset is in in_coords and return the index of the found input coordinate.
@@ -170,7 +170,6 @@ def conv_kernel_map(
     For definitions, please refer to Sec. 4.2. of https://arxiv.org/pdf/1904.08755
     """
     idx = wp.tid()
-    N_query_coords = query_coords.shape[0]
     for k in range(kernel_offsets.shape[0]):
         # TODO(cchoy): Change this to shared memory operation.
         # Copy the query coordinate to the scratch coordinate.
@@ -184,31 +183,44 @@ def conv_kernel_map(
             in_hashmap.capacity,
             in_hashmap.hash_method,
         )
-        found_in_coord_index[idx + N_query_coords * k] = index
+        found_in_coord_index[k][idx] = index
 
 
 @wp.kernel
-def num_neighbors_kernel(
+def conv_kernel_map_vec4i(
     in_hashmap: HashStruct,
-    query_coords: wp.array2d(dtype=int),
-    neighbor_distance_threshold: int,
-    num_neighbors: wp.array(dtype=int),
+    query_coords: wp.array(dtype=wp.vec4i),
+    kernel_size: wp.vec3i,
+    found_in_coord_index: wp.array2d(dtype=int),
 ):
+    """
+    Compute whether query + offset is in in_coords and return the index of the found input coordinate.
+
+    For definitions, please refer to Sec. 4.2. of https://arxiv.org/pdf/1904.08755
+    """
     idx = wp.tid()
-    curr_num_neighbors = int(0)
-    center = neighbor_distance_threshold // 2
+
+    # center to be 0 if kernel size is even
+    center = wp.vec3i(0, 0, 0)
+    if kernel_size[0] % 2 != 0:
+        center[0] = kernel_size[0] // 2
+    if kernel_size[1] % 2 != 0:
+        center[1] = kernel_size[1] // 2
+    if kernel_size[2] % 2 != 0:
+        center[2] = kernel_size[2] // 2
+    kernel_index = int(0)
     b = query_coords[idx][0]
-
     # Loop over the neighbors
-    for i in range(neighbor_distance_threshold):
-        for j in range(neighbor_distance_threshold):
-            for k in range(neighbor_distance_threshold):
+    for i in range(kernel_size[0]):
+        for j in range(kernel_size[1]):
+            for k in range(kernel_size[2]):
                 # Compute query coord
-                x = query_coords[idx][1] + i - center
-                y = query_coords[idx][2] + j - center
-                z = query_coords[idx][3] + k - center
-
-                coord = wp.vec4i(b, x, y, z)
+                coord = wp.vec4i(
+                    b,
+                    query_coords[idx][1] + i - center[0],
+                    query_coords[idx][2] + j - center[1],
+                    query_coords[idx][3] + k - center[2],
+                )
                 index = search_func(
                     in_hashmap.table_kvs,
                     in_hashmap.vector_keys,
@@ -216,102 +228,8 @@ def num_neighbors_kernel(
                     in_hashmap.capacity,
                     in_hashmap.hash_method,
                 )
-                if index >= 0:
-                    curr_num_neighbors += 1
-
-    num_neighbors[idx] = curr_num_neighbors
-
-
-@wp.kernel
-def fill_neighbors_kernel(
-    in_hashmap: HashStruct,
-    query_coords: wp.array2d(dtype=int),
-    neighbor_distance_threshold: int,
-    neighbor_offset_inclusive: wp.array(dtype=int),
-    in_coords_index: wp.array(dtype=int),
-    query_coords_index: wp.array(dtype=int),
-):
-    idx = wp.tid()
-    if idx == 0:
-        neighbor_offset = 0
-    else:
-        neighbor_offset = neighbor_offset_inclusive[idx - 1]
-    curr_num_neighbors = int(neighbor_offset)
-    center = neighbor_distance_threshold // 2
-    b = query_coords[idx][0]
-    # Loop over the neighbors
-    for i in range(neighbor_distance_threshold):
-        for j in range(neighbor_distance_threshold):
-            for k in range(neighbor_distance_threshold):
-                # Compute query coord
-                x = query_coords[idx][1] + i - center
-                y = query_coords[idx][2] + j - center
-                z = query_coords[idx][3] + k - center
-                coord = wp.vec4i(b, x, y, z)
-                index = search_func(
-                    in_hashmap.table_kvs,
-                    in_hashmap.vector_keys,
-                    coord,
-                    in_hashmap.capacity,
-                    in_hashmap.hash_method,
-                )
-                if index >= 0:
-                    in_coords_index[curr_num_neighbors] = index
-                    query_coords_index[curr_num_neighbors] = idx
-                    curr_num_neighbors += 1
-
-
-def neighbor_search_hashmap(
-    in_hashmap: HashStruct,
-    batched_query_coords: wp.array2d(dtype=int),
-    neighbor_distance_threshold: int,
-):
-    # device checks
-    device = in_hashmap.table_kvs.device
-    assert device == batched_query_coords.device, f"{device} != {batched_query_coords.device}"
-
-    # Compute the number of neighbors for each query point
-    num_neighbors = wp.empty(len(batched_query_coords), dtype=int, device=device)
-
-    # Launch num neighbor kernel
-    wp.launch(
-        kernel=num_neighbors_kernel,
-        dim=len(batched_query_coords),
-        inputs=[
-            in_hashmap,
-            batched_query_coords,
-            neighbor_distance_threshold,
-            num_neighbors,
-        ],
-        device=device,
-    )
-
-    # array_scan to compute the total number and offsets of neighbors
-    num_neighbors_scan_inclusive = wp.empty_like(num_neighbors)
-    warp.utils.array_scan(num_neighbors, num_neighbors_scan_inclusive, inclusive=True)
-    N = len(num_neighbors_scan_inclusive)
-    tot = num_neighbors_scan_inclusive[N - 1 : N].numpy()
-
-    # Allocate outputs
-    in_coords_index = wp.empty(tot, dtype=int, device=device)
-    query_coords_index = wp.empty(tot, dtype=int, device=device)
-
-    # Launch the kernel
-    wp.launch(
-        kernel=fill_neighbors_kernel,
-        dim=len(batched_query_coords),
-        inputs=[
-            in_hashmap,
-            batched_query_coords,
-            neighbor_distance_threshold,
-            num_neighbors_scan_inclusive,
-            in_coords_index,
-            query_coords_index,
-        ],
-        device=device,
-    )
-
-    return in_coords_index, query_coords_index
+                found_in_coord_index[kernel_index][idx] = index
+                kernel_index += 1
 
 
 @torch.no_grad()
@@ -349,12 +267,43 @@ def kernel_offsets_from_size(
 
 
 @torch.no_grad()
-def kernel_map_from_offsets(
-    in_hashmap: HashStruct,
-    batched_query_coords: Int[Tensor, "M 4"],
-    kernel_offsets: Int[Tensor, "K 4"],
+def _kernel_map_search_to_result(
+    found_in_coord_index_wp: wp.array2d(dtype=int),
     return_type: Literal["indices", "offsets"] = "offsets",
 ) -> Int[Tensor, "K M"] | DiscreteNeighborSearchResult:
+    # Must have shape [K, M]
+    # assert found_in_coord_index_wp.shape[0] == kernel_offsets.shape[0]
+    # assert found_in_coord_index_wp.shape[1] == batched_query_coords.shape[0]
+    found_in_coord_index = wp.to_torch(found_in_coord_index_wp)
+    device = found_in_coord_index.device
+    K, M = found_in_coord_index.shape
+    if return_type == "indices":
+        return found_in_coord_index
+
+    assert return_type == "offsets"
+    # Return the kernel map
+    found_in_coord_index_bool = found_in_coord_index >= 0
+    in_maps = found_in_coord_index[found_in_coord_index_bool]
+
+    out_indices = torch.arange(M, device=device).repeat(K, 1)
+    out_maps = out_indices[found_in_coord_index_bool]
+    num_valid_maps = found_in_coord_index_bool.sum(1)
+
+    # convert the num_valid_maps to an offset
+    offsets = torch.cumsum(num_valid_maps.cpu(), dim=0)
+    # prepend 0 to the num_valid_maps
+    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
+
+    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
+
+
+@torch.no_grad()
+def _kernel_map_from_offsets(
+    in_hashmap: HashStruct,
+    batched_query_coords: Int[Tensor, "N 4"],
+    kernel_offsets: Int[Tensor, "K 4"],
+    return_type: Literal["indices", "offsets"] = "offsets",
+) -> Int[Tensor, "K N"] | DiscreteNeighborSearchResult:
     """
     Compute the kernel map (input index, output index) for each kernel offset using cached hashmap
     """
@@ -365,9 +314,9 @@ def kernel_map_from_offsets(
     assert device_wp == str(kernel_offsets.device), f"{device_wp} != {kernel_offsets.device}"
     assert batched_query_coords.shape[1] == kernel_offsets.shape[1]
 
-    # Allocate output
+    # Allocate output of size K x N
     found_in_coord_index_wp = wp.empty(
-        len(batched_query_coords) * len(kernel_offsets),
+        (len(kernel_offsets), len(batched_query_coords)),
         dtype=wp.int32,
         device=device_wp,
     )
@@ -377,7 +326,7 @@ def kernel_map_from_offsets(
 
     # Launch the kernel
     wp.launch(
-        kernel=conv_kernel_map,
+        kernel=conv_kernel_map_arr,
         dim=len(batched_query_coords),
         inputs=[
             in_hashmap,
@@ -388,33 +337,142 @@ def kernel_map_from_offsets(
         ],
         device=device_wp,
     )
+    return _kernel_map_search_to_result(found_in_coord_index_wp, return_type)
 
-    found_in_coord_index = wp.to_torch(found_in_coord_index_wp).reshape(
-        len(kernel_offsets), len(batched_query_coords)
+
+@torch.no_grad()
+def _kernel_map_from_size(
+    in_hashmap: HashStruct,
+    batched_query_coords: Int[Tensor, "N 4"],
+    kernel_sizes: Tuple[int, ...],
+    return_type: Literal["indices", "offsets"] = "offsets",
+) -> Int[Tensor, "K N"] | DiscreteNeighborSearchResult:
+    """
+    Compute the kernel map (input index, output index) for each kernel offset using cached hashmap
+    """
+    device_wp = in_hashmap.table_kvs.device  # string device from warp array
+    assert device_wp == str(
+        batched_query_coords.device
+    ), f"{device_wp} != {str(batched_query_coords.device)}"
+    assert batched_query_coords.shape[1] == len(kernel_sizes) + 1
+
+    num_kernels = np.prod(kernel_sizes)
+    # Allocate output of size K x N
+    found_in_coord_index_wp = wp.empty(
+        (num_kernels, len(batched_query_coords)),
+        dtype=wp.int32,
+        device=device_wp,
+    )
+    batched_query_coords_wp = wp.from_torch(batched_query_coords, dtype=wp.vec4i)
+    kernel_sizes_wp = wp.vec3i(kernel_sizes)
+
+    # Launch the kernel
+    wp.launch(
+        kernel=conv_kernel_map_vec4i,
+        dim=len(batched_query_coords),
+        inputs=[
+            in_hashmap,
+            batched_query_coords_wp,
+            kernel_sizes_wp,
+            found_in_coord_index_wp,
+        ],
+        device=device_wp,
+    )
+    return _kernel_map_search_to_result(found_in_coord_index_wp, return_type)
+
+
+def _kernel_map_from_direct_queries(
+    in_hashmap: HashStruct,
+    batch_indexed_out_coords: Int[Tensor, "M 4"],
+    in_to_out_stride_ratio: Tuple[int, ...],
+    kernel_size: Tuple[int, ...],
+    kernel_dilation: Optional[Tuple[int, ...]] = None,
+    kernel_search_batch_size: Optional[int] = None,
+    kernel_center_offset: Optional[Tuple[int, ...]] = None,
+) -> DiscreteNeighborSearchResult:
+    num_spatial_dims = batch_indexed_out_coords.shape[1] - 1
+    str_device = str(in_hashmap.table_kvs.device)
+    if kernel_dilation is None:
+        kernel_dilation = (1,) * num_spatial_dims
+
+    assert len(kernel_size) == num_spatial_dims
+    assert len(kernel_dilation) == num_spatial_dims
+    assert len(in_to_out_stride_ratio) == num_spatial_dims
+    assert str_device == str(batch_indexed_out_coords.device)
+
+    num_total_kernels = np.prod(kernel_size)
+    if kernel_search_batch_size is None:
+        kernel_search_batch_size = num_total_kernels // kernel_size[0]
+
+    # multiply output coordinates by in_to_out_stride_ratio if it is not all ones
+    if not all(s == 1 for s in in_to_out_stride_ratio):
+        batch_indexed_out_coords = batch_indexed_out_coords * torch.tensor(
+            [1, *ntuple(in_to_out_stride_ratio, ndim=num_spatial_dims)],
+            dtype=torch.int32,
+            device=str_device,
+        )
+    else:
+        batch_indexed_out_coords = batch_indexed_out_coords
+    N_out = batch_indexed_out_coords.shape[0]
+
+    # Found indices and offsets for each kernel offset
+    in_maps = []
+    out_maps = []
+    num_valid_maps = []
+
+    # Query the hashtable for all kernel offsets
+    all_out_indices = (
+        torch.arange(N_out, device=str_device).repeat(kernel_search_batch_size, 1).view(-1)
     )
 
-    if return_type == "indices":
-        return found_in_coord_index
+    # Generate kernel offsets
+    offsets = kernel_offsets_from_size(
+        kernel_size, kernel_dilation, center_offset=kernel_center_offset
+    ).to(str_device)
 
-    assert return_type == "offsets"
-    # Return the kernel map
-    found_in_coord_index_bool = found_in_coord_index >= 0
-    in_maps = found_in_coord_index[found_in_coord_index_bool]
+    for batch_start in range(0, num_total_kernels, kernel_search_batch_size):
+        batch_end = min(batch_start + kernel_search_batch_size, num_total_kernels)
+        num_kernels_in_batch = batch_end - batch_start
+        curr_offsets = offsets[batch_start:batch_end]
 
-    out_maps = []
-    out_indices = torch.arange(len(batched_query_coords), device=str(device_wp))
+        # Apply offsets in batch and query output + offsets. Add the offsets in the expanded dimension
+        # KND + K1D -> KND
+        new_batch_indexed_out_coords = batch_indexed_out_coords.unsqueeze(
+            0
+        ) + curr_offsets.unsqueeze(1)
+        new_batch_indexed_out_coords = new_batch_indexed_out_coords.view(-1, num_spatial_dims + 1)
+        new_batch_indexed_out_coords_wp = wp.from_torch(new_batch_indexed_out_coords)
 
-    num_valid_maps = []
-    for i in range(len(kernel_offsets)):
-        out_maps.append(out_indices[found_in_coord_index_bool[i]])
-        num_valid_maps.append(found_in_coord_index_bool[i].sum().item())
+        # Query the hashtable for all new coordinates at once
+        in_indices_wp = in_hashmap.search(new_batch_indexed_out_coords_wp)
+        in_indices = wp.to_torch(in_indices_wp)
 
+        # Get the valid indices and offsets.
+        # valid indices are all >= 0 and offsets [0, N1, N1+N2, N1+N2+N3, ..., N1+...+N_kernel_batch] for N1, N2, N3 being the number of valid indices for each kernel offset
+        valid_in_indices_bool = in_indices >= 0
+        # Reshape valid indices to [kernel_batch, N_out] to get the number of valid indices for each kernel offset
+        num_valid_in_indices = valid_in_indices_bool.view(num_kernels_in_batch, -1).sum(dim=1)
+        # Compress indices to the valid indices
+        valid_in_indices_int = in_indices[valid_in_indices_bool]
+        if num_kernels_in_batch < kernel_search_batch_size:
+            valid_out_indices_int = all_out_indices[: len(valid_in_indices_bool)][
+                valid_in_indices_bool
+            ]
+        else:
+            valid_out_indices_int = all_out_indices[valid_in_indices_bool]
+
+        in_maps.append(valid_in_indices_int)
+        out_maps.append(valid_out_indices_int)
+        num_valid_maps.append(num_valid_in_indices)
+
+    # Concatenate all the maps
+    in_maps = torch.cat(in_maps, dim=0)
     out_maps = torch.cat(out_maps, dim=0)
-    num_valid_maps = torch.tensor(num_valid_maps)
+    num_valid_maps = torch.cat(num_valid_maps, dim=0)
     # convert the num_valid_maps to an offset
     offsets = torch.cumsum(num_valid_maps, dim=0)
     # prepend 0 to the num_valid_maps
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0).to(str(device_wp))
+    offsets = torch.cat([torch.zeros(1, dtype=torch.int32, device=str_device), offsets], dim=0)
 
     return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
 
@@ -463,8 +521,6 @@ def kernel_map_from_size(
     # Create a vector hashtable for the batched coordinates
     hashtable = VectorHashTable.from_keys(batch_indexed_in_coords_wp)
 
-    num_total_kernels = np.prod(kernel_size)
-
     # Found indices and offsets for each kernel offset
     in_maps = []
     out_maps = []
@@ -480,7 +536,6 @@ def kernel_map_from_size(
         kernel_size, kernel_dilation, center_offset=kernel_center_offset
     ).to(device)
 
-    # TODO(cchoy): replace the inner loop with the kernel_map_from_offsets
     for batch_start in range(0, num_total_kernels, kernel_search_batch_size):
         batch_end = min(batch_start + kernel_search_batch_size, num_total_kernels)
         num_kernels_in_batch = batch_end - batch_start
