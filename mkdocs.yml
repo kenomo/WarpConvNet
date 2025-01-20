@@ -1,0 +1,95 @@
+site_name: WarpConvNet
+site_description: NVIDIA Internal Library for Sparse Convolutions
+repo_url: https://gitlab-master.nvidia.com/3dmmllm/warp
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - search.share
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [warpconvnet]
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 2
+            docstring_style: numpy
+            show_signature_annotations: true
+            separate_signature: true
+            show_if_no_docstring: false
+            filters: ["!^_"]  # Hide private members
+            docstring_section_style: spacy
+          import:
+            - https://docs.python.org/3/objects.inv
+            - https://pytorch.org/docs/stable/objects.inv
+          selection:
+            docstring_style: numpy
+            inherited_members: true
+            filters:
+              - "!^_"  # Hide private members
+              - "^__init__$"  # But show __init__
+
+markdown_extensions:
+  - pymdownx.arithmatex:  # For LaTeX math equations
+      generic: true
+  - pymdownx.highlight:   # For code highlighting
+      anchor_linenums: true
+  - pymdownx.superfences  # For nested code blocks
+  - pymdownx.details     # For collapsible sections
+  - admonition          # For note boxes
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting_started/installation.md
+    - Quick Start: getting_started/quickstart.md
+  - User Guide:
+    - Basic Concepts: user_guide/concepts.md
+    - Sparse Convolutions: user_guide/sparse_convolutions.md
+    - Point Convolutions: user_guide/point_convolutions.md
+    - Normalizations: user_guide/normalizations.md
+  - API Reference:
+    - Core: api/core.md
+    - Dataset: api/dataset.md
+    - Geometry: api/geometry.md
+    - Models: api/models.md
+    - Neural Networks: api/nn.md
+    - Operations: api/ops.md
+    - Utils: api/utils.md
+    - Types: api/types.md
+    - Miscellaneous: api/misc.md
+  - Examples:
+    - ScanNet: examples/scannet.md
+    - ModelNet: examples/modelnet.md
+  - Contributing: contributing.md

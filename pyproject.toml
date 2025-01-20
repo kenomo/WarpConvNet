@@ -15,14 +15,25 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "torch-scatter", "jaxtyping"]
+dependencies = ["numpy", "torch", "warp-lang>=1.5", "torch-scatter", "jaxtyping"]
 dynamic = ["version"]
 
 [project.urls]
 GitLab = "https://gitlab.nvidia.com/3dmmllm/warpconvnet"
+Documentation = "https://gitlab.nvidia.com/3dmmllm/warpconvnet/docs"
 
 [project.optional-dependencies]
-dev = ["pre-commit", "coverage[toml]"]
+dev = [
+    "pre-commit",
+    "coverage[toml]",
+]
+
+docs = [
+    "mkdocs>=1.4.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings[python]>=0.20.0",
+    "pymdown-extensions>=9.0.0",
+]
 
 models = [
     "h5py",
@@ -33,11 +44,16 @@ models = [
 
 all = [
     "warpconvnet[dev]",
+    "warpconvnet[docs]",
     "warpconvnet[models]",
 ]
 
+[project.scripts]
+warpconvnet-docs = "scripts.serve_docs:serve_docs"
+warpconvnet-build-docs = "scripts.build_docs:build_docs"
+
 [tool.setuptools.packages.find]
-include = ["warpconvnet*"]
+include = ["warpconvnet*", "scripts*"]
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION.md"] }

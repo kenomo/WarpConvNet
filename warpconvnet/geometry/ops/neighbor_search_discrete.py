@@ -392,18 +392,23 @@ def _kernel_map_from_offsets(
 @torch.no_grad()
 def _kernel_map_from_size(
     in_hashmap: HashStruct,
-    batched_query_coords: Int[Tensor, "N 4"],
+    batched_query_coords: Int[Tensor, "N D"],
     kernel_sizes: Tuple[int, ...],
     return_type: Literal["indices", "offsets"] = "offsets",
 ) -> Int[Tensor, "K N"] | DiscreteNeighborSearchResult:
     """
-    Compute the kernel map (input index, output index) for each kernel offset using cached hashmap
+    Compute the kernel map (input index, output index) for each kernel offset using cached hashmap.
+    Supports arbitrary number of spatial dimensions.
     """
     device_wp = in_hashmap.table_kvs.device  # string device from warp array
-    assert device_wp == str(
-        batched_query_coords.device
-    ), f"{device_wp} != {str(batched_query_coords.device)}"
-    assert batched_query_coords.shape[1] == len(kernel_sizes) + 1
+    device_torch = batched_query_coords.device
+    assert str(device_wp) == str(
+        device_torch
+    ), f"warp device {device_wp} != torch device {device_torch}"
+
+    num_dims = batched_query_coords.shape[1]
+    assert num_dims in (3, 4), f"Expected 3 or 4 dimensions, got {num_dims}"
+    assert len(kernel_sizes) == num_dims - 1
 
     num_kernels = np.prod(kernel_sizes)
     # Allocate output of size K x N
@@ -412,21 +417,44 @@ def _kernel_map_from_size(
         dtype=wp.int32,
         device=device_wp,
     )
-    batched_query_coords_wp = wp.from_torch(batched_query_coords, dtype=wp.vec4i)
-    kernel_sizes_wp = wp.vec3i(kernel_sizes)
 
-    # Launch the kernel
-    wp.launch(
-        kernel=conv_kernel_map_vec4i,
-        dim=len(batched_query_coords),
-        inputs=[
-            in_hashmap,
-            batched_query_coords_wp,
-            kernel_sizes_wp,
-            found_in_coord_index_wp,
-        ],
-        device=device_wp,
-    )
+    if num_dims == 4:
+        # Use existing vec4i implementation for 4D coordinates
+        batched_query_coords_wp = wp.from_torch(batched_query_coords, dtype=wp.vec4i)
+        kernel_sizes_wp = wp.vec3i(kernel_sizes)
+
+        wp.launch(
+            kernel=conv_kernel_map_vec4i,
+            dim=len(batched_query_coords),
+            inputs=[
+                in_hashmap,
+                batched_query_coords_wp,
+                kernel_sizes_wp,
+                found_in_coord_index_wp,
+            ],
+            device=device_wp,
+        )
+    else:
+        # Use array implementation for non 4D coordinates
+        batched_query_coords_wp = wp.from_torch(batched_query_coords)
+        # Generate kernel offsets
+        offsets = kernel_offsets_from_size(kernel_sizes, (1,) * len(kernel_sizes)).to(device_torch)
+        kernel_offsets_wp = wp.from_torch(offsets)
+        scratch_coords_wp = wp.empty_like(batched_query_coords_wp)
+
+        wp.launch(
+            kernel=conv_kernel_map_arr,
+            dim=len(batched_query_coords),
+            inputs=[
+                in_hashmap,
+                batched_query_coords_wp,
+                scratch_coords_wp,
+                kernel_offsets_wp,
+                found_in_coord_index_wp,
+            ],
+            device=device_wp,
+        )
+
     return _kernel_map_search_to_result(found_in_coord_index_wp, return_type)
 
 
