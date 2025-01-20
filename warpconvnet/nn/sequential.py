@@ -3,14 +3,14 @@ from typing import Tuple
 import torch
 import torch.nn as nn
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.nn.base_module import BaseSpatialModule
 
 
-def run_forward(module: nn.Module, x: SpatialFeatures, in_sf: SpatialFeatures):
-    if isinstance(module, BaseSpatialModule) and isinstance(x, SpatialFeatures):
+def run_forward(module: nn.Module, x: Geometry, in_sf: Geometry):
+    if isinstance(module, BaseSpatialModule) and isinstance(x, Geometry):
         return module(x), in_sf
-    elif not isinstance(module, BaseSpatialModule) and isinstance(x, SpatialFeatures):
+    elif not isinstance(module, BaseSpatialModule) and isinstance(x, Geometry):
         in_sf = x
         x = module(x.feature_tensor)
     elif isinstance(x, torch.Tensor) and isinstance(module, BaseSpatialModule):
@@ -22,10 +22,10 @@ def run_forward(module: nn.Module, x: SpatialFeatures, in_sf: SpatialFeatures):
     return x, in_sf
 
 
-def tuple_run_forward(module: nn.Module, xs: Tuple[SpatialFeatures], in_sf: SpatialFeatures):
-    if isinstance(module, BaseSpatialModule) and isinstance(xs[0], SpatialFeatures):
+def tuple_run_forward(module: nn.Module, xs: Tuple[Geometry], in_sf: Geometry):
+    if isinstance(module, BaseSpatialModule) and isinstance(xs[0], Geometry):
         return module(xs[0], *xs[1:]), in_sf
-    elif not isinstance(module, BaseSpatialModule) and isinstance(xs[0], SpatialFeatures):
+    elif not isinstance(module, BaseSpatialModule) and isinstance(xs[0], Geometry):
         in_sf = xs[0]
         xs = (module(xs[0].feature_tensor), *xs[1:])
     elif isinstance(xs[0], torch.Tensor) and isinstance(module, BaseSpatialModule):
@@ -45,10 +45,8 @@ class Sequential(nn.Sequential, BaseSpatialModule):
     spatial features object and will become more efficient.
     """
 
-    def forward(self, x: SpatialFeatures):
-        assert isinstance(
-            x, SpatialFeatures
-        ), f"Expected BatchedSpatialFeatures, got {type(x)}"
+    def forward(self, x: Geometry):
+        assert isinstance(x, Geometry), f"Expected BatchedSpatialFeatures, got {type(x)}"
 
         in_sf = x
         for module in self:
@@ -69,7 +67,7 @@ class TupleSequential(Sequential, BaseSpatialModule):
         super().__init__(*args)
         self.tuple_layer = tuple_layer
 
-    def forward(self, *xs: Tuple[SpatialFeatures]):
+    def forward(self, *xs: Tuple[Geometry]):
         x = xs[0]
         in_sf = x
         for i, module in enumerate(self):

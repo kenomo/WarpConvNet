@@ -3,21 +3,19 @@ from typing import Callable, Sequence
 import torch
 import torch.nn.functional as F
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 
 
 def apply_feature_transform(
-    input: SpatialFeatures,
+    input: Geometry,
     transform: Callable,
 ):
-    assert isinstance(
-        input, SpatialFeatures
-    ), f"Expected BatchedSpatialFeatures, got {type(input)}"
+    assert isinstance(input, Geometry), f"Expected BatchedSpatialFeatures, got {type(input)}"
     return input.replace(batched_features=transform(input.feature_tensor))
 
 
 def create_activation_function(torch_func):
-    def wrapper(input: SpatialFeatures):
+    def wrapper(input: Geometry):
         return apply_feature_transform(input, torch_func)
 
     return wrapper
@@ -37,7 +35,7 @@ log_softmax = create_activation_function(F.log_softmax)
 
 # Normalization functions
 def create_norm_function(torch_norm_func):
-    def wrapper(input: SpatialFeatures, *args, **kwargs):
+    def wrapper(input: Geometry, *args, **kwargs):
         return apply_feature_transform(input, lambda x: torch_norm_func(x, *args, **kwargs))
 
     return wrapper
@@ -55,12 +53,12 @@ group_norm = create_norm_function(F.group_norm)
 
 
 # Concatenation
-def cat(*inputs: SpatialFeatures, dim: int = -1):
+def cat(*inputs: Geometry, dim: int = -1):
     # If called with a single sequence argument, unpack it
     if len(inputs) == 1 and isinstance(inputs[0], Sequence):
         inputs = inputs[0]
     assert all(
-        isinstance(input, SpatialFeatures) for input in inputs
+        isinstance(input, Geometry) for input in inputs
     ), f"Expected all inputs to be BatchedSpatialFeatures, got {type(inputs)}"
     assert all(
         torch.allclose(input.offsets, inputs[0].offsets) for input in inputs

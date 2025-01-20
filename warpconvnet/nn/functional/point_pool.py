@@ -5,7 +5,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     NeighborSearchResult,
     batched_knn_search,
@@ -63,7 +63,7 @@ def _pool_by_random_sample(
     pc: "PointCollection",  # noqa: F821
     downsample_voxel_size: Optional[float] = None,
     return_type: Literal["point", "sparse"] = "point",
-) -> SpatialFeatures:
+) -> Geometry:
     from warpconvnet.geometry.point_collection import PointCollection
     from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
@@ -102,7 +102,7 @@ def _pool_by_max_num_points(
     downsample_max_num_points: Optional[int] = None,
     return_type: Literal["point", "sparse"] = "point",
     return_neighbor_search_result: bool = False,
-) -> SpatialFeatures:
+) -> Geometry:
     from warpconvnet.geometry.point_collection import PointCollection
     from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
@@ -192,7 +192,7 @@ def point_pool(
     return_neighbor_search_result: bool = False,
     return_to_unique: bool = False,
     unique_method: Literal["torch", "ravel", "morton"] = "torch",
-) -> SpatialFeatures:
+) -> Geometry:
     """
     Pool points in a point cloud.
     When downsample_max_num_points is provided, the point cloud will be downsampled to the number of points.

@@ -2,31 +2,31 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import (
-    CatBatchedFeatures,
-    PadBatchedFeatures,
-    SpatialFeatures,
+from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.features.cat import (
+    CatFeatures,
 )
-from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
+from warpconvnet.geometry.features.pad import PadFeatures
+from warpconvnet.ops.batch_copy import cat_to_pad_tensor, pad_to_cat_tensor
 
 
 def bmm(
-    sf: SpatialFeatures,
+    sf: Geometry,
     weights: Float[Tensor, "B C_in C_out"],
-) -> SpatialFeatures:
+) -> Geometry:
     """
     Batch matrix multiplication.
     """
     assert sf.batch_size == weights.shape[0]
-    if isinstance(sf.batched_features, CatBatchedFeatures):
-        bat_features = cat_to_pad(sf.feature_tensor, sf.offsets)  # BxNxC_in
+    if isinstance(sf.batched_features, CatFeatures):
+        bat_features = cat_to_pad_tensor(sf.feature_tensor, sf.offsets)  # BxNxC_in
         out_bat_features = torch.bmm(bat_features, weights)
-        out_features = pad_to_cat(out_bat_features, sf.offsets)
-        out_features = CatBatchedFeatures(out_features, sf.offsets)
-    elif isinstance(sf.batched_features, PadBatchedFeatures):
+        out_features = pad_to_cat_tensor(out_bat_features, sf.offsets)
+        out_features = CatFeatures(out_features, sf.offsets)
+    elif isinstance(sf.batched_features, PadFeatures):
         bat_features = sf.feature_tensor  # BxMxC_in
         out_bat_features = torch.bmm(bat_features, weights)  # BxMxC_out
-        out_features = PadBatchedFeatures(out_bat_features, sf.offsets)
+        out_features = PadFeatures(out_bat_features, sf.offsets)
     else:
         raise ValueError(f"Unsupported batched features type: {type(sf.batched_features)}")
     return sf.replace(

@@ -53,8 +53,7 @@ def _copy_batch_kernel2_native(
     num_out_features_rows: int,
     C: int,
     num_copy: int,
-):
-    ...
+): ...
 
 
 @wp.kernel
@@ -154,7 +153,7 @@ def copy_batch_torch(
     return out_features
 
 
-def cat_to_pad(
+def cat_to_pad_tensor(
     in_features: Float[Tensor, "N F"],
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
     backend: Literal["torch", "warp"] = "torch",
@@ -166,6 +165,7 @@ def cat_to_pad(
 
     Torch is much faster in general.
     """
+    assert backend in ["torch", "warp"], f"Invalid backend: {backend}. Must be 'torch' or 'warp'."
     assert in_features.ndim == 2
     if backend == "torch":
         out_features = copy_batch_torch(in_features, row_splits, pad_multiple)
@@ -177,7 +177,7 @@ def cat_to_pad(
     return out_features
 
 
-def pad_to_cat(
+def pad_to_cat_tensor(
     in_features: Float[Tensor, "B M F"],
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
 ) -> Float[Tensor, "N F"]:

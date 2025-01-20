@@ -8,7 +8,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.autograd import Function
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.ops.neighbor_search_discrete import (
     DiscreteNeighborSearchResult,
     KernelMapCache,
@@ -234,7 +234,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
 
 
 def spatially_sparse_conv(
-    input_sparse_tensor: SpatialFeatures,
+    input_sparse_tensor: Geometry,
     weight: Float[Tensor, "K C_out C_in"],
     kernel_size: Union[int, List[int], Tuple[int, ...]],
     stride: Union[int, List[int], Tuple[int, ...]] = 1,
@@ -243,14 +243,14 @@ def spatially_sparse_conv(
     kernel_search_batch_size: Optional[int] = None,
     kernel_matmul_batch_size: int = 2,
     generative: bool = False,
-    output_spatially_sparse_tensor: Optional[SpatialFeatures] = None,
+    output_spatially_sparse_tensor: Optional[Geometry] = None,
     transposed: bool = False,
     conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
     stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     stride_reduce: str = "max",
     out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
     compute_dtype: torch.dtype = torch.float32,
-) -> SpatialFeatures:
+) -> Geometry:
     """
     Perform spatially sparse convolution on the input tensor using the specified algorithm.
     Spatially sparse and feature sparse is not supported yet.
@@ -363,13 +363,13 @@ def spatially_sparse_conv(
 
 
 def generate_output_coords_and_kernel_map(
-    input_sparse_tensor: SpatialFeatures,
+    input_sparse_tensor: Geometry,
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     stride: Tuple[int, ...],
     generative: bool,
     transposed: bool,
-    output_spatially_sparse_tensor: Optional[SpatialFeatures],
+    output_spatially_sparse_tensor: Optional[Geometry],
     kernel_search_batch_size: int,
     stride_mode: STRIDED_CONV_MODE,
     out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",

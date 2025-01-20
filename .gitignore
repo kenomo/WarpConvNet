@@ -23,3 +23,11 @@ outputs/
 wandb/
 slurm_outputs/
 results/
+
+# Python cache
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# Documentation build
+site/

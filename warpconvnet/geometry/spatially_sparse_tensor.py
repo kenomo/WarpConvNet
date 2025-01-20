@@ -4,15 +4,15 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.core.hashmap import VectorHashTable
-from warpconvnet.core.serialization import POINT_ORDERING, morton_code
-from warpconvnet.geometry.base_geometry import (
-    BatchedCoordinates,
-    CatBatchedFeatures,
-    PadBatchedFeatures,
-    SpatialFeatures,
+from warpconvnet.geometry.coords.spatial.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.base.coords import Coords
+from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.utils.batch import (
     to_batched_features,
 )
+from warpconvnet.geometry.features.cat import CatFeatures
+from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
 from warpconvnet.utils.batch_index import (
     batch_indexed_coordinates,
@@ -23,7 +23,7 @@ from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.ravel import ravel_multi_index
 
 
-class BatchedDiscreteCoordinates(BatchedCoordinates):
+class BatchedDiscreteCoordinates(Coords):
     voxel_size: float
     voxel_origin: Float[Tensor, "D"]  # noqa: F821
     tensor_stride: Optional[Tuple[int, ...]]
@@ -31,7 +31,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
 
     def __init__(
         self,
-        batched_tensor: (List[Float[Tensor, "N D"]] | Float[Tensor, "N D"]),  # noqa: F722,F821
+        batched_tensor: List[Float[Tensor, "N D"]] | Float[Tensor, "N D"],  # noqa: F722,F821
         offsets: Optional[List[int]] = None,
         voxel_size: Optional[float] = None,
         voxel_origin: Optional[Float[Tensor, "D"]] = None,  # noqa: F821
@@ -70,7 +70,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         self.check()
 
     def check(self):
-        BatchedCoordinates.check(self)
+        Coords.check(self)
         assert self.batched_tensor.dtype in [
             torch.int32,
             torch.int64,
@@ -126,7 +126,7 @@ class BatchedDiscreteCoordinates(BatchedCoordinates):
         self.tensor_stride = ntuple(tensor_stride, ndim=self.num_spatial_dims)
 
 
-class SpatiallySparseTensor(SpatialFeatures):
+class SpatiallySparseTensor(Geometry):
     def __init__(
         self,
         batched_coordinates: (
@@ -136,8 +136,8 @@ class SpatiallySparseTensor(SpatialFeatures):
             List[Float[Tensor, "N C"]]
             | Float[Tensor, "N C"]
             | Float[Tensor, "B M C"]
-            | CatBatchedFeatures
-            | PadBatchedFeatures
+            | CatFeatures
+            | PadFeatures
         ),
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
         device: Optional[str] = None,
@@ -172,13 +172,13 @@ class SpatiallySparseTensor(SpatialFeatures):
                 batched_coordinates.set_tensor_stride(tensor_stride)
 
         if isinstance(batched_features, list):
-            batched_features = CatBatchedFeatures(batched_features, device=device)
+            batched_features = CatFeatures(batched_features, device=device)
         elif isinstance(batched_features, Tensor):
             batched_features = to_batched_features(
                 batched_features, batched_coordinates.offsets, device=device
             )
 
-        SpatialFeatures.__init__(self, batched_coordinates, batched_features, **kwargs)
+        Geometry.__init__(self, batched_coordinates, batched_features, **kwargs)
 
     @classmethod
     def from_dense(
@@ -214,7 +214,7 @@ class SpatiallySparseTensor(SpatialFeatures):
                 batched_coordinates=BatchedDiscreteCoordinates(
                     non_zero_inds[:, 1:], offsets=offsets
                 ),
-                batched_features=CatBatchedFeatures(non_zero_feats, offsets=offsets),
+                batched_features=CatFeatures(non_zero_feats, offsets=offsets),
                 **kwargs,
             )
         else:
@@ -347,7 +347,7 @@ class SpatiallySparseTensor(SpatialFeatures):
             return self
 
         assert isinstance(
-            self.batched_features, CatBatchedFeatures
+            self.batched_features, CatFeatures
         ), "Features must be a CatBatchedFeatures to sort."
 
         code, perm = morton_code(self.coordinate_tensor, self.offsets, ordering)  # noqa: F821
@@ -358,7 +358,7 @@ class SpatiallySparseTensor(SpatialFeatures):
             batched_coordinates=BatchedDiscreteCoordinates(
                 self.coordinate_tensor[perm], self.offsets
             ),
-            batched_features=CatBatchedFeatures(self.feature_tensor[perm], self.offsets),
+            batched_features=CatFeatures(self.feature_tensor[perm], self.offsets),
             **kwargs,
         )
 
@@ -368,7 +368,7 @@ class SpatiallySparseTensor(SpatialFeatures):
             self.offsets,
         )
         coords = BatchedDiscreteCoordinates(self.coordinate_tensor[unique_indices], batch_offsets)
-        feats = CatBatchedFeatures(self.feature_tensor[unique_indices], batch_offsets)
+        feats = CatFeatures(self.feature_tensor[unique_indices], batch_offsets)
         return self.__class__(coords, feats, **self.extra_attributes)
 
     @property

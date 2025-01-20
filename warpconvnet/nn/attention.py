@@ -7,15 +7,15 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import (
-    CatBatchedFeatures,
-    CatPatchedFeatures,
-    SpatialFeatures,
+from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.features.cat import (
+    CatFeatures,
 )
+from warpconvnet.geometry.features.patch import CatPatchFeatures
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.normalizations import LayerNorm, RMSNorm
-from warpconvnet.ops.batch_copy import cat_to_pad, pad_to_cat
+from warpconvnet.ops.batch_copy import cat_to_pad_tensor, pad_to_cat_tensor
 from warpconvnet.types import NestedTensor
 
 
@@ -93,7 +93,7 @@ class ToAttention(BaseSpatialModule):
             )
 
     def forward(
-        self, x: SpatialFeatures
+        self, x: Geometry
     ) -> Tuple[Float[Tensor, "B M C"], Float[Tensor, "B M C"], Float[Tensor, "B M M"]]:
         if self.out_type == "nested":
             features = x.nested_features
@@ -104,12 +104,12 @@ class ToAttention(BaseSpatialModule):
                 x.offsets,
                 x.offsets.diff(),
             )
-            features = cat_to_pad(features, offsets)
+            features = cat_to_pad_tensor(features, offsets)
             coordinates = x.coordinate_tensor
 
         if self.use_encoding:
             pos_enc = self.encoding(coordinates)
-            pos_enc = cat_to_pad(pos_enc, offsets)
+            pos_enc = cat_to_pad_tensor(pos_enc, offsets)
         else:
             pos_enc = None
         mask = offset_to_mask(features, offsets, features.shape[1])
@@ -117,8 +117,8 @@ class ToAttention(BaseSpatialModule):
 
 
 class ToSpatialFeatures(nn.Module):
-    def forward(self, x: Float[Tensor, "B N C"], target: SpatialFeatures) -> SpatialFeatures:
-        feats = pad_to_cat(x, target.offsets)
+    def forward(self, x: Float[Tensor, "B N C"], target: Geometry) -> Geometry:
+        feats = pad_to_cat_tensor(x, target.offsets)
         return target.replace(batched_features=feats)
 
 
@@ -229,7 +229,7 @@ class SpatialFeatureAttention(Attention):
         )
         self.from_attn = ToSpatialFeatures()
 
-    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
+    def forward(self, x: Geometry) -> Geometry:
         features, pos_enc, mask, num_points = self.to_attn(x)
         y = super().forward(features, pos_enc, mask, num_points)
         y = self.from_attn(y, x)
@@ -263,13 +263,13 @@ class NestedAttention(BaseSpatialModule):
 
     def forward(
         self,
-        query: Union[SpatialFeatures, Tensor, NestedTensor],
-        key: Optional[SpatialFeatures] = None,
-        value: Optional[SpatialFeatures] = None,
+        query: Union[Geometry, Tensor, NestedTensor],
+        key: Optional[Geometry] = None,
+        value: Optional[Geometry] = None,
         query_pos: Optional[Tensor] = None,
         key_pos: Optional[Tensor] = None,
-    ) -> Union[SpatialFeatures, Tensor, NestedTensor]:
-        if isinstance(query, SpatialFeatures):
+    ) -> Union[Geometry, Tensor, NestedTensor]:
+        if isinstance(query, Geometry):
             query_feats = query.nested_features
         elif query.is_nested:
             query_feats = query
@@ -283,7 +283,7 @@ class NestedAttention(BaseSpatialModule):
         key_feats = key.nested_features if key is not None else query_feats
         value_feats = value.nested_features if value is not None else key_feats
         if self.pos_enc is not None:
-            assert isinstance(query, SpatialFeatures)
+            assert isinstance(query, Geometry)
             query_pos = self.pos_enc(query.nested_coordinates)
             key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
 
@@ -332,8 +332,8 @@ class NestedAttention(BaseSpatialModule):
         x = self.proj_drop(x)
 
         # Return based on the type of query
-        if isinstance(query, SpatialFeatures):
-            return query.replace(batched_features=CatBatchedFeatures.from_nested(x))
+        if isinstance(query, Geometry):
+            return query.replace(batched_features=CatFeatures.from_nested(x))
         elif query.is_nested:
             return x
         else:
@@ -368,7 +368,7 @@ class PatchAttention(BaseSpatialModule):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x: SpatialFeatures) -> SpatialFeatures:
+    def forward(self, x: Geometry) -> Geometry:
         # Assert that x is serialized
         K = self.patch_size
         skip = x
@@ -384,7 +384,7 @@ class PatchAttention(BaseSpatialModule):
             inverse_perm = torch.argsort(perm)
             x = x.replace(batched_features=x.feature_tensor[perm])
 
-        patch_feats: CatPatchedFeatures = CatPatchedFeatures.from_cat(x.batched_features, K)
+        patch_feats: CatPatchFeatures = CatPatchFeatures.from_cat(x.batched_features, K)
         feats = patch_feats.batched_tensor  # MxC
         M, C = feats.shape
         qkv = (
@@ -433,7 +433,7 @@ class PatchAttention(BaseSpatialModule):
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
-        out_patch_feats: CatBatchedFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
+        out_patch_feats: CatFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
 
         if self.rand_perm_patch:
             out_patch_feats = out_patch_feats.batched_tensor[inverse_perm]
@@ -457,13 +457,13 @@ class FeedForward(BaseSpatialModule):
         self.w3 = nn.Linear(dim, hidden_dim, bias=False)
 
     def forward(
-        self, x: Union[Float[Tensor, "B N D"], SpatialFeatures]
-    ) -> Union[Float[Tensor, "B N D"], SpatialFeatures]:
-        feat = x.features if isinstance(x, SpatialFeatures) else x
+        self, x: Union[Float[Tensor, "B N D"], Geometry]
+    ) -> Union[Float[Tensor, "B N D"], Geometry]:
+        feat = x.features if isinstance(x, Geometry) else x
         # Apply feed forward
         feat = self.w2(F.silu(self.w1(feat)) * self.w3(feat))
         # Return based on the type of x
-        return x.replace(batched_features=feat) if isinstance(x, SpatialFeatures) else feat
+        return x.replace(batched_features=feat) if isinstance(x, Geometry) else feat
 
 
 class TransformerBlock(BaseSpatialModule):
@@ -501,10 +501,10 @@ class TransformerBlock(BaseSpatialModule):
 
     def forward(
         self,
-        x: SpatialFeatures,
+        x: Geometry,
         *args: Any,
         **kwargs: Any,
-    ) -> SpatialFeatures:
+    ) -> Geometry:
         h = x + self.attention(self.attention_norm(x), *args, **kwargs)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out

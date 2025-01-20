@@ -4,14 +4,14 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.core.serialization import POINT_ORDERING, morton_code
-from warpconvnet.geometry.base_geometry import (
-    BatchedCoordinates,
-    CatBatchedFeatures,
-    PadBatchedFeatures,
-    SpatialFeatures,
+from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.base.coords import Coords
+from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.utils.batch import (
     to_batched_features,
 )
+from warpconvnet.geometry.features.cat import CatFeatures
+from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
     ContinuousNeighborSearchArgs,
     NeighborSearchCache,
@@ -48,9 +48,9 @@ def random_downsample(
     return sampled_indices, offsets
 
 
-class BatchedContinuousCoordinates(BatchedCoordinates):
+class BatchedContinuousCoordinates(Coords):
     def check(self):
-        BatchedCoordinates.check(self)
+        Coords.check(self)
         assert self.batched_tensor.shape[-1] == 3, "Coordinates must have 3 dimensions"
 
     def voxel_downsample(self, voxel_size: float):
@@ -77,7 +77,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
     def neighbors(
         self,
         search_args: ContinuousNeighborSearchArgs,
-        query_coords: Optional["BatchedCoordinates"] = None,
+        query_coords: Optional["Coords"] = None,
     ) -> NeighborSearchResult:
         """
         Returns CSR format neighbor indices
@@ -85,9 +85,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         if query_coords is None:
             query_coords = self
 
-        assert isinstance(
-            query_coords, BatchedCoordinates
-        ), "query_coords must be BatchedCoordinates"
+        assert isinstance(query_coords, Coords), "query_coords must be BatchedCoordinates"
 
         return neighbor_search(
             self.batched_tensor,
@@ -118,7 +116,7 @@ class BatchedContinuousCoordinates(BatchedCoordinates):
         )
 
 
-class PointCollection(SpatialFeatures):
+class PointCollection(Geometry):
     """
     Interface class for collections of points
 
@@ -135,8 +133,8 @@ class PointCollection(SpatialFeatures):
             List[Float[Tensor, "N C"]]
             | Float[Tensor, "N C"]
             | Float[Tensor, "B M C"]
-            | CatBatchedFeatures
-            | PadBatchedFeatures
+            | CatFeatures
+            | PadFeatures
         ),  # noqa: F722,F821
         offsets: Optional[Int[Tensor, "B + 1"]] = None,  # noqa: F722,F821
         device: Optional[str] = None,
@@ -164,13 +162,13 @@ class PointCollection(SpatialFeatures):
             )
 
         if isinstance(batched_features, list):
-            batched_features = CatBatchedFeatures(batched_features, device=device)
+            batched_features = CatFeatures(batched_features, device=device)
         elif isinstance(batched_features, Tensor):
             batched_features = to_batched_features(
                 batched_features, batched_coordinates.offsets, device=device
             )
 
-        SpatialFeatures.__init__(
+        Geometry.__init__(
             self,
             batched_coordinates,
             batched_features,
@@ -202,7 +200,7 @@ class PointCollection(SpatialFeatures):
                 batched_tensor=self.coordinate_tensor[perm],
                 offsets=self.offsets,
             ),
-            batched_features=CatBatchedFeatures(
+            batched_features=CatFeatures(
                 batched_tensor=self.feature_tensor[perm],
                 offsets=self.offsets,
             ),
@@ -221,7 +219,7 @@ class PointCollection(SpatialFeatures):
         extra_args = self.extra_attributes
         extra_args["voxel_size"] = voxel_size
         assert isinstance(
-            self.batched_features, CatBatchedFeatures
+            self.batched_features, CatFeatures
         ), "Voxel downsample is only supported for CatBatchedFeatures"
         if reduction == REDUCTIONS.RANDOM:
             to_unique_indicies, unique_offsets = voxel_downsample_random_indices(
@@ -234,7 +232,7 @@ class PointCollection(SpatialFeatures):
                     batched_tensor=self.coordinate_tensor[to_unique_indicies],
                     offsets=unique_offsets,
                 ),
-                batched_features=CatBatchedFeatures(
+                batched_features=CatFeatures(
                     batched_tensor=self.feature_tensor[to_unique_indicies],
                     offsets=unique_offsets,
                 ),
@@ -270,9 +268,7 @@ class PointCollection(SpatialFeatures):
                 batched_tensor=self.coordinate_tensor[to_unique.to_unique_indices],
                 offsets=unique_offsets,
             ),
-            batched_features=CatBatchedFeatures(
-                batched_tensor=down_features, offsets=unique_offsets
-            ),
+            batched_features=CatFeatures(batched_tensor=down_features, offsets=unique_offsets),
             **extra_args,
         )
 
@@ -286,7 +282,7 @@ class PointCollection(SpatialFeatures):
                 batched_tensor=self.coordinate_tensor[sampled_indices],
                 offsets=sample_offsets,
             ),
-            batched_features=CatBatchedFeatures(
+            batched_features=CatFeatures(
                 batched_tensor=self.feature_tensor[sampled_indices],
                 offsets=sample_offsets,
             ),
@@ -296,7 +292,7 @@ class PointCollection(SpatialFeatures):
     def neighbors(
         self,
         search_args: ContinuousNeighborSearchArgs,
-        query_coords: Optional["BatchedCoordinates"] = None,
+        query_coords: Optional["Coords"] = None,
     ) -> NeighborSearchResult:
         """
         Returns CSR format neighbor indices
@@ -304,9 +300,7 @@ class PointCollection(SpatialFeatures):
         if query_coords is None:
             query_coords = self.batched_coordinates
 
-        assert isinstance(
-            query_coords, BatchedCoordinates
-        ), "query_coords must be BatchedCoordinates"
+        assert isinstance(query_coords, Coords), "query_coords must be BatchedCoordinates"
 
         # cache the neighbor search result
         if self.cache is not None:
@@ -364,7 +358,7 @@ class PointCollection(SpatialFeatures):
         # Create BatchedContinuousCoordinates
         batched_coordinates = BatchedContinuousCoordinates(coordinates)
         # Create CatBatchedFeatures
-        batched_features = CatBatchedFeatures(features)
+        batched_features = CatFeatures(features)
 
         return cls(batched_coordinates, batched_features)
 

@@ -6,15 +6,18 @@ import warp as wp
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.core.hashmap import HashMethod, VectorHashTable
-from warpconvnet.core.serialization import morton_code
+from warpconvnet.geometry.coords.spatial.hashmap import HashMethod, VectorHashTable
+from warpconvnet.geometry.coords.spatial.serialization import morton_code
 from warpconvnet.utils.ravel import ravel_multi_index
 
 
 def unique_inverse(
     x: Tensor,
     dim: int = 0,
-) -> Tuple[Int[Tensor, "M C"], Int[Tensor, "N"],]:  # noqa: F821  # noqa: F821  # noqa: F821
+) -> Tuple[
+    Int[Tensor, "M C"],
+    Int[Tensor, "N"],  # noqa: F821
+]:
     """
     Get to_unique_indices and to_orig_indices.
     """

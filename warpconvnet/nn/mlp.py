@@ -5,7 +5,7 @@ import torch.nn as nn
 from jaxtyping import Float
 from torch import Tensor
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.nn.base_module import BaseSpatialModule
 
 __all__ = ["FeatureResidualMLPBlock", "Linear"]
@@ -70,7 +70,7 @@ class Linear(BaseSpatialModule):
         super().__init__()
         self.block = nn.Linear(in_features, out_features, bias=bias)
 
-    def forward(self, x: SpatialFeatures):
+    def forward(self, x: Geometry):
         return x.replace(batched_features=self.block(x.feature_tensor))
 
 
@@ -83,7 +83,7 @@ class LinearNormActivation(BaseSpatialModule):
             nn.ReLU(),
         )
 
-    def forward(self, x: SpatialFeatures):
+    def forward(self, x: Geometry):
         return x.replace(batched_features=self.block(x.feature_tensor))
 
 
@@ -91,5 +91,5 @@ class ResidualMLPBlock(FeatureResidualMLPBlock):
     def __init__(self, in_features: int, out_features: int = None, hidden_features: int = None):
         super().__init__(in_features, out_features, hidden_features)
 
-    def forward(self, x: SpatialFeatures):
+    def forward(self, x: Geometry):
         return x.replace(batched_features=super().forward(x.feature_tensor))

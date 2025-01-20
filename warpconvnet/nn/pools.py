@@ -3,7 +3,7 @@ from typing import Literal, Tuple, Union
 import torch
 import torch.nn as nn
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.nn.base_module import BaseSpatialModule
@@ -56,7 +56,7 @@ class GlobalPool(BaseSpatialModule):
         super().__init__()
         self.reduce = reduce
 
-    def forward(self, x: SpatialFeatures):
+    def forward(self, x: Geometry):
         return global_pool(x, self.reduce)
 
 

@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.core.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.point_collection import PointCollection
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 
@@ -17,9 +17,7 @@ class TestSorting(unittest.TestCase):
         self.pc = PointCollection(self.coords, self.features)
 
         self.voxel_size = 0.01
-        self.st_coords = [
-            torch.floor(coords / self.voxel_size).int() for coords in self.coords
-        ]
+        self.st_coords = [torch.floor(coords / self.voxel_size).int() for coords in self.coords]
         self.st = SpatiallySparseTensor(self.st_coords, self.features)
 
     # Test point collection sorting

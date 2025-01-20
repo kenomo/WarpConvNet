@@ -3,7 +3,7 @@ from typing import Any, Dict, Tuple
 import torch
 import torch.nn as nn
 
-from warpconvnet.geometry.base_geometry import SpatialFeatures
+from warpconvnet.geometry.base.geometry import Geometry
 
 
 class BaseSpatialModule(nn.Module):
@@ -14,7 +14,7 @@ class BaseSpatialModule(nn.Module):
         """Returns the device that the model is on."""
         return next(self.parameters()).device
 
-    def forward(self, x: SpatialFeatures):
+    def forward(self, x: Geometry):
         """Forward pass."""
         raise NotImplementedError
 

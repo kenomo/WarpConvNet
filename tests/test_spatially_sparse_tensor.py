@@ -3,8 +3,8 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.core.hashmap import HashMethod
-from warpconvnet.core.serialization import POINT_ORDERING
+from warpconvnet.geometry.coords.spatial.hashmap import HashMethod
+from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING
 from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.timer import Timer
@@ -58,7 +58,10 @@ class TestSpatiallySparseTensor(unittest.TestCase):
                     to_unique_indices,
                 ) = unique_torch(bcoords, dim=0, return_to_unique_indices=True)
 
-        self.assertTrue(len(unique_index) == len(to_unique_indices), f"{len(unique_index)} != {len(to_unique_indices)}")
+        self.assertTrue(
+            len(unique_index) == len(to_unique_indices),
+            f"{len(unique_index)} != {len(to_unique_indices)}",
+        )
         self.assertTrue((bcoords[unique_index].unique(dim=0) == unique_coords).all())
 
         print(f"Coord size: {coords.batched_tensor.shape}, N unique: {len(unique_index)}")

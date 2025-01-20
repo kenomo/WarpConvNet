@@ -10,7 +10,7 @@ import warp.utils
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.core.hashmap import HashStruct, VectorHashTable, search_func
+from warpconvnet.geometry.coords.spatial.hashmap import HashStruct, VectorHashTable, search_func
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.ntuple import ntuple
 
