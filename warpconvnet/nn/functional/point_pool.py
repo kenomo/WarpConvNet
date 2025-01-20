@@ -10,8 +10,8 @@ from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.geometry.coords.search.knn import (
     batched_knn_search,
 )
-from warpconvnet.geometry.ops.random_sample import random_sample
-from warpconvnet.geometry.ops.voxel_ops import (
+from warpconvnet.geometry.coords.sample import random_downsample
+from warpconvnet.geometry.coords.ops.voxel import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
 )
@@ -113,7 +113,7 @@ def _pool_by_max_num_points(
     else:
         RETURN_CLS = Points
 
-    sample_idx, unique_offsets = random_sample(
+    sample_idx, unique_offsets = random_downsample(
         batch_offsets=pc.offsets,
         num_samples_per_batch=downsample_max_num_points,
     )

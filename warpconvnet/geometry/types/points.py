@@ -11,17 +11,17 @@ from warpconvnet.geometry.coords.search.cache import RealSearchCache
 from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.coords.sample import random_downsample
-from warpconvnet.geometry.coords.search.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.features.cat import CatFeatures
 from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.coords.search.continuous import (
     neighbor_search,
 )
-from warpconvnet.geometry.ops.voxel_ops import (
+from warpconvnet.geometry.coords.ops.voxel import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
 )
-from warpconvnet.geometry.utils.batch import to_batched_features
+from warpconvnet.geometry.features.convert import to_batched_features
 from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.ops.reductions import REDUCTIONS, REDUCTION_TYPES_STR, row_reduction

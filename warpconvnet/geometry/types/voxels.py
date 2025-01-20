@@ -8,11 +8,11 @@ from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.real import RealCoords
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
-from warpconvnet.geometry.coords.search.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.features.cat import CatFeatures
 from warpconvnet.geometry.features.pad import PadFeatures
-from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
-from warpconvnet.geometry.utils.batch import to_batched_features
+from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
+from warpconvnet.geometry.features.convert import to_batched_features
 from warpconvnet.utils.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ravel import ravel_multi_index
 

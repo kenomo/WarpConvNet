@@ -4,7 +4,7 @@ from typing import Literal, Optional, Tuple
 import torch
 from torch.utils.data import Dataset
 
-from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_np
+from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_np
 
 SCANNET_URL = "https://cvg-data.inf.ethz.ch/openscene/data/scannet_processed/scannet_3d.zip"
 

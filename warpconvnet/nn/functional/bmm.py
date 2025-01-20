@@ -6,8 +6,9 @@ from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.features.cat import (
     CatFeatures,
 )
+from warpconvnet.geometry.features.convert import cat_to_pad_tensor
 from warpconvnet.geometry.features.pad import PadFeatures
-from warpconvnet.ops.batch_copy import cat_to_pad_tensor, pad_to_cat_tensor
+from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 
 
 def bmm(

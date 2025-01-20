@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from warpconvnet.geometry.base.features import Features
-from warpconvnet.ops.batch_copy import cat_to_pad_tensor, pad_to_cat_tensor
+from warpconvnet.geometry.features.convert import cat_to_pad_tensor
+from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 from warpconvnet.utils.list_to_batch import list_to_pad_tensor
 from .convert import pad_to_cat, cat_to_pad
 

@@ -7,11 +7,11 @@ from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.coords.sample import random_downsample
-from warpconvnet.geometry.coords.search.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.coords.search.continuous import (
     neighbor_search,
 )
-from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_random_indices
+from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
 
 
 class RealCoords(Coords):

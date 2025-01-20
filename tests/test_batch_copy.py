@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.ops.batch_copy import cat_to_pad_tensor
+from warpconvnet.geometry.features.convert import cat_to_pad_tensor
 from warpconvnet.utils.timer import Timer
 
 

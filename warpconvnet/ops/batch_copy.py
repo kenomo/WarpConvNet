@@ -1,4 +1,4 @@
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -149,51 +149,5 @@ def copy_batch_torch(
     for batch_idx in range(row_splits.shape[0] - 1):
         out_features[batch_idx, : num_points[batch_idx]] = in_features[
             row_splits[batch_idx] : row_splits[batch_idx + 1]
-        ]
-    return out_features
-
-
-def cat_to_pad_tensor(
-    in_features: Float[Tensor, "N F"],
-    row_splits: Int[Tensor, "B+1"],  # noqa: F821
-    backend: Literal["torch", "warp"] = "torch",
-    num_copy_per_thread: Optional[int] = 256,  # constant
-    pad_multiple: Optional[int] = None,
-) -> Float[Tensor, "B M F"]:
-    """
-    Convert a concatenated 2D tensor to a batched 3D tensor.
-
-    Torch is much faster in general.
-    """
-    assert backend in ["torch", "warp"], f"Invalid backend: {backend}. Must be 'torch' or 'warp'."
-    assert in_features.ndim == 2
-    if backend == "torch":
-        out_features = copy_batch_torch(in_features, row_splits, pad_multiple)
-    elif backend == "warp":
-        out_features = copy_batch_warp(in_features, row_splits, num_copy_per_thread, pad_multiple)
-    else:
-        raise ValueError(f"Invalid backend: {backend}")
-
-    return out_features
-
-
-def pad_to_cat_tensor(
-    in_features: Float[Tensor, "B M F"],
-    row_splits: Int[Tensor, "B+1"],  # noqa: F821
-) -> Float[Tensor, "N F"]:
-    """
-    Convert a batched 3D tensor to a concatenated 2D tensor.
-    """
-    assert in_features.ndim == 3
-    tot_num = row_splits[-1]
-    num_points = row_splits.diff()
-    out_features = torch.zeros(
-        (tot_num, in_features.shape[2]),
-        dtype=in_features.dtype,
-        device=in_features.device,
-    )
-    for batch_idx, num_points_in_batch in enumerate(num_points):
-        out_features[row_splits[batch_idx] : row_splits[batch_idx + 1]] = in_features[batch_idx][
-            :num_points_in_batch
         ]
     return out_features

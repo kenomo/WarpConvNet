@@ -259,6 +259,8 @@ def voxel_downsample_np(
     voxel_size: Optional[float] = None,
 ):
     """
+    Numpy based voxel downsampling function. Use it for data processing in data loading.
+
     Args:
         coords: np.ndarray - coordinates
         voxel_size: float - voxel size

@@ -6,9 +6,7 @@ import torch.nn as nn
 
 from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    RealSearchMode,
-)
+from warpconvnet.geometry.coords.search.continuous import RealSearchMode
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding

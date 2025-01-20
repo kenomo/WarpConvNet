@@ -43,14 +43,14 @@ def neighbor_search(
         )
 
     elif search_args.mode == RealSearchMode.KNN:
-        assert search_args.k is not None, "knn_k must be provided for knn search"
+        assert search_args.knn_k is not None, "knn_k must be provided for knn search"
         # M x K
         neighbor_index = batched_knn_search(
             ref_positions=ref_positions,
             ref_offsets=ref_offsets,
             query_positions=query_positions,
             query_offsets=query_offsets,
-            k=search_args.k,
+            k=search_args.knn_k,
         )
         return RealSearchResult(neighbor_index)
 

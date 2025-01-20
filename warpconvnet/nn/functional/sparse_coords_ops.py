@@ -7,7 +7,7 @@ from jaxtyping import Int
 from torch import Tensor
 
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
-from warpconvnet.geometry.coords.search.serialization import morton_code
+from warpconvnet.geometry.coords.ops.serialization import morton_code
 from warpconvnet.geometry.coords.search.discrete import kernel_offsets_from_size
 from warpconvnet.utils.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ntuple import ntuple

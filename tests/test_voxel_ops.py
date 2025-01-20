@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.coords.real import RealCoords
 from warpconvnet.geometry.coords.search.knn import knn_search
-from warpconvnet.geometry.ops.voxel_ops import voxel_downsample_mapping
+from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_mapping
 from warpconvnet.geometry.types.points import (
     Points,
 )

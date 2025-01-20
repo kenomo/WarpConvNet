@@ -27,7 +27,7 @@ class RealSearchConfig:
     # The radius for radius search
     radius: Optional[float]
     # The number of neighbors for knn search
-    knn: Optional[int]
+    knn_k: Optional[int]
     # Grid dim
     grid_dim: Optional[int | Tuple[int, int, int]]
 
@@ -43,14 +43,14 @@ class RealSearchConfig:
 
         self.mode = mode
         self.radius = radius
-        self.knn = k
+        self.knn_k = k
         self.grid_dim = grid_dim
 
     def __repr__(self):
         if self.mode == RealSearchMode.RADIUS:
             out_str = f"{self.mode.name}({self.radius})"
         elif self.mode == RealSearchMode.KNN:
-            out_str = f"{self.mode._name}({self.knn})"
+            out_str = f"{self.mode._name}({self.knn_k})"
         return out_str
 
     def replace(
@@ -63,17 +63,19 @@ class RealSearchConfig:
         return RealSearchConfig(
             mode=mode if mode is not None else self.mode,
             radius=radius if radius is not None else self.radius,
-            k=k if k is not None else self.knn,
+            k=k if k is not None else self.knn_k,
             grid_dim=grid_dim if grid_dim is not None else self.grid_dim,
         )
 
     def __hash__(self):
-        return int(hash(self.mode) ^ hash(self.radius) ^ hash(self.knn))
+        return int(hash(self.mode) ^ hash(self.radius) ^ hash(self.knn_k))
 
     def __eq__(self, other):
         if not isinstance(other, RealSearchConfig):
             return False
-        return self.mode == other.mode and self.radius == other.radius and self.knn == other.knn
+        return (
+            self.mode == other.mode and self.radius == other.radius and self.knn_k == other.knn_k
+        )
 
 
 @dataclass
