@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.points import Points
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.global_pool import global_pool
 from warpconvnet.nn.functional.point_pool import point_pool
@@ -31,7 +31,7 @@ class SparsePool(BaseSpatialModule):
     def __repr__(self):
         return f"{self.__class__.__name__}(kernel_size={self.kernel_size}, stride={self.stride}, reduce={self.reduce})"
 
-    def forward(self, st: SpatiallySparseTensor):
+    def forward(self, st: Voxels):
         return sparse_reduce(
             st,
             self.kernel_size,
@@ -67,7 +67,7 @@ class SparseUnpool(BaseSpatialModule):
         self.stride = stride
         self.concat_unpooled_st = concat_unpooled_st
 
-    def forward(self, st: SpatiallySparseTensor, unpooled_st: SpatiallySparseTensor):
+    def forward(self, st: Voxels, unpooled_st: Voxels):
         return sparse_unpool(
             st,
             unpooled_st,
@@ -99,7 +99,7 @@ class PointToSparseWrapper(BaseSpatialModule):
         self.concat_unpooled_pc = concat_unpooled_pc
         self.unique_method = unique_method
 
-    def forward(self, pc: PointCollection):
+    def forward(self, pc: Points):
         st, to_unique = point_pool(
             pc,
             reduction=self.reduction,

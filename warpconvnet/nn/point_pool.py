@@ -3,8 +3,8 @@ from typing import Literal, Optional, Tuple, Union
 import torch.nn as nn
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.coords.search.search_results import RealSearchResult
+from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
@@ -35,9 +35,7 @@ class PointPoolBase(BaseSpatialModule):
         self.unique_method = unique_method
         self.avereage_pooled_coordinates = avereage_pooled_coordinates
 
-    def forward(
-        self, pc: PointCollection
-    ) -> Union[Geometry, Tuple[Geometry, NeighborSearchResult]]:
+    def forward(self, pc: Points) -> Union[Geometry, Tuple[Geometry, RealSearchResult]]:
         return point_pool(
             pc=pc,
             reduction=self.reduction,
@@ -113,7 +111,7 @@ class PointUnpool(BaseSpatialModule):
         self.unpooling_mode = unpooling_mode
         self.concat_unpooled_pc = concat_unpooled_pc
 
-    def forward(self, pooled_pc: PointCollection, unpooled_pc: PointCollection):
+    def forward(self, pooled_pc: Points, unpooled_pc: Points):
         return point_unpool(
             pooled_pc=pooled_pc,
             unpooled_pc=unpooled_pc,

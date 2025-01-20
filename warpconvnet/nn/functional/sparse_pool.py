@@ -3,15 +3,14 @@ from typing import Optional, Tuple, Union
 
 import torch
 
-from warpconvnet.geometry.ops.neighbor_search_discrete import (
-    DiscreteNeighborSearchResult,
-    KernelMapCache,
-    KernelMapCacheKey,
+from warpconvnet.geometry.coords.integer import IntCoords
+from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
+from warpconvnet.geometry.coords.search.search_results import IntSearchResult
+from warpconvnet.geometry.coords.search.discrete import (
     generate_kernel_map,
 )
-from warpconvnet.geometry.spatially_sparse_tensor import (
-    BatchedDiscreteCoordinates,
-    SpatiallySparseTensor,
+from warpconvnet.geometry.types.voxels import (
+    Voxels,
 )
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
 from warpconvnet.ops.reductions import REDUCTIONS, row_reduction
@@ -20,13 +19,13 @@ from warpconvnet.utils.unique import unique_inverse
 
 
 def sparse_reduce(
-    spatially_sparse_tensor: SpatiallySparseTensor,
+    spatially_sparse_tensor: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
     reduction: Union[REDUCTIONS, str] = REDUCTIONS.MAX,
     kernel_search_batch_size: Optional[int] = None,
     out_code_backend: str = "unique",
-) -> SpatiallySparseTensor:
+) -> Voxels:
     """
     Max pooling for spatially sparse tensors.
     """
@@ -50,7 +49,7 @@ def sparse_reduce(
     )
     from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE
 
-    kernel_map_cache_key = KernelMapCacheKey(
+    kernel_map_cache_key = IntSearchCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=ntuple(1, ndim=ndim),
         transposed=False,
@@ -65,7 +64,7 @@ def sparse_reduce(
 
     if kernel_map is None:
         # Find mapping from in to out
-        kernel_map: DiscreteNeighborSearchResult = generate_kernel_map(
+        kernel_map: IntSearchResult = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
             in_to_out_stride_ratio=stride,
@@ -75,7 +74,7 @@ def sparse_reduce(
         )
 
     if spatially_sparse_tensor.cache is None:
-        spatially_sparse_tensor._extra_attributes["_cache"] = KernelMapCache()
+        spatially_sparse_tensor._extra_attributes["_cache"] = IntSearchCache()
     spatially_sparse_tensor.cache.put(kernel_map_cache_key, kernel_map)
 
     in_maps, unique_out_maps, map_offsets = kernel_map.to_csr()
@@ -102,7 +101,7 @@ def sparse_reduce(
 
     output_offsets = output_offsets.cpu()
     return spatially_sparse_tensor.replace(
-        batched_coordinates=BatchedDiscreteCoordinates(
+        batched_coordinates=IntCoords(
             batch_indexed_out_coords[:, 1:],
             output_offsets,
         ),
@@ -112,10 +111,10 @@ def sparse_reduce(
 
 
 def sparse_max_pool(
-    spatially_sparse_tensor: SpatiallySparseTensor,
+    spatially_sparse_tensor: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
-) -> SpatiallySparseTensor:
+) -> Voxels:
     """
     Max pooling for spatially sparse tensors.
     """
@@ -123,10 +122,10 @@ def sparse_max_pool(
 
 
 def sparse_avg_pool(
-    spatially_sparse_tensor: SpatiallySparseTensor,
+    spatially_sparse_tensor: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
-) -> SpatiallySparseTensor:
+) -> Voxels:
     """
     Average pooling for spatially sparse tensors.
     """
@@ -134,12 +133,12 @@ def sparse_avg_pool(
 
 
 def sparse_unpool(
-    pooled_st: SpatiallySparseTensor,
-    unpooled_st: SpatiallySparseTensor,
+    pooled_st: Voxels,
+    unpooled_st: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Union[int, Tuple[int, ...]],
     concat_unpooled_st: bool = False,
-) -> SpatiallySparseTensor:
+) -> Voxels:
     """
     Unpooling for spatially sparse tensors.
     """
@@ -150,7 +149,7 @@ def sparse_unpool(
     # use the cache for the transposed case to get the kernel map
     from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE
 
-    kernel_map_cache_key = KernelMapCacheKey(
+    kernel_map_cache_key = IntSearchCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=ntuple(1, ndim=ndim),
         transposed=False,

@@ -5,8 +5,8 @@ import torch.nn as nn
 from torch_scatter import segment_csr
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.points import Points
+from warpconvnet.geometry.types.voxels import Voxels
 
 
 def global_pool(

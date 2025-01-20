@@ -4,22 +4,22 @@ import unittest
 import torch
 import warp as wp
 
+from warpconvnet.geometry.coords.search.search_results import RealSearchResult
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
-    ContinuousNeighborSearchArgs,
-    NeighborSearchResult,
+    RealSearchMode,
 )
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 
 
-class TestPointCollection(unittest.TestCase):
+class TestPoints(unittest.TestCase):
     def setUp(self):
         wp.init()
         self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features, device="cuda:0")
+        self.pc = Points(self.coords, self.features, device="cuda:0")
 
     # Test indexing
     def test_point_collection_indexing(self):
@@ -50,7 +50,7 @@ class TestPointCollection(unittest.TestCase):
         coords = torch.cat(self.coords, dim=0)
         features = torch.cat(self.features, dim=0)
         offsets = torch.IntTensor([0] + Ns_cumsum)
-        pc = PointCollection(coords, features, offsets=offsets)
+        pc = Points(coords, features, offsets=offsets)
         self.assertTrue(pc.batched_coordinates.batch_size == self.B)
 
     def test_point_collection_dataclasses(self):
@@ -70,12 +70,12 @@ class TestPointCollection(unittest.TestCase):
     def test_point_collection_radius_search(self):
         pc = self.pc
         radius = 0.1
-        args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
+        args = RealSearchConfig(
+            mode=RealSearchMode.RADIUS,
             radius=radius,
         )
         search_result = pc.batched_coordinates.neighbors(args)
-        self.assertTrue(isinstance(search_result, NeighborSearchResult))
+        self.assertTrue(isinstance(search_result, RealSearchResult))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
         self.assertTrue(
             search_result.neighbors_row_splits[-1] == search_result.neighbors_index.numel()
@@ -84,12 +84,12 @@ class TestPointCollection(unittest.TestCase):
     def test_knn_search(self):
         pc = self.pc
         knn_k = 10
-        args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.KNN,
+        args = RealSearchConfig(
+            mode=RealSearchMode.KNN,
             k=knn_k,
         )
         search_result = pc.batched_coordinates.neighbors(args)
-        self.assertTrue(isinstance(search_result, NeighborSearchResult))
+        self.assertTrue(isinstance(search_result, RealSearchResult))
         self.assertTrue(sum(self.Ns) == search_result.neighbors_row_splits.shape[0] - 1)
         self.assertTrue(sum(self.Ns) * knn_k == search_result.neighbors_index.numel())
         self.assertTrue(
@@ -137,9 +137,7 @@ class TestPointCollection(unittest.TestCase):
     def test_from_coordinates(self):
         B, N, D = 7, 100000, 3
         coords = [torch.rand(N, D) for _ in range(B)]
-        pc = PointCollection.from_list_of_coordinates(
-            coords, encoding_channels=10, encoding_range=1
-        )
+        pc = Points.from_list_of_coordinates(coords, encoding_channels=10, encoding_range=1)
         self.assertTrue(pc.batched_coordinates.batched_tensor.shape == (B * N, D))
         self.assertTrue(pc.batched_features.batched_tensor.shape == (B * N, 10 * D))
 

@@ -2,7 +2,7 @@ from torch import Tensor
 from .batched import BatchedTensor
 
 
-from warpconvnet.geometry.ops.neighbor_search_continuous import NeighborSearchResult
+from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 
 
@@ -17,7 +17,7 @@ class Coords(BatchedTensor):
         self,
         query_coords: "Coords",
         search_args: dict,
-    ) -> "NeighborSearchResult":
+    ) -> "RealSearchResult":
         """
         Find the neighbors of the query_coords in the current coordinates.
 

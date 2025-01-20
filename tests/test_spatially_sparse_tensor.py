@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.coords.spatial.hashmap import HashMethod
 from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.timer import Timer
 from warpconvnet.utils.unique import unique_hashmap, unique_torch
@@ -22,7 +22,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         self.voxel_size = 0.01
         self.coords = [(torch.rand((N, 3)) / self.voxel_size).int() for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.st = SpatiallySparseTensor(self.coords, self.features)
+        self.st = Voxels(self.coords, self.features)
         return super().setUp()
 
     def test_spatially_sparse_tensor(self):
@@ -90,7 +90,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         dense_tensor = torch.rand(16, 3, 128, 128)
         # Empty out 80% of the elements
         dense_tensor[dense_tensor < 0.8] = 0
-        st = SpatiallySparseTensor.from_dense(dense_tensor, dense_tensor_channel_dim=1)
+        st = Voxels.from_dense(dense_tensor, dense_tensor_channel_dim=1)
         self.assertTrue(st.batch_size == 16)
 
         # test to_dense
@@ -99,7 +99,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
 
     def test_sparse_to_dense_to_sparse(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device=device)
+        st: Voxels = self.st.to(device=device)
         dense_tensor = st.to_dense(channel_dim=1)
         # convolution on dense
         out_channels = 13
@@ -107,7 +107,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
         dense_tensor = conv(dense_tensor)
 
         # convert back to sparse
-        st2 = SpatiallySparseTensor.from_dense(
+        st2 = Voxels.from_dense(
             dense_tensor,
             target_spatial_sparse_tensor=st,
         )
@@ -115,7 +115,7 @@ class TestSpatiallySparseTensor(unittest.TestCase):
 
     def test_to_point(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device=device)
+        st: Voxels = self.st.to(device=device)
         st.set_tensor_stride((2, 2, 2))
         pc = st.to_point(self.voxel_size)
         self.assertTrue(pc.features.shape[1] == self.C)

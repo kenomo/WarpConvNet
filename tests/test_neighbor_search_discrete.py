@@ -4,15 +4,15 @@ import torch
 import warp as wp
 import warp.utils
 
-from warpconvnet.geometry.ops.neighbor_search_discrete import (
-    DiscreteNeighborSearchResult,
+from warpconvnet.geometry.coords.search.search_results import IntSearchResult
+from warpconvnet.geometry.coords.search.discrete import (
     _kernel_map_from_direct_queries,
     _kernel_map_from_offsets,
     _kernel_map_from_size,
     generate_kernel_map,
     kernel_offsets_from_size,
 )
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.utils.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.timer import Timer
 
@@ -27,11 +27,11 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
         self.voxel_size = 0.025
         self.st_coords = [torch.floor(coords / self.voxel_size).int() for coords in self.coords]
-        self.st = SpatiallySparseTensor(self.st_coords, self.features, device=device).unique()
+        self.st = Voxels(self.st_coords, self.features, device=device).unique()
 
     def test_kernel_map_from_offset(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device)
+        st: Voxels = self.st.to(device)
 
         kernel_offsets = torch.tensor(
             [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 1, 0], [0, 1, 0, 0]],
@@ -42,7 +42,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         st_hashmap = st.coordinate_hashmap
 
-        kernel_map: DiscreteNeighborSearchResult = _kernel_map_from_offsets(
+        kernel_map: IntSearchResult = _kernel_map_from_offsets(
             st_hashmap._hash_struct,
             bcoords,
             kernel_offsets,
@@ -54,13 +54,13 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
 
     def test_kernel_map_from_size(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device)
+        st: Voxels = self.st.to(device)
 
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         st_hashmap = st.coordinate_hashmap
         kernel_sizes = (3, 3, 3)
 
-        kernel_map: DiscreteNeighborSearchResult = _kernel_map_from_size(
+        kernel_map: IntSearchResult = _kernel_map_from_size(
             st_hashmap._hash_struct,
             bcoords,
             kernel_sizes,
@@ -72,7 +72,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
 
     def test_compare_all_kernel_maps(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device)
+        st: Voxels = self.st.to(device)
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         st_hashmap = st.coordinate_hashmap
 
@@ -140,7 +140,7 @@ class TestNeighborSearchDiscrete(unittest.TestCase):
 
     def test_kernel_map_speed(self):
         device = torch.device("cuda:0")
-        st: SpatiallySparseTensor = self.st.to(device)
+        st: Voxels = self.st.to(device)
         bcoords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
         st_hashmap = st.coordinate_hashmap
         return_type = "offsets"

@@ -1,25 +1,18 @@
-__pycache__
+# IDE
 .idea
-.history
-*.net
-*.prof
-.[v]env
-.vscode
-archive
-*.o
-*.exp
-*.dll
-*.lib
-*.cpp.obj
+
 *.pdb
-/data
-.vs/
-outputs/
 .venv/
-/build
-/dist
+
+# Build
+build/
+_build/
+dist/
 .coverage
 .cache
+
+# Experiment outputs
+outputs/
 wandb/
 slurm_outputs/
 results/

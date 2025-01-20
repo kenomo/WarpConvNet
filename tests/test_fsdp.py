@@ -6,11 +6,11 @@ import warp as wp
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
-    ContinuousNeighborSearchArgs,
+    RealSearchMode,
 )
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
@@ -25,7 +25,7 @@ class TestFSDP(unittest.TestCase):
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C), requires_grad=True) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
+        self.pc = Points(self.coords, self.features)
 
     def test_fsdp(self):
         device = dist.get_rank()
@@ -33,8 +33,8 @@ class TestFSDP(unittest.TestCase):
 
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_arg = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
+        search_arg = RealSearchConfig(
+            mode=RealSearchMode.RADIUS,
             radius=0.4,
         )
         pooling_arg = FeaturePoolingArgs(

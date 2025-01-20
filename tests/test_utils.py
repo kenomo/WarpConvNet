@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
@@ -27,7 +27,7 @@ class TestUtils(unittest.TestCase):
 
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
+        self.pc = Points(self.coords, self.features)
 
         return super().setUp()
 

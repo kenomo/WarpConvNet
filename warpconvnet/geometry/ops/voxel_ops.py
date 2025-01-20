@@ -6,8 +6,8 @@ import warp as wp
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.spatial.hashmap import VectorHashTable
-from warpconvnet.geometry.ops.neighbor_search_continuous import batched_knn_search
+from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.search.knn import batched_knn_search
 from warpconvnet.utils.batch_index import (
     batch_index_from_indicies,
     batch_index_from_offset,

@@ -6,8 +6,8 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    NeighborSearchResult,
+from warpconvnet.geometry.coords.search.search_results import RealSearchResult
+from warpconvnet.geometry.coords.search.knn import (
     batched_knn_search,
 )
 from warpconvnet.geometry.ops.random_sample import random_sample
@@ -32,11 +32,11 @@ def _generate_batched_coords(
     downsample_voxel_size: float,
     avereage_pooled_coordinates: bool = False,
 ) -> Union["BatchedContinuousCoordinates", "BatchedDiscreteCoordinates"]:  # noqa: F821
-    from warpconvnet.geometry.point_collection import BatchedContinuousCoordinates
-    from warpconvnet.geometry.spatially_sparse_tensor import BatchedDiscreteCoordinates
+    from warpconvnet.geometry.coords.real import RealCoords
+    from warpconvnet.geometry.coords.integer import IntCoords
 
     if return_type == "point" and not avereage_pooled_coordinates:
-        return BatchedContinuousCoordinates(
+        return RealCoords(
             batched_tensor=coordinate_tensor[to_unique_indices],
             offsets=unique_offsets,
         )
@@ -46,12 +46,12 @@ def _generate_batched_coords(
             csr_offsets,
             reduction=REDUCTIONS.MEAN,
         )
-        return BatchedContinuousCoordinates(
+        return RealCoords(
             batched_tensor=avg_coords,
             offsets=unique_offsets,
         )
     else:
-        return BatchedDiscreteCoordinates(
+        return IntCoords(
             batched_tensor=torch.floor(
                 coordinate_tensor[to_unique_indices] / downsample_voxel_size
             ).int(),
@@ -60,17 +60,17 @@ def _generate_batched_coords(
 
 
 def _pool_by_random_sample(
-    pc: "PointCollection",  # noqa: F821
+    pc: "Points",  # noqa: F821
     downsample_voxel_size: Optional[float] = None,
     return_type: Literal["point", "sparse"] = "point",
 ) -> Geometry:
-    from warpconvnet.geometry.point_collection import PointCollection
-    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+    from warpconvnet.geometry.types.points import Points
+    from warpconvnet.geometry.types.voxels import Voxels
 
     if return_type == "sparse":
-        RETURN_CLS = SpatiallySparseTensor
+        RETURN_CLS = Voxels
     else:
-        RETURN_CLS = PointCollection
+        RETURN_CLS = Points
 
     to_unique_indices, unique_offsets = voxel_downsample_random_indices(
         batched_points=pc.coordinate_tensor,
@@ -97,21 +97,21 @@ def _pool_by_random_sample(
 
 
 def _pool_by_max_num_points(
-    pc: "PointCollection",  # noqa: F821
+    pc: "Points",  # noqa: F821
     reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
     downsample_max_num_points: Optional[int] = None,
     return_type: Literal["point", "sparse"] = "point",
     return_neighbor_search_result: bool = False,
 ) -> Geometry:
-    from warpconvnet.geometry.point_collection import PointCollection
-    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+    from warpconvnet.geometry.types.points import Points
+    from warpconvnet.geometry.types.voxels import Voxels
 
     if isinstance(reduction, str):
         reduction = REDUCTIONS(reduction)
     if return_type == "sparse":
-        RETURN_CLS = SpatiallySparseTensor
+        RETURN_CLS = Voxels
     else:
-        RETURN_CLS = PointCollection
+        RETURN_CLS = Points
 
     sample_idx, unique_offsets = random_sample(
         batch_offsets=pc.offsets,
@@ -178,12 +178,12 @@ def _pool_by_max_num_points(
         num_points=downsample_max_num_points,
     )
     if return_neighbor_search_result:
-        return out_pc, NeighborSearchResult(knn_down_indices, knn_offsets)
+        return out_pc, RealSearchResult(knn_down_indices, knn_offsets)
     return out_pc
 
 
 def point_pool(
-    pc: "PointCollection",  # noqa: F821
+    pc: "Points",  # noqa: F821
     reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
     downsample_max_num_points: Optional[int] = None,
     downsample_voxel_size: Optional[float] = None,
@@ -200,7 +200,7 @@ def point_pool(
     When both are provided, the point cloud will be downsampled to the voxel size.
 
     Args:
-        pc: PointCollection
+        pc: Points
         reduction: Reduction type
         downsample_max_num_points: Number of points to downsample to
         downsample_voxel_size: Voxel size to downsample to
@@ -208,10 +208,10 @@ def point_pool(
         return_neighbor_search_result: Return neighbor search result
         return_to_unique: Return to unique object
     Returns:
-        PointCollection or SpatiallySparseTensor
+        Points or SpatiallySparseTensor
     """
-    from warpconvnet.geometry.point_collection import PointCollection
-    from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+    from warpconvnet.geometry.types.points import Points
+    from warpconvnet.geometry.types.voxels import Voxels
 
     if isinstance(reduction, str):
         reduction = REDUCTIONS(reduction)
@@ -223,9 +223,9 @@ def point_pool(
         assert (
             not avereage_pooled_coordinates
         ), "averaging pooled coordinates is not supported for sparse return type"
-        RETURN_CLS = SpatiallySparseTensor
+        RETURN_CLS = Voxels
     else:
-        RETURN_CLS = PointCollection
+        RETURN_CLS = Points
 
     if downsample_max_num_points is not None:
         assert (
@@ -293,13 +293,13 @@ def point_pool(
 
 
 def point_pool_by_code(
-    pc: "PointCollection",  # noqa: F821
+    pc: "Points",  # noqa: F821
     code: Int[Tensor, "N"],  # noqa: F821
     reduction: Union[REDUCTIONS | REDUCTION_TYPES_STR],
     average_pooled_coordinates: bool = False,
     return_to_unique: bool = False,
-) -> "PointCollection":  # noqa: F821
-    from warpconvnet.geometry.point_collection import PointCollection
+) -> "Points":  # noqa: F821
+    from warpconvnet.geometry.types.points import Points
 
     if isinstance(reduction, str):
         reduction = REDUCTIONS(reduction)

@@ -9,16 +9,13 @@ from torch import Tensor
 from torch.autograd import Function
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.ops.neighbor_search_discrete import (
-    DiscreteNeighborSearchResult,
-    KernelMapCache,
-    KernelMapCacheKey,
+from warpconvnet.geometry.coords.integer import IntCoords
+from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
+from warpconvnet.geometry.coords.search.search_results import IntSearchResult
+from warpconvnet.geometry.coords.search.discrete import (
     generate_kernel_map,
 )
-from warpconvnet.geometry.spatially_sparse_tensor import (
-    BatchedDiscreteCoordinates,
-    SpatiallySparseTensor,
-)
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
     generate_output_coords,
@@ -59,7 +56,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         batched_features: Float[Tensor, "N C_in"],
         batch_offsets: Int[Tensor, "B + 1"],  # noqa: F821
         weight: Float[Tensor, "K C_in C_out"],
-        kernel_map: DiscreteNeighborSearchResult,
+        kernel_map: IntSearchResult,
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
     ) -> Float[Tensor, "M C_out"]:
         """
@@ -83,7 +80,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         ctx,
         in_features: Float[Tensor, "N C_in"],
         weight: Float[Tensor, "K C_in C_out"],
-        kernel_map: DiscreteNeighborSearchResult,
+        kernel_map: IntSearchResult,
         num_out_coords: int,
         compute_dtype: torch.dtype = torch.float32,
     ) -> Float[Tensor, "M C_out"]:
@@ -151,7 +148,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         ctx,
         in_features: Float[Tensor, "N C_in"],
         weight: Float[Tensor, "K C_in C_out"],
-        kernel_map: DiscreteNeighborSearchResult,
+        kernel_map: IntSearchResult,
         num_out_coords: int,
         matmul_batch_size: int,
         compute_dtype: torch.dtype = torch.float32,
@@ -353,7 +350,7 @@ def spatially_sparse_conv(
 
     out_offsets = out_offsets.cpu().int()
     return input_sparse_tensor.replace(
-        batched_coordinates=BatchedDiscreteCoordinates(
+        batched_coordinates=IntCoords(
             batch_indexed_out_coords[:, 1:],
             offsets=out_offsets,
         ),
@@ -434,7 +431,7 @@ def generate_output_coords_and_kernel_map(
         )
 
     # if input_sparse_tensor.cache is not None, check the cache first
-    kernel_map_cache_key = KernelMapCacheKey(
+    kernel_map_cache_key = IntSearchCacheKey(
         kernel_size=kernel_size,
         kernel_dilation=kernel_dilation,
         transposed=transposed,
@@ -452,7 +449,7 @@ def generate_output_coords_and_kernel_map(
     if transposed and not generative:
         if input_sparse_tensor.cache is not None:
             # Check if the kernel map for non transposed case exists
-            kernel_map_cache_key_non_transposed = KernelMapCacheKey(
+            kernel_map_cache_key_non_transposed = IntSearchCacheKey(
                 kernel_size=kernel_size,
                 kernel_dilation=kernel_dilation,
                 transposed=False,
@@ -466,7 +463,7 @@ def generate_output_coords_and_kernel_map(
             )
             if kernel_map_non_transposed is not None:
                 # Swap in and out maps for transposed kernel map generation and swap it back
-                kernel_map = DiscreteNeighborSearchResult(
+                kernel_map = IntSearchResult(
                     in_maps=kernel_map_non_transposed.out_maps,
                     out_maps=kernel_map_non_transposed.in_maps,
                     offsets=kernel_map_non_transposed.offsets,
@@ -482,7 +479,7 @@ def generate_output_coords_and_kernel_map(
             kernel_dilation,
             kernel_search_batch_size,
         )
-        kernel_map = DiscreteNeighborSearchResult(
+        kernel_map = IntSearchResult(
             in_maps=kernel_map.out_maps,
             out_maps=kernel_map.in_maps,
             offsets=kernel_map.offsets,
@@ -523,7 +520,7 @@ def generate_output_coords_and_kernel_map(
     # put the kernel map in the cache
 
     if input_sparse_tensor.cache is None:
-        input_sparse_tensor._extra_attributes["_cache"] = KernelMapCache()
+        input_sparse_tensor._extra_attributes["_cache"] = IntSearchCache()
 
     input_sparse_tensor.cache.put(kernel_map_cache_key, kernel_map)
     return batch_indexed_out_coords, out_offsets, kernel_map

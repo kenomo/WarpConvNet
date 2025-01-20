@@ -1,7 +1,6 @@
 import hashlib
-from dataclasses import dataclass
 from enum import Enum
-from typing import List, Literal, Optional, Sequence, Tuple
+from typing import Literal, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -10,150 +9,9 @@ import warp.utils
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.spatial.hashmap import HashStruct, VectorHashTable, search_func
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.coords.search.hashmap import HashStruct, VectorHashTable, search_func
+from warpconvnet.geometry.coords.search.search_results import IntSearchResult
 from warpconvnet.utils.ntuple import ntuple
-
-
-class DISCRETE_NEIGHBOR_SEARCH_MODE(Enum):
-    MANHATTAN_DISTANCE = "manhattan_distance"
-    CUSTOM_OFFSETS = "custom_offsets"
-
-
-class DiscreteNeighborSearchArgs:
-    """
-    Wrapper for the input of a neighbor search operation.
-    """
-
-    # The mode of the neighbor search
-    _mode: DISCRETE_NEIGHBOR_SEARCH_MODE
-    _distance_threshold: Optional[int]
-    _offsets: Optional[Int[Tensor, "K 3"]]
-
-    def __init__(
-        self,
-        mode: DISCRETE_NEIGHBOR_SEARCH_MODE,
-        distance_threshold: Optional[int] = None,
-        offsets: Optional[Int[Tensor, "K 3"]] = None,
-    ):
-        self._mode = mode
-        if mode == DISCRETE_NEIGHBOR_SEARCH_MODE.MANHATTAN_DISTANCE:
-            assert (
-                distance_threshold is not None
-            ), "Distance threshold must be provided for manhattan distance search"
-            self._distance_threshold = distance_threshold
-        elif mode == DISCRETE_NEIGHBOR_SEARCH_MODE.CUSTOM_OFFSETS:
-            assert offsets is not None, "Offsets must be provided for custom offsets search"
-            self._offsets = offsets
-        else:
-            raise ValueError(f"Invalid neighbor search mode: {mode}")
-
-
-@dataclass
-class DiscreteNeighborSearchResult:
-    """
-    Wrapper for the output of a neighbor search operation.
-    """
-
-    # The indices of the neighbors
-    in_maps: Int[Tensor, "L"]  # noqa: F821
-    out_maps: Int[Tensor, "L"]  # noqa: F821
-    offsets: Int[Tensor, "K + 1"]  # noqa: F821
-
-    def __init__(
-        self,
-        in_maps: Int[Tensor, "L"],  # noqa: F821
-        out_maps: Int[Tensor, "L"],  # noqa: F821
-        offsets: Int[Tensor, "K + 1"],  # noqa: F821
-    ):
-        assert len(in_maps) == len(out_maps) == offsets[-1].item()
-        self.in_maps = in_maps
-        self.out_maps = out_maps
-        self.offsets = offsets.cpu()
-
-    @torch.no_grad()
-    def __getitem__(self, idx: int) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:  # noqa: F821
-        start, end = self.offsets[idx], self.offsets[idx + 1]
-        return self.in_maps[start:end], self.out_maps[start:end]
-
-    @torch.no_grad()
-    def get_batch(
-        self,
-        start_idx: int,
-        end_idx: int,
-        out_format: Literal["list", "tensor"] = "list",
-    ) -> Tuple[List[Int[Tensor, "N"]], List[Int[Tensor, "N"]]]:  # noqa: F821
-        in_maps = []
-        out_maps = []
-        for i in range(start_idx, end_idx):
-            in_maps.append(self.in_maps[self.offsets[i] : self.offsets[i + 1]])
-            out_maps.append(self.out_maps[self.offsets[i] : self.offsets[i + 1]])
-        if out_format == "list":
-            return in_maps, out_maps
-        elif out_format == "tensor":
-            max_num_maps = max(len(in_map) for in_map in in_maps)
-            in_maps_tensor = -1 * torch.ones(
-                len(in_maps),
-                max_num_maps,
-                device=self.in_maps.device,
-                dtype=torch.int64,
-            )
-            out_maps_tensor = -1 * torch.ones(
-                len(out_maps),
-                max_num_maps,
-                device=self.out_maps.device,
-                dtype=torch.int64,
-            )
-            for i, (in_map, out_map) in enumerate(zip(in_maps, out_maps)):
-                in_maps_tensor[i, : len(in_map)] = in_map
-                out_maps_tensor[i, : len(out_map)] = out_map
-            return in_maps_tensor, out_maps_tensor
-        else:
-            raise ValueError(f"Invalid output format: {out_format}")
-
-    def __len__(self):
-        return len(self.offsets) - 1
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(len={len(self)})"
-
-    @torch.no_grad()
-    def to_csr(
-        self,
-    ) -> Tuple[Int[Tensor, "L"], Int[Tensor, "K"], Int[Tensor, "K + 1"]]:  # noqa: F821
-        """
-        Convert the neighbor search result to a CSR format.
-
-        in_maps to row indices
-        out_maps to sort and use for columns
-        ignore offsets
-        """
-        in_maps = self.in_maps
-        out_maps = self.out_maps
-
-        # Sort the out_maps and get the indices
-        out_maps_sorted, out_maps_indices = torch.sort(out_maps)
-        # cchoy: Could skip the sorting by implementing a custom warp kernel
-        unique_out_maps_sorted, num_unique = torch.unique(
-            out_maps_sorted, return_counts=True, sorted=True
-        )
-
-        # Get the in_maps from the indices
-        in_maps_sorted = in_maps[out_maps_indices]
-
-        # convert to offsets
-        offsets = torch.cumsum(num_unique.cpu(), dim=0)
-        offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets], dim=0)
-        return in_maps_sorted, unique_out_maps_sorted, offsets
-
-    def clone(self):
-        return DiscreteNeighborSearchResult(
-            self.in_maps.clone(), self.out_maps.clone(), self.offsets.clone()
-        )
 
 
 @wp.kernel
@@ -289,7 +147,7 @@ def map_found_indices_to_maps(
 def _kernel_map_search_to_result(
     found_in_coord_index_wp: wp.array2d(dtype=int),
     return_type: Literal["indices", "offsets"] = "offsets",
-) -> Int[Tensor, "K M"] | DiscreteNeighborSearchResult:
+) -> Int[Tensor, "K M"] | IntSearchResult:
     # Must have shape [K, M]
     # assert found_in_coord_index_wp.shape[0] == kernel_offsets.shape[0]
     # assert found_in_coord_index_wp.shape[1] == batched_query_coords.shape[0]
@@ -343,7 +201,7 @@ def _kernel_map_search_to_result(
         in_maps = wp.to_torch(in_maps_wp)
         out_maps = wp.to_torch(out_maps_wp)
 
-    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
+    return IntSearchResult(in_maps, out_maps, offsets)
 
 
 @torch.no_grad()
@@ -352,7 +210,7 @@ def _kernel_map_from_offsets(
     batched_query_coords: Int[Tensor, "N 4"],
     kernel_offsets: Int[Tensor, "K 4"],
     return_type: Literal["indices", "offsets"] = "offsets",
-) -> Int[Tensor, "K N"] | DiscreteNeighborSearchResult:
+) -> Int[Tensor, "K N"] | IntSearchResult:
     """
     Compute the kernel map (input index, output index) for each kernel offset using cached hashmap
     """
@@ -395,7 +253,7 @@ def _kernel_map_from_size(
     batched_query_coords: Int[Tensor, "N D"],
     kernel_sizes: Tuple[int, ...],
     return_type: Literal["indices", "offsets"] = "offsets",
-) -> Int[Tensor, "K N"] | DiscreteNeighborSearchResult:
+) -> Int[Tensor, "K N"] | IntSearchResult:
     """
     Compute the kernel map (input index, output index) for each kernel offset using cached hashmap.
     Supports arbitrary number of spatial dimensions.
@@ -465,7 +323,7 @@ def _kernel_map_from_direct_queries(
     kernel_dilation: Optional[Tuple[int, ...]] = None,
     kernel_search_batch_size: Optional[int] = None,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
-) -> DiscreteNeighborSearchResult:
+) -> IntSearchResult:
     num_spatial_dims = batch_indexed_out_coords.shape[1] - 1
     str_device = str(in_hashmap.table_kvs.device)
     if kernel_dilation is None:
@@ -540,7 +398,7 @@ def _kernel_map_from_direct_queries(
     # prepend 0 to the num_valid_maps
     offsets = torch.cat([torch.zeros(1, dtype=torch.int32, device=str_device), offsets], dim=0)
 
-    return DiscreteNeighborSearchResult(in_maps, out_maps, offsets)
+    return IntSearchResult(in_maps, out_maps, offsets)
 
 
 @torch.no_grad()
@@ -553,7 +411,7 @@ def generate_kernel_map(
     kernel_search_batch_size: Optional[int] = None,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
     method: Literal["query", "size", "offset"] = "size",
-) -> DiscreteNeighborSearchResult:
+) -> IntSearchResult:
     """
     Generate the kernel map for the spatially sparse convolution.
 
@@ -620,84 +478,3 @@ def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821
 # Use a deterministic hash function for strings
 def string_hash(s: str) -> int:
     return int(hashlib.md5(s.encode()).hexdigest(), 16)
-
-
-class KernelMapCacheKey:
-    """
-    Key for kernel map cache.
-    """
-
-    kernel_size: Tuple[int, ...]
-    kernel_dilation: Tuple[int, ...]
-    transposed: bool
-    generative: bool
-    stride_mode: str
-    in_offsets: Int[Tensor, "B+1"]  # noqa: F821
-    out_offsets: Int[Tensor, "B+1"]  # noqa: F821
-
-    def __init__(
-        self,
-        kernel_size,
-        kernel_dilation,
-        transposed,
-        generative,
-        stride_mode,
-        in_offsets,
-        out_offsets,
-    ):
-        self.kernel_size = kernel_size
-        self.kernel_dilation = kernel_dilation
-        self.transposed = transposed
-        self.generative = generative
-        self.stride_mode = stride_mode
-        self.in_offsets = in_offsets.detach().cpu().int()
-        self.out_offsets = out_offsets.detach().cpu().int()
-
-    def __hash__(self):
-        return int(
-            _int_sequence_hash(self.kernel_size)
-            ^ _int_sequence_hash(self.kernel_dilation)
-            ^ hash(self.transposed)
-            ^ hash(self.generative)
-            ^ string_hash(self.stride_mode)  # Use string_hash for stride_mode
-            ^ _int_sequence_hash(self.in_offsets.tolist())
-            ^ _int_sequence_hash(self.out_offsets.tolist())
-        )
-
-    def __eq__(self, other: "KernelMapCacheKey"):
-        return (
-            self.kernel_size == other.kernel_size
-            and self.kernel_dilation == other.kernel_dilation
-            and self.transposed == other.transposed
-            and self.generative == other.generative
-            and self.stride_mode == other.stride_mode
-            and self.in_offsets.equal(other.in_offsets)
-            and self.out_offsets.equal(other.out_offsets)
-        )
-
-    def __repr__(self):
-        return f"KernelMapCacheKey(kernel_size={self.kernel_size}, kernel_dilation={self.kernel_dilation}, transposed={self.transposed}, generative={self.generative}, stride_mode={self.stride_mode}, in_offsets={self.in_offsets}, out_offsets={self.out_offsets})"
-
-
-class KernelMapCache:
-    """
-    Cache for kernel map.
-    """
-
-    def __init__(self):
-        self.cache = {}
-
-    def get(self, key: KernelMapCacheKey) -> Optional[DiscreteNeighborSearchResult]:
-        return self.cache.get(key, None)
-
-    def put(self, key: KernelMapCacheKey, value: DiscreteNeighborSearchResult):
-        self.cache[key] = value
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({len(self.cache)} keys)"
-
-    def __getstate__(self):
-        return None
-
-    def __setstate__(self, state):
-        self.cache = {}

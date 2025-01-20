@@ -3,8 +3,8 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.points import Points
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.global_pool import global_pool
 
 
@@ -16,9 +16,9 @@ class TestGlobalPool(unittest.TestCase):
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features).to(self.device)
+        self.pc = Points(self.coords, self.features).to(self.device)
         self.voxel_size = 0.01
-        self.st: SpatiallySparseTensor = self.pc.to_sparse(self.voxel_size)
+        self.st: Voxels = self.pc.to_sparse(self.voxel_size)
 
     def test_global_pool_pc(self):
         pooled_pc = global_pool(self.pc, reduce="max")

@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.nn import init
 from torch.nn.init import calculate_gain
 
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
@@ -109,8 +109,8 @@ class SpatiallySparseConv(BaseSpatialModule):
 
     def forward(
         self,
-        input_sparse_tensor: SpatiallySparseTensor,
-        output_spatially_sparse_tensor: Optional[SpatiallySparseTensor] = None,
+        input_sparse_tensor: Voxels,
+        output_spatially_sparse_tensor: Optional[Voxels] = None,
     ):
         return spatially_sparse_conv(
             input_sparse_tensor=input_sparse_tensor,

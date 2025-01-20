@@ -8,7 +8,7 @@ from tests.test_global_pool import TestGlobalPool
 from tests.test_neighbor_search_discrete import TestNeighborSearchDiscrete
 
 # Points
-from tests.test_point_collection import TestPointCollection
+from tests.test_point_collection import TestPoints
 from tests.test_point_conv import TestPointConv
 from tests.test_point_pool import TestPointPool
 
@@ -33,7 +33,7 @@ def test_suite():
     # Add tests using the loader
     suite.addTests(loader.loadTestsFromTestCase(TestUtils))
 
-    suite.addTests(loader.loadTestsFromTestCase(TestPointCollection))
+    suite.addTests(loader.loadTestsFromTestCase(TestPoints))
     suite.addTests(loader.loadTestsFromTestCase(TestPointConv))
     suite.addTests(loader.loadTestsFromTestCase(TestPointPool))
 

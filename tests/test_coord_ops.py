@@ -3,35 +3,35 @@ import unittest
 import torch
 import warp as wp
 
+from warpconvnet.geometry.coords.search.search_results import RealSearchResult
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.ops.coord_ops import relative_coords
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
-    ContinuousNeighborSearchArgs,
-    NeighborSearchResult,
+    RealSearchMode,
 )
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 
 
-class TestPointCollection(unittest.TestCase):
+class TestPoints(unittest.TestCase):
     def setUp(self):
         wp.init()
         self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
+        self.pc = Points(self.coords, self.features)
 
     # Test point collection radius search
     def test_relative_coords(self):
         device = torch.device("cuda:0")
         pc = self.pc.to(device)
         radius = 0.1
-        args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
+        args = RealSearchConfig(
+            mode=RealSearchMode.RADIUS,
             radius=radius,
         )
         search_result = pc.batched_coordinates.neighbors(args)
-        self.assertTrue(isinstance(search_result, NeighborSearchResult))
+        self.assertTrue(isinstance(search_result, RealSearchResult))
 
         # Test relative_coords
         rel_coords = relative_coords(

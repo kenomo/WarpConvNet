@@ -14,11 +14,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from warpconvnet.dataset.modelnet import ModelNet40Dataset
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    ContinuousNeighborSearchArgs,
+from warpconvnet.geometry.coords.search.search_configs import (
+    RealSearchConfig,
 )
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.points import Points
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.point_conv import PointConv
 from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv3d
@@ -40,14 +40,14 @@ class UseAllConvNet(nn.Module):
             PointConv(
                 24,
                 64,
-                neighbor_search_args=ContinuousNeighborSearchArgs("knn", k=16),
+                neighbor_search_args=RealSearchConfig("knn", k=16),
             ),
             nn.LayerNorm(64),
             nn.ReLU(),
             PointConv(
                 64,
                 64,
-                neighbor_search_args=ContinuousNeighborSearchArgs("radius", radius=voxel_size),
+                neighbor_search_args=RealSearchConfig("radius", radius=voxel_size),
             ),
             nn.LayerNorm(64),
             nn.ReLU(),
@@ -88,13 +88,9 @@ class UseAllConvNet(nn.Module):
         )
 
     def forward(self, x: Float[Tensor, "B N 3"]) -> Float[Tensor, "B 40"]:
-        pc: PointCollection = PointCollection.from_list_of_coordinates(
-            x, encoding_channels=8, encoding_range=1
-        )
+        pc: Points = Points.from_list_of_coordinates(x, encoding_channels=8, encoding_range=1)
         pc = self.point_conv(pc)
-        st: SpatiallySparseTensor = pc.to_sparse(
-            reduction=REDUCTIONS.MAX, voxel_size=self.voxel_size
-        )
+        st: Voxels = pc.to_sparse(reduction=REDUCTIONS.MAX, voxel_size=self.voxel_size)
         st = self.sparse_conv(st)
         dt: Tensor = st.to_dense(channel_dim=1, min_coords=(-5, -5, -5), max_coords=(4, 4, 4))
         return self.dense_conv(dt)

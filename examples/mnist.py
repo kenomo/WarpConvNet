@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import StepLR
 from torchvision import datasets, transforms
 
 import warpconvnet.nn.functional.transforms as T
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
 from warpconvnet.nn.sequential import Sequential
 from warpconvnet.nn.sparse_conv import SparseConv2d
@@ -34,7 +34,7 @@ class Net(nn.Module):
         )
 
     def forward(self, x: Tensor):
-        x = SpatiallySparseTensor.from_dense(x)
+        x = Voxels.from_dense(x)
         x = self.layers(x)
         x = sparse_max_pool(x, kernel_size=(2, 2), stride=(2, 2))
         x = x.to_dense(channel_dim=1, spatial_shape=(14, 14))

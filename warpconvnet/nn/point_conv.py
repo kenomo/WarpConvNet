@@ -5,11 +5,11 @@ import torch
 import torch.nn as nn
 
 from warpconvnet.geometry.base.coords import Coords
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
-    ContinuousNeighborSearchArgs,
+    RealSearchMode,
 )
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.nn.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
@@ -39,7 +39,7 @@ class PointConv(BaseSpatialModule):
         self,
         in_channels: int,
         out_channels: int,
-        neighbor_search_args: ContinuousNeighborSearchArgs,
+        neighbor_search_args: RealSearchConfig,
         pooling_reduction: Optional[REDUCTIONS] = None,
         pooling_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
@@ -85,7 +85,7 @@ class PointConv(BaseSpatialModule):
             # print warning if search radius is not \sqrt(3) times the downsample voxel size
             if (
                 pooling_voxel_size is not None
-                and neighbor_search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS
+                and neighbor_search_args.mode == RealSearchMode.RADIUS
                 and neighbor_search_args.radius < pooling_voxel_size * (3**0.5)
             ):
                 warnings.warn(
@@ -100,14 +100,14 @@ class PointConv(BaseSpatialModule):
         if (
             pooling_reduction is not None
             and pooling_voxel_size is not None
-            and neighbor_search_args.mode == CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS
+            and neighbor_search_args.mode == RealSearchMode.RADIUS
             and pooling_voxel_size > neighbor_search_args.radius
         ):
             raise ValueError(
                 f"downsample_voxel_size {pooling_voxel_size} must be <= radius {neighbor_search_args.radius}"
             )
 
-        assert isinstance(neighbor_search_args, ContinuousNeighborSearchArgs)
+        assert isinstance(neighbor_search_args, RealSearchConfig)
         self.reductions = reductions
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -159,9 +159,9 @@ class PointConv(BaseSpatialModule):
 
     def forward(
         self,
-        in_pc: PointCollection,
-        query_pc: Optional[PointCollection] = None,
-    ) -> PointCollection:
+        in_pc: Points,
+        query_pc: Optional[Points] = None,
+    ) -> Points:
         """
         When out_point_features is None, the output will be generated on the
         in_point_features.batched_coordinates.
@@ -195,8 +195,8 @@ class PointConv(BaseSpatialModule):
             query_coords=query_pc.batched_coordinates,
             search_args=self.neighbor_search_args,
         )
-        neighbors_index = neighbors.neighbors_index.long().view(-1)
-        neighbors_row_splits = neighbors.neighbors_row_splits
+        neighbors_index = neighbors.neighbor_indices.long().view(-1)
+        neighbors_row_splits = neighbors.neighbor_row_splits
         num_reps = neighbors_row_splits[1:] - neighbors_row_splits[:-1]
 
         # repeat the self features using num_reps
@@ -234,7 +234,7 @@ class PointConv(BaseSpatialModule):
         out_features = torch.cat(out_features, dim=-1)
         out_features = self.out_transform_mlp(out_features)
 
-        return PointCollection(
+        return Points(
             batched_coordinates=Coords(
                 batched_tensor=query_pc.coordinate_tensor,
                 offsets=query_pc.offsets,

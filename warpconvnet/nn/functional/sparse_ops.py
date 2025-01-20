@@ -2,12 +2,12 @@ from typing import Sequence
 
 import torch
 
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.voxels import Voxels
 
 
 def cat_spatially_sparse_tensors(
-    *sparse_tensors: Sequence[SpatiallySparseTensor],
-) -> SpatiallySparseTensor:
+    *sparse_tensors: Sequence[Voxels],
+) -> Voxels:
     """
     Concatenate a list of spatially sparse tensors.
     """

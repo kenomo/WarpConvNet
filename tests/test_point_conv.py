@@ -3,11 +3,11 @@ import unittest
 import torch
 import warp as wp
 
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    CONTINUOUS_NEIGHBOR_SEARCH_MODE,
-    ContinuousNeighborSearchArgs,
+    RealSearchMode,
 )
-from warpconvnet.geometry.point_collection import PointCollection
+from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.point_conv import PointConv
 from warpconvnet.ops.reductions import REDUCTIONS
 
@@ -20,14 +20,14 @@ class TestPointConv(unittest.TestCase):
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features).to(self.device)
+        self.pc = Points(self.coords, self.features).to(self.device)
 
     def test_point_conv_radius(self):
         pc = self.pc
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_arg = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
+        search_arg = RealSearchConfig(
+            mode=RealSearchMode.RADIUS,
             radius=0.1,
         )
         conv = PointConv(
@@ -49,8 +49,8 @@ class TestPointConv(unittest.TestCase):
         pc = self.pc
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.KNN,
+        search_args = RealSearchConfig(
+            mode=RealSearchMode.KNN,
             k=16,
         )
         conv = PointConv(
@@ -65,8 +65,8 @@ class TestPointConv(unittest.TestCase):
         pc = self.pc
         # Create conv layer
         in_channels, out_channels = self.C, 16
-        search_args = ContinuousNeighborSearchArgs(
-            mode=CONTINUOUS_NEIGHBOR_SEARCH_MODE.RADIUS,
+        search_args = RealSearchConfig(
+            mode=RealSearchMode.RADIUS,
             radius=0.1,
         )
         conv = PointConv(

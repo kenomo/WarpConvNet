@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import warp as wp
 
-from warpconvnet.geometry.point_collection import PointCollection
-from warpconvnet.geometry.spatially_sparse_tensor import SpatiallySparseTensor
+from warpconvnet.geometry.types.points import Points
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.point_pool import REDUCTIONS, point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
 from warpconvnet.nn.point_pool import PointMaxPool
@@ -20,7 +20,7 @@ class TestPointPool(unittest.TestCase):
         self.Ns = torch.randint(min_N, max_N, (self.B,))
         self.coords = [torch.rand((N, 3)) for N in self.Ns]
         self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = PointCollection(self.coords, self.features)
+        self.pc = Points(self.coords, self.features)
 
     # Test point collection construction
     def test_point_pool(self):
@@ -72,7 +72,7 @@ class TestPointPool(unittest.TestCase):
             downsample_voxel_size=0.1,
             return_type="sparse",
         )
-        self.assertTrue(isinstance(st, SpatiallySparseTensor))
+        self.assertTrue(isinstance(st, Voxels))
         self.assertTrue(st.batch_size == self.B)
         self.assertTrue(st.batched_features.shape[1] == self.C)
 
@@ -87,7 +87,7 @@ class TestPointPool(unittest.TestCase):
             return_type="point",
             avereage_pooled_coordinates=True,
         )
-        self.assertTrue(isinstance(out_pc, PointCollection))
+        self.assertTrue(isinstance(out_pc, Points))
         self.assertTrue(out_pc.batch_size == self.B)
         self.assertTrue(out_pc.batched_features.shape[1] == self.C)
 
@@ -103,7 +103,7 @@ class TestPointPool(unittest.TestCase):
             unique_method="morton",
             avereage_pooled_coordinates=True,
         )
-        self.assertTrue(isinstance(out_pc, PointCollection))
+        self.assertTrue(isinstance(out_pc, Points))
         self.assertTrue(out_pc.batch_size == self.B)
         self.assertTrue(out_pc.batched_features.shape[1] == self.C)
 
@@ -149,7 +149,7 @@ class TestPointPool(unittest.TestCase):
             concat_unpooled_pc=False,
         )
         out_pc = wrapper(pc)
-        self.assertTrue(isinstance(out_pc, PointCollection))
+        self.assertTrue(isinstance(out_pc, Points))
         self.assertTrue(out_pc.num_channels == pc.num_channels)
         self.assertTrue(torch.all(out_pc.feature_tensor == pc.feature_tensor))
 
