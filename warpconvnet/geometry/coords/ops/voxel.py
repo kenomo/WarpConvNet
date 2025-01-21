@@ -8,13 +8,13 @@ from torch import Tensor
 
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
 from warpconvnet.geometry.coords.search.knn import batched_knn_search
-from warpconvnet.utils.batch_index import (
+from warpconvnet.geometry.coords.ops.batch_index import (
     batch_index_from_indicies,
     batch_index_from_offset,
     batch_indexed_coordinates,
     offsets_from_batch_index,
 )
-from warpconvnet.utils.list_to_batch import list_to_cat_tensor
+from warpconvnet.geometry.utils.list_to_batch import list_to_cat_tensor
 from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import ToUnique, unique_hashmap, unique_torch
 

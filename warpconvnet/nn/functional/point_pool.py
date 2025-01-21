@@ -16,7 +16,10 @@ from warpconvnet.geometry.coords.ops.voxel import (
     voxel_downsample_random_indices,
 )
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
-from warpconvnet.utils.batch_index import batch_index_from_offset, offsets_from_offsets
+from warpconvnet.geometry.coords.ops.batch_index import (
+    batch_index_from_offset,
+    offsets_from_offsets,
+)
 from warpconvnet.utils.unique import ToUnique
 
 __all__ = ["point_pool"]
@@ -208,7 +211,7 @@ def point_pool(
         return_neighbor_search_result: Return neighbor search result
         return_to_unique: Return to unique object
     Returns:
-        Points or SpatiallySparseTensor
+        Points or Voxels
     """
     from warpconvnet.geometry.types.points import Points
     from warpconvnet.geometry.types.voxels import Voxels

@@ -45,8 +45,7 @@ def _find_bin_native(
     index: int,
     batch_index_wp: wp.array(dtype=Any),
     batch_index_len: int,
-):
-    ...
+): ...
 
 
 @wp.func

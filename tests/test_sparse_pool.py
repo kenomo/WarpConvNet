@@ -6,7 +6,7 @@ import warp as wp
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce, sparse_unpool
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 
 class TestSparsePool(unittest.TestCase):

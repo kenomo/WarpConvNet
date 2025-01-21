@@ -193,12 +193,12 @@ class PointConv(BaseSpatialModule):
             query_coords=query_pc.batched_coordinates,
             search_args=self.neighbor_search_args,
         )
-        neighbors_index = neighbors.neighbor_indices.long().view(-1)
-        neighbors_row_splits = neighbors.neighbor_row_splits
-        num_reps = neighbors_row_splits[1:] - neighbors_row_splits[:-1]
+        neighbor_indices = neighbors.neighbor_indices.long().view(-1)
+        neighbor_row_splits = neighbors.neighbor_row_splits
+        num_reps = neighbor_row_splits[1:] - neighbor_row_splits[:-1]
 
         # repeat the self features using num_reps
-        rep_in_features = in_pc.feature_tensor[neighbors_index]
+        rep_in_features = in_pc.feature_tensor[neighbor_indices]
         self_features = torch.repeat_interleave(
             query_pc.feature_tensor.view(-1, query_num_channels).contiguous(),
             num_reps,
@@ -206,7 +206,7 @@ class PointConv(BaseSpatialModule):
         )
         edge_features = [rep_in_features, self_features]
         if self.use_rel_pos or self.use_rel_pos_encode:
-            in_rep_vertices = in_pc.coordinate_tensor.view(-1, 3)[neighbors_index]
+            in_rep_vertices = in_pc.coordinate_tensor.view(-1, 3)[neighbor_indices]
             self_vertices = torch.repeat_interleave(
                 query_pc.coordinate_tensor.view(-1, 3).contiguous(),
                 num_reps,
@@ -221,13 +221,13 @@ class PointConv(BaseSpatialModule):
         edge_features = self.edge_transform_mlp(edge_features)
         # if in_weight is not None:
         #     assert in_weight.shape[0] == in_point_features.features.shape[0]
-        #     rep_weights = in_weight[neighbors_index]
+        #     rep_weights = in_weight[neighbor_indices]
         #     edge_features = edge_features * rep_weights.squeeze().unsqueeze(-1)
 
         out_features = []
         for reduction in self.reductions:
             out_features.append(
-                row_reduction(edge_features, neighbors_row_splits, reduction=reduction)
+                row_reduction(edge_features, neighbor_row_splits, reduction=reduction)
             )
         out_features = torch.cat(out_features, dim=-1)
         out_features = self.out_transform_mlp(out_features)

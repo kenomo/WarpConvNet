@@ -19,8 +19,8 @@ def _knn_search(
         torch.cuda.set_device(ref_positions.device)
     # Use topk to get the top k indices from distances
     dists = torch.cdist(query_positions, ref_positions)
-    _, neighbors_index = torch.topk(dists, k, dim=1, largest=False)
-    return neighbors_index
+    _, neighbor_indices = torch.topk(dists, k, dim=1, largest=False)
+    return neighbor_indices
 
 
 @torch.no_grad()
@@ -34,12 +34,12 @@ def _chunked_knn_search(
     assert k > 0
     assert k < ref_positions.shape[0]
     assert chunk_size > 0
-    neighbors_index = []
+    neighbor_indices = []
     for i in range(0, query_positions.shape[0], chunk_size):
         chunk_out_positions = query_positions[i : i + chunk_size]
-        chunk_neighbors_index = _knn_search(ref_positions, chunk_out_positions, k)
-        neighbors_index.append(chunk_neighbors_index)
-    return torch.concatenate(neighbors_index, dim=0)
+        chunk_neighbor_indices = _knn_search(ref_positions, chunk_out_positions, k)
+        neighbor_indices.append(chunk_neighbor_indices)
+    return torch.concatenate(neighbor_indices, dim=0)
 
 
 @torch.no_grad()
@@ -63,14 +63,14 @@ def knn_search(
     assert ref_positions.device == query_positions.device
     if search_method == "chunk":
         if query_positions.shape[0] < chunk_size:
-            neighbors_index = _knn_search(ref_positions, query_positions, k)
+            neighbor_indices = _knn_search(ref_positions, query_positions, k)
         else:
-            neighbors_index = _chunked_knn_search(
+            neighbor_indices = _chunked_knn_search(
                 ref_positions, query_positions, k, chunk_size=chunk_size
             )
     else:
         raise ValueError(f"search_method {search_method} not supported.")
-    return neighbors_index
+    return neighbor_indices
 
 
 @torch.no_grad()

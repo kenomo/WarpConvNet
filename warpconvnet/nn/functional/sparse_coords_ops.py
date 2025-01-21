@@ -9,7 +9,7 @@ from torch import Tensor
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
 from warpconvnet.geometry.coords.ops.serialization import morton_code
 from warpconvnet.geometry.coords.search.discrete import kernel_offsets_from_size
-from warpconvnet.utils.batch_index import offsets_from_batch_index
+from warpconvnet.geometry.coords.ops.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import unique_hashmap, unique_inverse

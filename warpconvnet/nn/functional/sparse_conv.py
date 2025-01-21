@@ -12,10 +12,7 @@ from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
-from warpconvnet.geometry.coords.search.discrete import (
-    generate_kernel_map,
-)
-from warpconvnet.geometry.types.voxels import Voxels
+from warpconvnet.geometry.coords.search.discrete import generate_kernel_map
 from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
     generate_output_coords,

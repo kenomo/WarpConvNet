@@ -35,7 +35,7 @@ class RealSearchConfig:
         self,
         mode: RealSearchMode,
         radius: Optional[float] = None,
-        k: Optional[int] = None,
+        knn_k: Optional[int] = None,
         grid_dim: Optional[int | Tuple[int, int, int]] = None,
     ):
         if isinstance(mode, str):
@@ -43,7 +43,7 @@ class RealSearchConfig:
 
         self.mode = mode
         self.radius = radius
-        self.knn_k = k
+        self.knn_k = knn_k
         self.grid_dim = grid_dim
 
     def __repr__(self):
@@ -63,7 +63,7 @@ class RealSearchConfig:
         return RealSearchConfig(
             mode=mode if mode is not None else self.mode,
             radius=radius if radius is not None else self.radius,
-            k=k if k is not None else self.knn_k,
+            knn_k=k if k is not None else self.knn_k,
             grid_dim=grid_dim if grid_dim is not None else self.grid_dim,
         )
 

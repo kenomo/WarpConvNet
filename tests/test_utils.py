@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.utils.argsort import argsort
-from warpconvnet.utils.batch_index import (
+from warpconvnet.geometry.coords.ops.batch_index import (
     batch_index_from_indicies,
     batch_index_from_offset,
     batch_indexed_coordinates,

@@ -98,7 +98,9 @@ def _radius_search(
     result_count_torch = wp.to_torch(result_count)
     torch.cumsum(result_count_torch, dim=0, out=torch_offset[1:])
     total_count = torch_offset[-1].item()
-    assert total_count < 2**31 - 1, f"Total result count is too large: {total_count} > 2**31 - 1"
+    assert (
+        0 < total_count and total_count < 2**31 - 1
+    ), f"Invalid total count: {total_count}. Must be between 0 and 2**31 - 1"
 
     result_point_idx = wp.zeros(shape=(total_count,), dtype=wp.int32, device=str_device)
     result_point_dist = wp.zeros(shape=(total_count,), dtype=wp.float32, device=str_device)

@@ -18,10 +18,10 @@ class RealSearchResult:
     # M is the number of queries
     neighbor_row_splits: Int[Tensor, "M + 1"]  # noqa: F821
     # optional distance
-    neighbor_distances: Optional[Float[Tensor, "N"]]  # noqa: F821
+    neighbor_distances: Optional[Float[Tensor, "N"]] = None  # noqa: F821
 
     def __init__(self, *args):
-        # If there are two args, assume they are neighbors_index and neighbors_row_splits
+        # If there are two args, assume they are neighbor_indices and neighbor_row_splits
         # If there is one arg, assume it is a NeighborSearchReturnType
         if len(args) == 2:
             self.neighbor_indices = args[0].long()
@@ -45,7 +45,7 @@ class RealSearchResult:
         return self
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(neighbors_index={self.neighbor_indices.shape}, neighbors_row_splits={self.neighbor_row_splits.shape})"
+        return f"{self.__class__.__name__}(neighbor_indices={self.neighbor_indices.shape}, neighbor_row_splits={self.neighbor_row_splits.shape})"
 
 
 @dataclass

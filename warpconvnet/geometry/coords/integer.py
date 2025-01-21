@@ -8,8 +8,8 @@ from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
-from warpconvnet.utils.list_to_batch import list_to_cat_tensor
+from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.utils.list_to_batch import list_to_cat_tensor
 from warpconvnet.utils.ntuple import ntuple
 
 

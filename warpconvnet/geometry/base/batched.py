@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from warpconvnet.utils.list_to_batch import list_to_cat_tensor
+from warpconvnet.geometry.utils.list_to_batch import list_to_cat_tensor
 
 
 @dataclass

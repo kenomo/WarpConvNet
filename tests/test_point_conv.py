@@ -51,7 +51,7 @@ class TestPointConv(unittest.TestCase):
         in_channels, out_channels = self.C, 16
         search_args = RealSearchConfig(
             mode=RealSearchMode.KNN,
-            k=16,
+            knn_k=16,
         )
         conv = PointConv(
             in_channels,

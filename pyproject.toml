@@ -26,6 +26,9 @@ Documentation = "https://gitlab.nvidia.com/3dmmllm/warpconvnet/docs"
 dev = [
     "pre-commit",
     "coverage[toml]",
+    "pytest>=7.4.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-cov>=4.1.0",
 ]
 
 docs = [
@@ -79,4 +82,9 @@ exclude_lines = [
 omit = [
     "*/warpconvnet/examples/*",
     "*/warpconvnet/tests/*",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "benchmark: mark test as a performance benchmark",
 ]

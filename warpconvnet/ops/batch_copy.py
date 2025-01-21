@@ -6,7 +6,7 @@ import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.utils.batch_index import _find_bin
+from warpconvnet.geometry.coords.ops.batch_index import _find_bin
 
 snippet = """
     __shared__ int shared_row_splits[256];

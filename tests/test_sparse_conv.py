@@ -16,7 +16,7 @@ from warpconvnet.nn.functional.sparse_conv import (
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
 from warpconvnet.nn.sparse_conv import SpatiallySparseConv
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 
 class TestSparseConv(unittest.TestCase):

@@ -2,33 +2,64 @@
 
 DISCLAIMER: THIS REPOSITORY IS NVIDIA INTERNAL/CONFIDENTIAL. DO NOT SHARE EXTERNALLY. IF YOU PLAN TO USE THIS CODEBASE FOR YOUR RESEARCH, PLEASE CONTACT CHRIS CHOY cchoy@nvidia.com
 
-
 ## Directory Structure
 
 ```
 warpconvnet/
 ├── warpconvnet/
-│   ├── core/
-│   ├── dataset/        # dataset classes (e.g. ModelNet, ScanNet)
-│   ├── geometry/       # geometry classes
-│   │   ├── ops/        # primitive operations on geometry classes
-│   ├── models/         # model classes (e.g. DGCNN, MinkowskiNet)
-│   │   ├── configs/    # model configs
-│   │   ├── examples/   # model examples (e.g. ModelNet, ScanNet)
-│   ├── nn/             # neural network modules
-│   │   ├── functional/ # functions
-│   ├── ops/            # non geometry related operations
-│   ├── utils/          # utility functions
-├── docker/             # docker files for building containers
-├── examples/           # example usage of the library
-├── README.md
+│   ├── geometry/          # Geometry implementations
+│   │   ├── base/          # Core definitions
+│   │   │   ├── batched.py # Base batched tensor class
+│   │   │   ├── coords.py  # Base coordinates class
+│   │   │   ├── features.py # Base features class
+│   │   │   └── geometry.py # Base geometry class
+│   │   ├── coords/        # Coordinate implementations
+│   │   │   ├── search/    # Search operations
+│   │   │   ├── ops/       # Coordinate operations
+│   │   │   │   ├── batch_index.py
+│   │   │   │   ├── sample.py
+│   │   │   │   └── voxel.py
+│   │   │   ├── integer.py # Integer coordinates
+│   │   │   └── real.py    # Real coordinates
+│   │   ├── features/      # Feature implementations
+│   │   ├── types/         # Geometry types (Points, Voxels)
+│   │   │   ├── points.py  # Point types (PointCloud)
+│   │   │   └── voxels.py  # Voxel types (Spatially Sparse Tensor)
+│   │   └── utils/         # Geometry utilities
+│   │
+│   ├── nn/                # Neural network implementations
+│   │   ├── functional/    # Functional implementations
+│   │   │   ├── sparse_conv.py
+│   │   │   ├── sparse_coords_ops.py
+│   │   │   └── sparse_pool.py
+│   │   ├── base_module.py # Base neural network modules
+│   │   └── sparse_conv.py # Sparse convolution modules
+│   │
+│   ├── ops/               # General operations
+│   │   ├── batch_copy.py
+│   │   └── reductions.py
+│   │
+│   ├── utils/             # General utilities
+│   │   ├── argsort.py
+│   │   ├── ntuple.py
+│   │   ├── ravel.py
+│   │   └── unique.py
+│   │
+│   ├── dataset/           # Data loader implementations
+│   │
+│   └── models/            # Model implementations
+│       ├── configs/       # Model configurations
+│       └── examples/      # Usage examples
+│
+├── docker/                # Docker build files
+├── examples/              # Example scripts
+├── tests/                 # Test suite
+└── README.md
 ```
-
 
 ## Model Submodule
 
 Model submodule contains popular models and configs. Please see the README.md in the subdirectory for more details.
-
 
 ## Installation
 
@@ -37,7 +68,6 @@ git clone --recurse-submodules https://gitlab-master.nvidia.com/3dmmllm/warp.git
 cd warpconvnet
 pip install -e .
 ```
-
 
 ## Example
 

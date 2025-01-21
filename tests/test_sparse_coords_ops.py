@@ -8,7 +8,7 @@ from warpconvnet.nn.functional.sparse_coords_ops import (
     expand_coords,
     generate_output_coords,
 )
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.timer import Timer
 
 

@@ -3,7 +3,7 @@ from .batched import BatchedTensor
 
 
 from warpconvnet.geometry.coords.search.search_results import RealSearchResult
-from warpconvnet.utils.batch_index import batch_indexed_coordinates
+from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 
 class Coords(BatchedTensor):

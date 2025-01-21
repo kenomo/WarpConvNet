@@ -40,7 +40,7 @@ class UseAllConvNet(nn.Module):
             PointConv(
                 24,
                 64,
-                neighbor_search_args=RealSearchConfig("knn", k=16),
+                neighbor_search_args=RealSearchConfig("knn", knn_k=16),
             ),
             nn.LayerNorm(64),
             nn.ReLU(),

@@ -38,6 +38,11 @@ def cat_to_pad_tensor(
 def cat_to_pad(cat_features: "CatFeatures", pad_multiple: Optional[int] = None) -> "PadFeatures":
     """Convert concatenated features to padded format."""
     from .pad import PadFeatures
+    from .cat import CatFeatures
+
+    assert isinstance(
+        cat_features, CatFeatures
+    ), f"cat_features must be a CatFeatures, got {type(cat_features)}"
 
     batched_tensor = cat_to_pad_tensor(
         cat_features.batched_tensor,
