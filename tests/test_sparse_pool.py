@@ -4,7 +4,7 @@ import torch
 import warp as wp
 
 from warpconvnet.geometry.types.voxels import Voxels
-from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce, sparse_unpool
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
@@ -29,7 +29,7 @@ class TestSparsePool(unittest.TestCase):
             self.st.coordinate_tensor,
             self.st.offsets,
         )
-        output_coords, offsets = generate_output_coords(batch_indexed_coords, stride=(2, 2, 2))
+        output_coords, offsets = stride_coords(batch_indexed_coords, stride=(2, 2, 2))
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 

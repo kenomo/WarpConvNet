@@ -10,12 +10,12 @@ from torch.autograd import Function
 
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.integer import IntCoords
+from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
 from warpconvnet.geometry.coords.search.discrete import generate_kernel_map
-from warpconvnet.nn.functional.sparse_coords_ops import (
+from warpconvnet.geometry.coords.ops.expand import (
     expand_coords,
-    generate_output_coords,
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 from warpconvnet.utils.ntuple import ntuple
@@ -393,7 +393,7 @@ def generate_output_coords_and_kernel_map(
             kernel_batch=kernel_search_batch_size,
         )
     elif any(s != 1 for s in stride):
-        batch_indexed_out_coords, out_offsets = generate_output_coords(
+        batch_indexed_out_coords, out_offsets = stride_coords(
             batch_indexed_in_coords,
             stride,
             backend=out_code_backend,

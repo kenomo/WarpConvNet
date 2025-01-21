@@ -12,7 +12,7 @@ from warpconvnet.geometry.coords.search.discrete import (
 from warpconvnet.geometry.types.voxels import (
     Voxels,
 )
-from warpconvnet.nn.functional.sparse_coords_ops import generate_output_coords
+from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.ops.reductions import REDUCTIONS, row_reduction
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.unique import unique_inverse
@@ -44,7 +44,7 @@ def sparse_reduce(
     out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
 
     batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
-    batch_indexed_out_coords, output_offsets = generate_output_coords(
+    batch_indexed_out_coords, output_offsets = stride_coords(
         batch_indexed_in_coords, stride, backend=out_code_backend
     )
     from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE

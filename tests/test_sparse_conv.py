@@ -3,6 +3,7 @@ import unittest
 import torch
 import warp as wp
 
+from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
 from warpconvnet.geometry.coords.search.discrete import generate_kernel_map
 from warpconvnet.geometry.types.voxels import Voxels
@@ -11,7 +12,6 @@ from warpconvnet.nn.functional.sparse_conv import (
     STRIDED_CONV_MODE,
     SpatiallySparseConvBatchedExplicitGEMMFunction,
     SpatiallySparseConvExplicitGEMMFunction,
-    generate_output_coords,
     spatially_sparse_conv,
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
@@ -39,7 +39,7 @@ class TestSparseConv(unittest.TestCase):
             self.st.coordinate_tensor,
             self.st.offsets,
         )
-        output_coords, offsets = generate_output_coords(batch_indexed_coords, stride=(2, 2, 2))
+        output_coords, offsets = stride_coords(batch_indexed_coords, stride=(2, 2, 2))
         self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
         self.assertTrue(offsets.shape == (self.B + 1,))
 
@@ -49,7 +49,7 @@ class TestSparseConv(unittest.TestCase):
             self.st.coordinate_tensor,
             self.st.offsets,
         )
-        batch_indexed_output_coords, offsets = generate_output_coords(
+        batch_indexed_output_coords, offsets = stride_coords(
             batch_indexed_in_coords, stride=(2, 2, 2)
         )
         self.assertTrue(batch_indexed_in_coords.dtype == torch.int32)
@@ -145,9 +145,7 @@ class TestSparseConv(unittest.TestCase):
         st = Voxels(coords, features, device="cuda:0").unique()
 
         batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batch_indexed_out_coords, offsets = generate_output_coords(
-            batch_indexed_in_coords, stride=stride
-        )
+        batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
         kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
@@ -273,9 +271,7 @@ class TestSparseConv(unittest.TestCase):
         st = Voxels(coords, features, device="cuda:0").unique()
 
         batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batch_indexed_out_coords, offsets = generate_output_coords(
-            batch_indexed_in_coords, stride=stride
-        )
+        batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
         kernel_map = generate_kernel_map(
             batch_indexed_in_coords,
             batch_indexed_out_coords,
