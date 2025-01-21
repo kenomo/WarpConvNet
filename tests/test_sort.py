@@ -3,7 +3,7 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.coords.spatial.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
 

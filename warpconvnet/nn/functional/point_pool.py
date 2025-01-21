@@ -117,8 +117,8 @@ def _pool_by_max_num_points(
         RETURN_CLS = Points
 
     sample_idx, unique_offsets = random_downsample(
-        batch_offsets=pc.offsets,
-        num_samples_per_batch=downsample_max_num_points,
+        offsets=pc.offsets,
+        sample_points=downsample_max_num_points,
     )
     unique_coords = pc.coordinate_tensor[sample_idx]
     # nearest neighbor of all points to down_coords
@@ -292,6 +292,8 @@ def point_pool(
 
     if return_to_unique:
         return out_sf, to_unique
+    if return_neighbor_search_result:
+        return out_sf, RealSearchResult(to_unique.to_unique_indices, unique_offsets)
     return out_sf
 
 

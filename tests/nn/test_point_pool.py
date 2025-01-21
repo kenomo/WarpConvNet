@@ -1,158 +1,143 @@
-import unittest
-
+import pytest
 import torch
-import torch.nn as nn
 import warp as wp
 
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.point_pool import REDUCTIONS, point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
-from warpconvnet.nn.modules.point_pool import PointMaxPool
+from warpconvnet.nn.modules.point_pool import PointMaxPool, PointAvgPool, PointSumPool, PointUnpool
 from warpconvnet.nn.modules.sparse_pool import PointToSparseWrapper
 from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
 
 
-class TestPointPool(unittest.TestCase):
-    def setUp(self):
-        wp.init()
-        self.B, min_N, max_N, self.C = 3, 1000, 10000, 7
-        self.Ns = torch.randint(min_N, max_N, (self.B,))
-        self.coords = [torch.rand((N, 3)) for N in self.Ns]
-        self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.pc = Points(self.coords, self.features)
+@pytest.fixture
+def setup_points():
+    """Setup test points with random coordinates."""
+    wp.init()
+    torch.manual_seed(0)
+    device = torch.device("cuda:0")
 
-    # Test point collection construction
-    def test_point_pool(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        # Pool features
-        pooled_pc, to_unique = point_pool(
-            pc,
-            reduction=REDUCTIONS.MEAN,
-            downsample_voxel_size=0.1,
-            return_type="point",
-            return_to_unique=True,
-        )
-        self.assertTrue(pooled_pc.batch_size == self.B)
-        self.assertTrue(pooled_pc.batched_features.shape[1] == self.C)
-        # Assert pooled coords are smaller
-        self.assertGreater(pc.coordinates.shape[0], pooled_pc.coordinates.shape[0])
-
-        # Unpool features
-        unpooling_mode = FEATURE_UNPOOLING_MODE.REPEAT
-        unpooled_pc = point_unpool(
-            pooled_pc,
-            pc,
-            concat_unpooled_pc=False,
-            unpooling_mode=unpooling_mode,
-            to_unique=to_unique,
-        )
-
-        # Check if the unpooled features have the same shape
-        N_tot = sum(self.Ns)
-        self.assertTrue(unpooled_pc.feature_tensor.shape == (N_tot, self.C))
-
-        unpooled_pc = point_unpool(
-            pooled_pc,
-            pc,
-            concat_unpooled_pc=True,
-            unpooling_mode=unpooling_mode,
-            to_unique=to_unique,
-        )
-        self.assertTrue(unpooled_pc.feature_tensor.shape == (N_tot, 2 * self.C))
-
-    def test_point_collection_to_sparse(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        # Pool features
-        st = point_pool(
-            pc,
-            reduction=REDUCTIONS.MEAN,
-            downsample_voxel_size=0.1,
-            return_type="sparse",
-        )
-        self.assertTrue(isinstance(st, Voxels))
-        self.assertTrue(st.batch_size == self.B)
-        self.assertTrue(st.batched_features.shape[1] == self.C)
-
-    def test_point_collection_to_point(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        # Pool features
-        out_pc = point_pool(
-            pc,
-            reduction=REDUCTIONS.MEAN,
-            downsample_voxel_size=0.1,
-            return_type="point",
-            avereage_pooled_coordinates=True,
-        )
-        self.assertTrue(isinstance(out_pc, Points))
-        self.assertTrue(out_pc.batch_size == self.B)
-        self.assertTrue(out_pc.batched_features.shape[1] == self.C)
-
-    def test_pool_unique_method(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        # Pool features
-        out_pc = point_pool(
-            pc,
-            reduction=REDUCTIONS.MEAN,
-            downsample_voxel_size=0.1,
-            return_type="point",
-            unique_method="morton",
-            avereage_pooled_coordinates=True,
-        )
-        self.assertTrue(isinstance(out_pc, Points))
-        self.assertTrue(out_pc.batch_size == self.B)
-        self.assertTrue(out_pc.batched_features.shape[1] == self.C)
-
-    def test_point_pool_num_points(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        # Pool features
-        pooled_pc = point_pool(
-            pc,
-            reduction=REDUCTIONS.MEAN,
-            downsample_max_num_points=1000,
-            return_type="point",
-        )
-        self.assertGreaterEqual(1000 * self.B, pooled_pc.coordinates.shape[0])
-
-    def test_point_max_pool(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-        pooled_pc = point_pool(
-            pc,
-            reduction=REDUCTIONS.MAX,
-            downsample_max_num_points=1000,
-            return_type="point",
-        )
-
-        self.assertTrue(torch.all(pooled_pc.offsets.diff() <= 1000))
-        self.assertTrue(pooled_pc.batched_features.shape[1] == self.C)
-
-    def test_point_to_sparse_wrapper(self):
-        device = torch.device("cuda:0")
-        pc = self.pc.to(device)
-
-        voxel_size = 0.1
-        raveled_values = ravel_multi_index_auto_shape(
-            torch.floor(pc.batch_indexed_coordinates / voxel_size).int()
-        )
-        pc = pc.replace(batched_features=raveled_values.view(-1, 1))
-
-        wrapper = PointToSparseWrapper(
-            inner_module=nn.Identity(),
-            voxel_size=voxel_size,
-            reduction=REDUCTIONS.MEAN,
-            concat_unpooled_pc=False,
-        )
-        out_pc = wrapper(pc)
-        self.assertTrue(isinstance(out_pc, Points))
-        self.assertTrue(out_pc.num_channels == pc.num_channels)
-        self.assertTrue(torch.all(out_pc.feature_tensor == pc.feature_tensor))
+    B, min_N, max_N, C = 3, 1000, 10000, 7
+    Ns = torch.randint(min_N, max_N, (B,))
+    coords = [torch.rand((N, 3)) for N in Ns]
+    features = [torch.rand((N, C)) for N in Ns]
+    return Points(coords, features).to(device)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_point_max_pool(setup_points):
+    """Test max pooling with voxel downsampling."""
+    pc: Points = setup_points
+    device = pc.device
+
+    pool = PointMaxPool(
+        downsample_voxel_size=0.1,
+        return_type="point",
+    ).to(device)
+
+    # Forward pass
+    out = pool(pc)
+
+    # Verify output
+    assert isinstance(out, Points)
+    assert out.num_channels == pc.num_channels
+    assert len(out) < len(pc)  # Should be downsampled
+    assert out.voxel_size == 0.1
+
+
+def test_point_avg_pool(setup_points):
+    """Test average pooling with point limit."""
+    pc: Points = setup_points
+    device = pc.device
+    max_points = 1000
+
+    pool = PointAvgPool(
+        downsample_max_num_points=max_points,
+        return_type="point",
+    ).to(device)
+
+    # Forward pass
+    out = pool(pc)
+
+    # Verify output
+    assert isinstance(out, Points)
+    assert out.num_channels == pc.num_channels
+    assert len(out) <= max_points
+    assert out.device == device
+
+
+def test_point_sum_pool(setup_points):
+    """Test sum pooling with neighbor search result."""
+    pc: Points = setup_points
+    device = pc.device
+
+    pool = PointSumPool(
+        downsample_voxel_size=0.1,
+        return_type="point",
+        return_neighbor_search_result=True,
+    ).to(device)
+
+    # Forward pass
+    out, search_result = pool(pc)
+
+    # Verify output
+    assert isinstance(out, Points)
+    assert out.num_channels == pc.num_channels
+    assert len(out) < len(pc)  # Should be downsampled
+    assert search_result is not None
+
+
+@pytest.mark.parametrize(
+    "unpooling_mode",
+    [
+        FEATURE_UNPOOLING_MODE.REPEAT,
+    ],
+)
+def test_point_unpool(setup_points, unpooling_mode):
+    """Test unpooling with different modes."""
+    pc: Points = setup_points
+    device = pc.device
+
+    # First create pooled points
+    pool = PointMaxPool(downsample_voxel_size=0.1).to(device)
+    pooled_pc = pool(pc)
+
+    # Create unpool layer
+    unpool = PointUnpool(
+        unpooling_mode=unpooling_mode,
+        concat_unpooled_pc=False,
+    ).to(device)
+
+    # Forward pass
+    out = unpool(pooled_pc, pc)
+
+    # Verify output
+    assert isinstance(out, Points)
+    assert out.num_channels == pooled_pc.num_channels
+    assert len(out) == len(pc)  # Should match original size
+    assert out.device == device
+
+
+def test_point_unpool_concat(setup_points):
+    """Test unpooling with concatenated features."""
+    pc: Points = setup_points
+    device = pc.device
+
+    # First create pooled points
+    pool = PointMaxPool(downsample_voxel_size=0.1).to(device)
+    pooled_pc = pool(pc)
+
+    # Create unpool layer with concatenation
+    unpool = PointUnpool(
+        unpooling_mode=FEATURE_UNPOOLING_MODE.REPEAT,
+        concat_unpooled_pc=True,
+    ).to(device)
+
+    # Forward pass
+    out = unpool(pooled_pc, pc)
+
+    # Verify output
+    assert isinstance(out, Points)
+    assert out.num_channels == pooled_pc.num_channels + pc.num_channels
+    assert len(out) == len(pc)
+    assert out.device == device

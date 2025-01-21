@@ -55,7 +55,9 @@ def knn_search(
     query_positions: [M,3]
     k: int
     """
-    assert 0 < k < ref_positions.shape[0]
+    assert (
+        0 < k < ref_positions.shape[0]
+    ), f"k must be greater than 0 and less than the number of reference points. K: {k}, ref_positions.shape[0]: {ref_positions.shape[0]}"
     assert search_method in ["chunk"]
     # Critical for multi GPU
     if ref_positions.is_cuda:
@@ -117,7 +119,15 @@ def batched_knn_search(
     neighbors = []
     # TODO(cchoy): warp kernel
     B = len(ref_offsets) - 1
+    N_ref = len(ref_positions)
+    N_query = len(query_positions)
     for b in range(B):
+        assert (
+            N_ref > ref_offsets[b]
+        ), f"Invalid reference offsets: {ref_offsets}. Reference point index: {b}, ref_offsets[b]: {ref_offsets[b]}, N_ref: {N_ref}"
+        assert (
+            N_query > query_offsets[b]
+        ), f"Invalid query offsets: {query_offsets}. Query point index: {b}, query_offsets[b]: {query_offsets[b]}, N_query: {N_query}"
         neighbor_index = knn_search(
             ref_positions[ref_offsets[b] : ref_offsets[b + 1],],
             query_positions[query_offsets[b] : query_offsets[b + 1],],

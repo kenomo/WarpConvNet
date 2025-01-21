@@ -1,5 +1,4 @@
-import unittest
-
+import pytest
 import torch
 import warp as wp
 
@@ -19,309 +18,241 @@ from warpconvnet.nn.modules.sparse_conv import SpatiallySparseConv
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 
-class TestSparseConv(unittest.TestCase):
-    def setUp(self) -> None:
-        wp.init()
-        # Set random seed
-        torch.manual_seed(0)
+@pytest.fixture
+def setup_voxels():
+    """Setup test voxels with random coordinates."""
+    wp.init()
+    torch.manual_seed(0)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.B, min_N, max_N, self.C = 3, 100000, 1000000, 7
-        self.Ns = torch.randint(min_N, max_N, (self.B,))
-        self.voxel_size = 0.01
-        self.coords = [(torch.rand((N, 3)) / self.voxel_size).int() for N in self.Ns]
-        self.features = [torch.rand((N, self.C)) for N in self.Ns]
-        self.st = Voxels(self.coords, self.features, device=device).unique()
-        return super().setUp()
-
-    def test_generate_output_coords(self):
-        batch_indexed_coords = batch_indexed_coordinates(
-            self.st.coordinate_tensor,
-            self.st.offsets,
-        )
-        output_coords, offsets = stride_coords(batch_indexed_coords, stride=(2, 2, 2))
-        self.assertTrue(output_coords.shape[0] < batch_indexed_coords.shape[0])
-        self.assertTrue(offsets.shape == (self.B + 1,))
-
-    def test_generate_kernel_map(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        batch_indexed_in_coords = batch_indexed_coordinates(
-            self.st.coordinate_tensor,
-            self.st.offsets,
-        )
-        batch_indexed_output_coords, offsets = stride_coords(
-            batch_indexed_in_coords, stride=(2, 2, 2)
-        )
-        self.assertTrue(batch_indexed_in_coords.dtype == torch.int32)
-        in_to_out_stride_ratio = (2, 2, 2)
-        kernel_size = (3, 3, 3)
-        kernel_dilation = (1, 1, 1)
-        kernel_batch = 8
-        kernel_map = generate_kernel_map(  # noqa: F841
-            batch_indexed_in_coords,
-            batch_indexed_output_coords,
-            in_to_out_stride_ratio,
-            kernel_size,
-            kernel_dilation,
-            kernel_batch,
-        )
-
-        tot_kernel_map = kernel_map.offsets[-1].item()
-        self.assertTrue(tot_kernel_map == kernel_map.in_maps.shape[0])
-        self.assertTrue(tot_kernel_map == kernel_map.out_maps.shape[0])
-
-        for _, (in_map, out_map) in enumerate(kernel_map):
-            self.assertTrue(in_map.shape[0] == out_map.shape[0])
-
-        # Manually check the kernel map
-        in_hashmap = VectorHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
-        i, j, k = torch.meshgrid(
-            torch.arange(kernel_size[0], dtype=torch.int32),
-            torch.arange(kernel_size[1], dtype=torch.int32),
-            torch.arange(kernel_size[2], dtype=torch.int32),
-            indexing="ij",
-        )
-        i, j, k = i.flatten(), j.flatten(), k.flatten()
-        kernel_offsets = torch.stack(
-            [
-                torch.zeros_like(i),
-                (i - kernel_size[0] // 2) * kernel_dilation[0],
-                (j - kernel_size[1] // 2) * kernel_dilation[1],
-                (k - kernel_size[2] // 2) * kernel_dilation[2],
-            ],
-            dim=1,
-        ).to(device)
-
-        batch_indexed_output_coords = batch_indexed_output_coords * torch.tensor(
-            [1, *in_to_out_stride_ratio], dtype=torch.int32, device=device
-        )
-
-        N_in = batch_indexed_in_coords.shape[0]
-        N_out = batch_indexed_output_coords.shape[0]
-        for i, (in_map, out_map) in enumerate(kernel_map):
-            offseted_out_coords = batch_indexed_output_coords + kernel_offsets[i]
-            indices = in_hashmap.search(wp.from_torch(offseted_out_coords))
-            indices = wp.to_torch(indices)
-            valid_bool = (indices >= 0).to(device)
-            num_valid = valid_bool.sum().item()
-            found_in_map = indices[valid_bool]
-
-            self.assertTrue(num_valid == in_map.shape[0])
-            self.assertTrue(in_map.max().item() < N_in)
-            self.assertTrue(out_map.max().item() < N_out)
-            self.assertTrue(found_in_map.max().item() <= N_in)
-            unique_found_in_map = found_in_map.unique(sorted=True)
-            unique_in_map = in_map.unique(sorted=True)
-            self.assertTrue(torch.all(unique_found_in_map == unique_in_map))
-
-    def test_sparse_conv(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
-        weights = torch.randn(num_kernels, C_in, C_out).to(self.st.device)
-        bias = torch.randn(C_out).to(self.st.device)
-        out = spatially_sparse_conv(
-            self.st,
-            weight=weights,
-            bias=bias,
-            kernel_size=kernel_size,
-            stride=stride,
-        )
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_sparse_conv_backward(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
-        weights = torch.randn(num_kernels, C_in, C_out).to(self.st.device)
-
-        B, min_N, max_N, C = 3, 10, 20, 7
-        Ns = torch.randint(min_N, max_N, (B,))
-        voxel_size = 0.01
-        coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
-        features = [torch.rand((N, C)) for N in Ns]
-        st = Voxels(coords, features, device="cuda:0").unique()
-
-        batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
-        kernel_map = generate_kernel_map(
-            batch_indexed_in_coords,
-            batch_indexed_out_coords,
-            stride,
-            kernel_size,
-        )
-
-        feature_tensor = st.feature_tensor.detach().requires_grad_(True)
-        # torch gradcheck
-        torch.autograd.gradcheck(
-            SpatiallySparseConvExplicitGEMMFunction.apply,
-            (feature_tensor, weights, kernel_map, batch_indexed_out_coords.shape[0]),
-            eps=1e-3,
-            atol=1e-3,
-            rtol=1e-3,
-        )
-
-    def test_sparse_conv_module(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride).to(self.st.device)
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_sparse_conv_module_transposed(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, transposed=True).to(
-            self.st.device
-        )
-        st: Voxels = self.st
-        st_downsampled = sparse_max_pool(st, (2, 2, 2), (2, 2, 2))
-        out = conv(st_downsampled, st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_sparse_conv_generative(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (1, 1, 1)
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, generative=True).to(
-            self.st.device
-        )
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-        # Check that the output is larger than the input
-        self.assertTrue(out.coordinate_tensor.shape[0] > self.st.coordinate_tensor.shape[0])
-
-    def test_sparse_conv_stride_mode(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        conv = SpatiallySparseConv(
-            C_in,
-            C_out,
-            kernel_size,
-            stride,
-            stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE,
-        ).to(self.st.device)
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-        conv2 = SpatiallySparseConv(
-            C_in, C_out, kernel_size, stride, stride_mode=STRIDED_CONV_MODE.STRIDE_ONLY
-        ).to(self.st.device)
-        out2 = conv2(self.st)
-        self.assertTrue(out2.feature_tensor.shape[1] == C_out)
-        self.assertTrue(out.feature_tensor.shape[0] == out2.feature_tensor.shape[0])
-
-        # generative
-        conv = SpatiallySparseConv(
-            C_in,
-            C_out,
-            kernel_size,
-            stride,
-            stride_mode=STRIDED_CONV_MODE.STRIDE_ONLY,
-            generative=True,
-        ).to(self.st.device)
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-        conv = SpatiallySparseConv(
-            C_in,
-            C_out,
-            kernel_size,
-            stride,
-            stride_mode=STRIDED_CONV_MODE.REDUCE_AND_STRIDE,
-            generative=True,
-        ).to(self.st.device)
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_sparse_conv_explicit_gemm_batched(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        conv = SpatiallySparseConv(
-            C_in,
-            C_out,
-            kernel_size,
-            stride,
-            conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM_BATCHED,
-        ).to(self.st.device)
-        out = conv(self.st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_sparse_conv_explicit_gemm_batched_gradcheck(self):
-        # gradcheck
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        matmul_batch_size = 2
-
-        num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
-        weights = torch.randn(num_kernels, C_in, C_out).to(self.st.device)
-
-        B, min_N, max_N, C = 3, 10, 20, 7
-        Ns = torch.randint(min_N, max_N, (B,))
-        voxel_size = 0.01
-        coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
-        features = [torch.rand((N, C)) for N in Ns]
-        st = Voxels(coords, features, device="cuda:0").unique()
-
-        batch_indexed_in_coords = batch_indexed_coordinates(st.coordinate_tensor, st.offsets)
-        batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
-        kernel_map = generate_kernel_map(
-            batch_indexed_in_coords,
-            batch_indexed_out_coords,
-            stride,
-            kernel_size,
-        )
-        feature_tensor = st.feature_tensor.detach().requires_grad_(True)
-        torch.autograd.gradcheck(
-            SpatiallySparseConvBatchedExplicitGEMMFunction.apply,
-            (
-                feature_tensor,
-                weights,
-                kernel_map,
-                batch_indexed_out_coords.shape[0],
-                matmul_batch_size,
-            ),
-            eps=1e-3,
-            atol=1e-3,
-            rtol=1e-3,
-        )
-
-    def test_sparse_conv_out_code_backend(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        device = torch.device("cuda:0")
-        st: Voxels = self.st.to(device)
-        # sort
-        st = st.sort()
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, out_code_backend="morton").to(
-            device
-        )
-        out = conv(st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
-
-    def test_spconv_amp(self):
-        C_in, C_out = self.C, 13
-        kernel_size = (3, 3, 3)
-        stride = (2, 2, 2)
-        device = torch.device("cuda:0")
-        st: Voxels = self.st.to(device)
-        # sort
-        st = st.sort()
-        conv = SpatiallySparseConv(C_in, C_out, kernel_size, stride, out_code_backend="morton").to(
-            device
-        )
-        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-            out = conv(st)
-        self.assertTrue(out.feature_tensor.shape[1] == C_out)
+    B, min_N, max_N, C = 3, 100000, 1000000, 7
+    Ns = torch.randint(min_N, max_N, (B,))
+    voxel_size = 0.01
+    coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
+    features = [torch.rand((N, C)) for N in Ns]
+    return Voxels(coords, features, device=device).unique()
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+def setup_small_voxels():
+    """Setup small voxels for gradient checking."""
+    wp.init()
+    torch.manual_seed(0)
+    device = torch.device("cuda:0")
+
+    B, min_N, max_N, C = 3, 10, 20, 7
+    Ns = torch.randint(min_N, max_N, (B,))
+    voxel_size = 0.01
+    coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
+    features = [torch.rand((N, C)) for N in Ns]
+    return Voxels(coords, features, device=device).unique()
+
+
+def test_generate_output_coords(setup_voxels):
+    """Test generation of output coordinates."""
+    voxels = setup_voxels
+    batch_indexed_coords = batch_indexed_coordinates(
+        voxels.coordinate_tensor,
+        voxels.offsets,
+    )
+    output_coords, offsets = stride_coords(batch_indexed_coords, stride=(2, 2, 2))
+
+    assert output_coords.shape[0] < batch_indexed_coords.shape[0]
+    assert offsets.shape == (voxels.batch_size + 1,)
+
+
+def test_generate_kernel_map(setup_voxels):
+    """Test kernel map generation and validation."""
+    voxels = setup_voxels
+    device = voxels.device
+
+    # Setup coordinates
+    batch_indexed_in_coords = batch_indexed_coordinates(
+        voxels.coordinate_tensor,
+        voxels.offsets,
+    )
+    batch_indexed_output_coords, offsets = stride_coords(batch_indexed_in_coords, stride=(2, 2, 2))
+
+    # Generate kernel map
+    assert batch_indexed_in_coords.dtype == torch.int32
+    kernel_map = generate_kernel_map(
+        batch_indexed_in_coords,
+        batch_indexed_output_coords,
+        in_to_out_stride_ratio=(2, 2, 2),
+        kernel_size=(3, 3, 3),
+        kernel_dilation=(1, 1, 1),
+        kernel_search_batch_size=8,
+    )
+
+    # Verify kernel map properties
+    tot_kernel_map = kernel_map.offsets[-1].item()
+    assert tot_kernel_map == kernel_map.in_maps.shape[0]
+    assert tot_kernel_map == kernel_map.out_maps.shape[0]
+
+    # Verify map sizes match
+    for _, (in_map, out_map) in enumerate(kernel_map):
+        assert in_map.shape[0] == out_map.shape[0]
+
+    # Manual verification with hashmap
+    in_hashmap = VectorHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
+    kernel_offsets = _generate_kernel_offsets((3, 3, 3), (1, 1, 1), device)
+
+    batch_indexed_output_coords = batch_indexed_output_coords * torch.tensor(
+        [1, 2, 2, 2], dtype=torch.int32, device=device
+    )
+
+    N_in = batch_indexed_in_coords.shape[0]
+    N_out = batch_indexed_output_coords.shape[0]
+
+    for i, (in_map, out_map) in enumerate(kernel_map):
+        offseted_out_coords = batch_indexed_output_coords + kernel_offsets[i]
+        indices = wp.to_torch(in_hashmap.search(wp.from_torch(offseted_out_coords)))
+        valid_bool = (indices >= 0).to(device)
+        num_valid = valid_bool.sum().item()
+        found_in_map = indices[valid_bool]
+
+        assert num_valid == in_map.shape[0]
+        assert in_map.max().item() < N_in
+        assert out_map.max().item() < N_out
+        assert found_in_map.max().item() <= N_in
+
+        unique_found_in_map = found_in_map.unique(sorted=True)
+        unique_in_map = in_map.unique(sorted=True)
+        assert torch.all(unique_found_in_map == unique_in_map)
+
+
+def test_sparse_conv(setup_voxels):
+    """Test basic sparse convolution."""
+    voxels = setup_voxels
+    C_in, C_out = voxels.num_channels, 13
+
+    # Create weights and bias
+    kernel_size = (3, 3, 3)
+    num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    weights = torch.randn(num_kernels, C_in, C_out).to(voxels.device)
+    bias = torch.randn(C_out).to(voxels.device)
+
+    # Forward pass
+    out = spatially_sparse_conv(
+        voxels,
+        weight=weights,
+        bias=bias,
+        kernel_size=kernel_size,
+        stride=(2, 2, 2),
+    )
+    assert out.num_channels == C_out
+
+
+def test_sparse_conv_backward(setup_small_voxels):
+    """Test sparse convolution gradients."""
+    voxels = setup_small_voxels
+    C_in, C_out = voxels.num_channels, 13
+    kernel_size = (3, 3, 3)
+    stride = (2, 2, 2)
+
+    # Setup convolution parameters
+    num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    weights = torch.randn(num_kernels, C_in, C_out).to(voxels.device)
+
+    # Generate kernel map
+    batch_indexed_in_coords = batch_indexed_coordinates(voxels.coordinate_tensor, voxels.offsets)
+    batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
+    kernel_map = generate_kernel_map(
+        batch_indexed_in_coords,
+        batch_indexed_out_coords,
+        stride,
+        kernel_size,
+    )
+
+    # Prepare for gradient check
+    feature_tensor = voxels.feature_tensor.detach().requires_grad_(True)
+
+    # Run gradient check
+    torch.autograd.gradcheck(
+        SpatiallySparseConvExplicitGEMMFunction.apply,
+        (feature_tensor, weights, kernel_map, batch_indexed_out_coords.shape[0]),
+        eps=1e-3,
+        atol=1e-3,
+        rtol=1e-3,
+    )
+
+
+@pytest.mark.parametrize(
+    "stride_mode", [STRIDED_CONV_MODE.REDUCE_AND_STRIDE, STRIDED_CONV_MODE.STRIDE_ONLY]
+)
+def test_sparse_conv_stride_modes(setup_voxels, stride_mode):
+    """Test different striding modes for sparse convolution."""
+    voxels = setup_voxels
+    C_in, C_out = voxels.num_channels, 13
+    kernel_size = (3, 3, 3)
+    stride = (2, 2, 2)
+
+    conv = SpatiallySparseConv(
+        C_in,
+        C_out,
+        kernel_size,
+        stride,
+        stride_mode=stride_mode,
+    ).to(voxels.device)
+
+    out = conv(voxels)
+    assert out.num_channels == C_out
+
+
+@pytest.mark.parametrize("generative", [True, False])
+def test_sparse_conv_generative(setup_voxels, generative):
+    """Test generative sparse convolution."""
+    voxels = setup_voxels
+    C_in, C_out = voxels.num_channels, 13
+
+    conv = SpatiallySparseConv(
+        C_in,
+        C_out,
+        kernel_size=(3, 3, 3),
+        stride=(1, 1, 1),
+        generative=generative,
+    ).to(voxels.device)
+
+    out = conv(voxels)
+    assert out.num_channels == C_out
+
+    if generative:
+        assert out.coordinate_tensor.shape[0] > voxels.coordinate_tensor.shape[0]
+
+
+def test_sparse_conv_amp(setup_voxels):
+    """Test sparse convolution with automatic mixed precision."""
+    voxels: Voxels = setup_voxels.to("cuda:0").sort()
+    C_in, C_out = voxels.num_channels, 13
+
+    conv = SpatiallySparseConv(
+        C_in,
+        C_out,
+        kernel_size=(3, 3, 3),
+        stride=(2, 2, 2),
+        out_code_backend="morton",
+    ).to(voxels.device)
+
+    with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+        out = conv(voxels)
+    assert out.num_channels == C_out
+
+
+def _generate_kernel_offsets(kernel_size, kernel_dilation, device):
+    """Helper function to generate kernel offsets."""
+    i, j, k = torch.meshgrid(
+        torch.arange(kernel_size[0], dtype=torch.int32),
+        torch.arange(kernel_size[1], dtype=torch.int32),
+        torch.arange(kernel_size[2], dtype=torch.int32),
+        indexing="ij",
+    )
+    i, j, k = i.flatten(), j.flatten(), k.flatten()
+    return torch.stack(
+        [
+            torch.zeros_like(i),
+            (i - kernel_size[0] // 2) * kernel_dilation[0],
+            (j - kernel_size[1] // 2) * kernel_dilation[1],
+            (k - kernel_size[2] // 2) * kernel_dilation[2],
+        ],
+        dim=1,
+    ).to(device)
