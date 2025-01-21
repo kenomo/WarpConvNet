@@ -8,7 +8,7 @@ from torch.nn import init
 from torch.nn.init import calculate_gain
 
 from warpconvnet.geometry.types.voxels import Voxels
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
     STRIDED_CONV_MODE,

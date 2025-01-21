@@ -19,9 +19,9 @@ from warpconvnet.geometry.coords.search.search_configs import (
 )
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
-from warpconvnet.nn.point_conv import PointConv
-from warpconvnet.nn.sequential import Sequential
-from warpconvnet.nn.sparse_conv import SparseConv3d
+from warpconvnet.nn.modules.point_conv import PointConv
+from warpconvnet.nn.modules.sequential import Sequential
+from warpconvnet.nn.modules.sparse_conv import SparseConv3d
 from warpconvnet.ops.reductions import REDUCTIONS
 
 

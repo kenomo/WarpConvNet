@@ -34,6 +34,14 @@ from warpconvnet.geometry.coords.search.discrete import (
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
 
+# Import nn modules
+from warpconvnet.nn.modules.activations import ReLU, GELU, SiLU, Tanh, Sigmoid, LeakyReLU
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.point_conv import PointConv
+from warpconvnet.nn.modules.sparse_conv import SparseConv
+
+# Import nn functionals
+
 
 def test_features_import():
     assert issubclass(Features, BatchedTensor)

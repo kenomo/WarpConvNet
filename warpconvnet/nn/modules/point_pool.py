@@ -5,7 +5,7 @@ import torch.nn as nn
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.geometry.types.points import Points
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.point_unpool import FEATURE_UNPOOLING_MODE, point_unpool
 from warpconvnet.ops.reductions import REDUCTIONS

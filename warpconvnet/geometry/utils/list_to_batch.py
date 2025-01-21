@@ -4,8 +4,6 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.ops.batch_index import batch_index_from_offset
-
 
 def list_to_cat_tensor(
     tensor_list: List[Float[Tensor, "N C"]],  # noqa: F821

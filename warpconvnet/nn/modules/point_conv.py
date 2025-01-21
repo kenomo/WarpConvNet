@@ -8,9 +8,9 @@ from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.coords.search.continuous import RealSearchMode
 from warpconvnet.geometry.types.points import Points
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
+from warpconvnet.nn.modules.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = ["PointConv"]

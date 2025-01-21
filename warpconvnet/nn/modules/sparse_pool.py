@@ -6,7 +6,7 @@ import torch.nn as nn
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.global_pool import global_pool
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.nn.functional.point_unpool import point_unpool

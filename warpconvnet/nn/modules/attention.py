@@ -13,9 +13,9 @@ from warpconvnet.geometry.features.cat import (
 )
 from warpconvnet.geometry.features.convert import cat_to_pad_tensor
 from warpconvnet.geometry.features.patch import CatPatchFeatures
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.normalizations import LayerNorm, RMSNorm
+from warpconvnet.nn.modules.normalizations import LayerNorm, RMSNorm
 from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 from warpconvnet.types import NestedTensor
 

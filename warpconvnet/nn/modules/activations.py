@@ -3,14 +3,13 @@ from typing import Union
 from torch import Tensor, nn
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.transforms import (
     apply_feature_transform,
     elu,
     gelu,
     leaky_relu,
     log_softmax,
-    relu,
     sigmoid,
     silu,
     softmax,

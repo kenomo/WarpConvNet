@@ -6,17 +6,14 @@ import warp as wp
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    RealSearchMode,
-)
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig, RealSearchMode
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.functional.point_pool import (
     FEATURE_POOLING_MODE,
     FeaturePoolingArgs,
 )
-from warpconvnet.nn.point_conv import PointConv
-from warpconvnet.nn.transforms import MLP
+from warpconvnet.nn.modules.point_conv import PointConv
+from warpconvnet.nn.modules.transforms import MLP
 
 
 class TestFSDP(unittest.TestCase):

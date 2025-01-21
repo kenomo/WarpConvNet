@@ -5,7 +5,7 @@ import warp as wp
 
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
-from warpconvnet.nn.normalizations import LayerNorm, RMSNorm
+from warpconvnet.nn.modules.normalizations import LayerNorm, RMSNorm
 
 
 class TestNormalization(unittest.TestCase):

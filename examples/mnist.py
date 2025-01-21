@@ -11,8 +11,8 @@ from torchvision import datasets, transforms
 import warpconvnet.nn.functional.transforms as T
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
-from warpconvnet.nn.sequential import Sequential
-from warpconvnet.nn.sparse_conv import SparseConv2d
+from warpconvnet.nn.modules.sequential import Sequential
+from warpconvnet.nn.modules.sparse_conv import SparseConv2d
 
 
 class Net(nn.Module):

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 
 
 def run_forward(module: nn.Module, x: Geometry, in_sf: Geometry):

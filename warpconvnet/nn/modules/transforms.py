@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 
 __all__ = [
     "Transform",

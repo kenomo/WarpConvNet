@@ -5,7 +5,7 @@ import torch
 import warp as wp
 
 from warpconvnet.geometry.types.points import Points
-from warpconvnet.nn.attention import (
+from warpconvnet.nn.modules.attention import (
     Attention,
     NestedAttention,
     PatchAttention,
@@ -15,7 +15,7 @@ from warpconvnet.nn.attention import (
     ZeroOutPoints,
 )
 from warpconvnet.nn.encodings import FourierEncoding
-from warpconvnet.nn.mlp import Linear
+from warpconvnet.nn.modules.mlp import Linear
 
 
 class TestAttention(unittest.TestCase):

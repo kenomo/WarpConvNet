@@ -3,12 +3,9 @@ import unittest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
-from warpconvnet.geometry.ops.neighbor_search_continuous import (
-    RealSearchMode,
-)
+from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig, RealSearchMode
 from warpconvnet.geometry.types.points import Points
-from warpconvnet.nn.point_conv import PointConv
+from warpconvnet.nn.modules.point_conv import PointConv
 from warpconvnet.ops.reductions import REDUCTIONS
 
 

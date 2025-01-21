@@ -5,7 +5,7 @@ from jaxtyping import Float
 from torch import Tensor, nn
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.nn.base_module import BaseSpatialModule
+from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.transforms import apply_feature_transform
 
 __all__ = [

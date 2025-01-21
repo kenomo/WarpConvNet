@@ -15,7 +15,7 @@ from warpconvnet.nn.functional.sparse_conv import (
     spatially_sparse_conv,
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
-from warpconvnet.nn.sparse_conv import SpatiallySparseConv
+from warpconvnet.nn.modules.sparse_conv import SpatiallySparseConv
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 

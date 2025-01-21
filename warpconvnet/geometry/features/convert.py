@@ -4,7 +4,7 @@ from jaxtyping import Float, Int
 import torch
 from torch import Tensor
 
-from warpconvnet.ops.batch_copy import copy_batch_torch, copy_batch_warp
+from .batch_copy import copy_batch_torch, copy_batch_warp
 
 if TYPE_CHECKING:
     from .cat import CatFeatures
