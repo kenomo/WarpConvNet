@@ -5,4 +5,4 @@
     echo "\`\`\`"
     git ls-files | tree --fromfile -F --dirsfirst
     echo "\`\`\`"
-} > DIR_STRUCTURE.md
+} | tee DIR_STRUCTURE.md
