@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union, Generator
 
 import numpy as np
 import torch
@@ -71,6 +71,11 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         pass
 
 
+def _maybe_cast(tensor: torch.Tensor, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
+    """Fast dtype conversion if needed."""
+    return tensor if dtype is None else tensor.to(dtype=dtype)
+
+
 class SpatiallySparseConvExplicitGEMMFunction(Function):
     @staticmethod
     def forward(
@@ -79,27 +84,23 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         weight: Float[Tensor, "K C_in C_out"],
         kernel_map: IntSearchResult,
         num_out_coords: int,
-        compute_dtype: torch.dtype = torch.float32,
+        compute_dtype: Optional[torch.dtype] = None,
     ) -> Float[Tensor, "M C_out"]:
         device = in_features.device
-        # Create output feature tensor
+
+        # Convert input features and weight once
+        comp_in_feats = _maybe_cast(in_features, compute_dtype)
+        comp_weight = _maybe_cast(weight, compute_dtype)
+
         output_feature_tensor = torch.zeros(
-            num_out_coords, weight.shape[-1], device=device, dtype=compute_dtype
+            num_out_coords, weight.shape[-1], device=device, dtype=comp_in_feats.dtype
         )
 
         for i, (in_map, out_map) in enumerate(kernel_map):
-            # Get the input and output maps
             in_map = in_map.to(device)
             out_map = out_map.to(device)
 
-            # Get the input and output features
-            curr_in_features = in_features[in_map].to(dtype=compute_dtype)
-
-            # matmul. N x C_in @ C_in x C_out -> N x C_out
-            # bmm. B x N x C_in @ B x C_in x C_out -> B x N x C_out
-            curr_out_features = torch.matmul(curr_in_features, weight[i])
-
-            # Add to output feature tensor
+            curr_out_features = torch.matmul(comp_in_feats[in_map], comp_weight[i])
             output_feature_tensor[out_map] += curr_out_features
 
         ctx.kernel_map = kernel_map
@@ -115,20 +116,27 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         in_features, weight = ctx.saved_tensors
         kernel_map = ctx.kernel_map
         compute_dtype = ctx.compute_dtype
-        # Compute the gradient of the input features
-        grad_in_features = torch.zeros_like(in_features, dtype=compute_dtype)
-        grad_weight = torch.zeros_like(weight, dtype=compute_dtype)
+        device = in_features.device  # Get device from input
+
+        # When compute_dtype is None, use input's dtype
+        dtype_to_use = compute_dtype if compute_dtype is not None else in_features.dtype
+
+        # Convert all tensors to the same dtype
+        comp_in_feats = in_features.to(device=device, dtype=dtype_to_use)
+        comp_weight = weight.to(device=device, dtype=dtype_to_use)
+        comp_grad_output = grad_output.to(device=device, dtype=dtype_to_use)
+
+        # Create gradients in same dtype
+        grad_in_features = torch.zeros_like(comp_in_feats, device=device)
+        grad_weight = torch.zeros_like(comp_weight, device=device)
 
         for i, (in_map, out_map) in enumerate(kernel_map):
-            # Get the input and output features
-            curr_in_features = in_features[in_map].to(dtype=compute_dtype)
-            curr_out_features = grad_output[out_map].to(dtype=compute_dtype)
+            curr_grad_output = comp_grad_output[out_map]
+            curr_in_feats = comp_in_feats[in_map]
+            curr_weight = comp_weight[i]
 
-            # matmul. N x C_out @ C_out x C_in -> N x C_in
-            grad_in_features[in_map] += torch.matmul(curr_out_features, weight[i].T)
-
-            # matmul. M x C_out @ C_out x C_in -> M x C_in
-            grad_weight[i] += torch.matmul(curr_in_features.T, curr_out_features)
+            grad_in_features[in_map] += torch.matmul(curr_grad_output, curr_weight.T)
+            grad_weight[i] += torch.matmul(curr_in_feats.T, curr_grad_output)
 
         return (
             grad_in_features.to(dtype=in_features.dtype),
@@ -184,11 +192,12 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         kernel_map = ctx.kernel_map
         matmul_batch_size = ctx.matmul_batch_size
         compute_dtype = ctx.compute_dtype
+        device = in_features.device  # Get device from input
         # Add a dummy row to the beginning of the in_maps tensor
         grad_in_features = torch.zeros(
             in_features.shape[0] + 1,
             in_features.shape[1],
-            device=in_features.device,
+            device=device,
             dtype=compute_dtype,
         )
         grad_weight = torch.zeros_like(weight, dtype=compute_dtype)

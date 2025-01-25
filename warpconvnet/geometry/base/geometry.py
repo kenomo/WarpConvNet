@@ -71,15 +71,25 @@ class Geometry:
             **self._extra_attributes,
         )
 
-    def to(self, device: str) -> "Geometry":
+    def to(
+        self,
+        device: Optional[str | torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> "Geometry":
         """Move the geometry to the specified device.
 
         Args:
-            device (str): Target device (e.g., 'cuda', 'cpu').
+            device (str): Target device (e.g., 'cuda', 'cpu') or dtype (e.g., torch.float16, torch.bfloat16).
 
         Returns:
             Geometry: A new Geometry instance on the target device.
         """
+        if device is None:
+            assert dtype is not None and isinstance(
+                dtype, torch.dtype
+            ), f"dtype must be a torch.dtype, got {dtype}"
+            return self._apply_feature_transform(lambda x: x.to(dtype))
+
         return self.__class__(
             batched_coordinates=self.batched_coordinates.to(device),
             batched_features=self.batched_features.to(device),
