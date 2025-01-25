@@ -133,7 +133,7 @@ def test_forward_sparse_conv(setup_sparse_conv, benchmark):
     def run_forward():
         with torch.no_grad():
             # Use autocast for FP16, nullcontext for FP32
-            ctx = torch.amp.autocast("cuda", dtype=test_dtype) if use_amp else nullcontext()
+            ctx = torch.cuda.amp.autocast(dtype=test_dtype) if use_amp else nullcontext()
             with ctx:
                 return conv(input_voxels)
 
@@ -154,12 +154,12 @@ def test_forward_backward_sparse_conv(setup_sparse_conv, benchmark):
 
     # Create GradScaler for FP16
     use_amp = test_dtype in [torch.float16, torch.bfloat16]
-    scaler = torch.amp.GradScaler() if use_amp else None
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
     optimizer = torch.optim.Adam(conv.parameters())
 
     def run_forward_backward():
         # Use autocast for FP16, nullcontext for FP32
-        ctx = torch.amp.autocast("cuda", dtype=test_dtype) if use_amp else nullcontext()
+        ctx = torch.cuda.amp.autocast(dtype=test_dtype) if use_amp else nullcontext()
         with ctx:
             output = conv(input_voxels)
             loss = output.features.mean()

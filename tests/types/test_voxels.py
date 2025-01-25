@@ -172,3 +172,64 @@ def test_to_point(setup_voxels):
     voxels.set_tensor_stride((2, 2, 2))
     points = voxels.to_point(voxel_size)
     assert points.features.shape[1] == 7
+
+
+@pytest.mark.parametrize(
+    "in_dtype,amp_dtype",
+    [
+        (torch.float32, torch.float16),
+        (torch.float32, torch.bfloat16),
+        (torch.float16, torch.float16),
+        (torch.float16, torch.bfloat16),
+    ],
+)
+def test_voxel_amp(setup_voxels, in_dtype, amp_dtype):
+    """Test voxel behavior with Automatic Mixed Precision."""
+    voxels, _, _ = setup_voxels
+    device = torch.device("cuda:0")
+    voxels = voxels.to(device)
+
+    # Convert input to target dtype
+    if in_dtype is not None:
+        voxels = voxels.to(dtype=in_dtype)
+
+    # Test feature access with autocast
+    with torch.cuda.amp.autocast(dtype=amp_dtype):
+        # Features should be in amp_dtype inside autocast
+        features = voxels.features
+        assert features.dtype == amp_dtype
+
+        # Original features should maintain their dtype
+        assert voxels.batched_features.batched_tensor.dtype == in_dtype
+
+        # Test some operations
+        result = features + 1.0
+        assert result.dtype == features.dtype
+
+    # Outside autocast, should be back to original dtype
+    features = voxels.features
+    assert features.dtype == in_dtype
+
+
+@pytest.mark.parametrize(
+    "in_dtype,out_dtype",
+    [
+        (torch.float32, torch.float16),
+        (torch.float32, torch.bfloat16),
+        (torch.float16, torch.float32),
+        (torch.bfloat16, torch.float32),
+    ],
+)
+def test_voxel_dtype_conversion(setup_voxels, in_dtype, out_dtype):
+    """Test voxel dtype conversion."""
+    voxels, _, _ = setup_voxels
+    device = torch.device("cuda:0")
+    voxels = voxels.to(device, dtype=in_dtype)
+
+    converted = voxels.to(dtype=out_dtype)
+    assert converted.features.dtype == out_dtype
+    assert voxels.features.dtype == in_dtype  # Original unchanged
+
+    # Test operations maintain dtype
+    result = converted + 1.0
+    assert result.features.dtype == out_dtype

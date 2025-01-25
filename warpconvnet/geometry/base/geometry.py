@@ -11,6 +11,26 @@ from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinate
 from .coords import Coords
 
 
+def amp_aware_dtype(func):
+    """Decorator to handle dtype conversion based on autocast context.
+
+    Usage:
+        @amp_aware_dtype
+        def features(self) -> Tensor:
+            return self.batched_features.batched_tensor
+    """
+
+    def wrapper(self, *args, **kwargs):
+        tensor = func(self, *args, **kwargs)
+        if torch.is_autocast_enabled():
+            amp_dtype = torch.get_autocast_gpu_dtype()
+            if amp_dtype is not None:
+                return tensor.to(dtype=amp_dtype)
+        return tensor
+
+    return wrapper
+
+
 @dataclass
 class Geometry:
     """A base class for all geometry objects such as sparse voxels, points, etc.
@@ -85,14 +105,10 @@ class Geometry:
             Geometry: A new Geometry instance on the target device.
         """
         if device is None:
-            assert dtype is not None and isinstance(
-                dtype, torch.dtype
-            ), f"dtype must be a torch.dtype, got {dtype}"
-            return self._apply_feature_transform(lambda x: x.to(dtype))
-
+            device = self.device
         return self.__class__(
-            batched_coordinates=self.batched_coordinates.to(device),
-            batched_features=self.batched_features.to(device),
+            batched_coordinates=self.batched_coordinates.to(device=device),
+            batched_features=self.batched_features.to(device=device, dtype=dtype),
             **self._extra_attributes,
         )
 
@@ -117,18 +133,22 @@ class Geometry:
         return batch_indexed_coordinates(self.coordinate_tensor, self.offsets)
 
     @property
+    @amp_aware_dtype
     def feature_tensor(self) -> Tensor:
         return self.batched_features.batched_tensor
 
     @property
+    @amp_aware_dtype
     def features(self) -> Tensor:
         return self.batched_features.batched_tensor
 
     @property
+    @amp_aware_dtype
     def nested_features(self) -> Tensor:
         return self.batched_features.to_nested()
 
     @property
+    @amp_aware_dtype
     def padded_features(self) -> "PadFeatures":  # noqa: F821
         """
         Explicitly convert batched features to padded features if necessary

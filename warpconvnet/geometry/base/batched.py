@@ -87,7 +87,11 @@ class BatchedTensor:
         self.batched_tensor = self.batched_tensor.to(device)
         return self
 
-    def to(self, device: str) -> "BatchedTensor":
+    def to(
+        self,
+        device: Optional[str | torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> "BatchedTensor":
         """Move the batched tensor to the specified device. This creates a new BatchedTensor object on the specified device.
 
         Args:
@@ -96,8 +100,10 @@ class BatchedTensor:
         Returns:
             BatchedTensor: A new BatchedTensor on the specified device
         """
+        if device is None:
+            device = self.device
         return self.__class__(
-            batched_tensor=self.batched_tensor.to(device),
+            batched_tensor=self.batched_tensor.to(device=device, dtype=dtype),
             offsets=self.offsets,
         )
 
