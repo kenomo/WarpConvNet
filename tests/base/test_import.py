@@ -38,9 +38,9 @@ from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.modules.activations import ReLU, GELU, SiLU, Tanh, Sigmoid, LeakyReLU
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.modules.point_conv import PointConv
-from warpconvnet.nn.modules.sparse_conv import SparseConv
+from warpconvnet.nn.modules.sparse_conv import SpatiallySparseConv, SparseConv2d, SparseConv3d
 
-# Import nn functionals
+# TODO: Import nn functionals
 
 
 def test_features_import():

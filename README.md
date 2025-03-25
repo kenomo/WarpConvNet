@@ -1,7 +1,5 @@
 # WarpConvNet
 
-DISCLAIMER: THIS REPOSITORY IS NVIDIA INTERNAL/CONFIDENTIAL. DO NOT SHARE EXTERNALLY. IF YOU PLAN TO USE THIS CODEBASE FOR YOUR RESEARCH, PLEASE CONTACT CHRIS CHOY cchoy@nvidia.com
-
 ## Overview
 
 WarpConvNet is a high-performance library for 3D deep learning, built on NVIDIA's Warp framework. It provides efficient implementations of:
@@ -14,13 +12,17 @@ WarpConvNet is a high-performance library for 3D deep learning, built on NVIDIA'
 ## Installation
 
 ```bash
-# Clone repository with submodules
-git clone --recurse-submodules https://gitlab-master.nvidia.com/3dmmllm/warp.git warpconvnet
-cd warpconvnet
-
-# Install package
-pip install -e .
+# Specify the CUDA version
+export CUDA=cu121  # For CUDA 12.1
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/${CUDA}
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.0+${CUDA}.html
+pip install warpconvnet
 ```
+
+Available optional dependency groups:
+- `warpconvnet[dev]`: Development tools (pytest, coverage, pre-commit)
+- `warpconvnet[docs]`: Documentation building tools
+- `warpconvnet[models]`: Additional dependencies for model training (wandb, hydra, etc.)
 
 ## Directory Structure
 
@@ -59,17 +61,18 @@ For complete directory structure, run `bash scripts/dir_struct.sh`.
 
 ## Quick Start
 
-### ScanNet Semantic Segmentation
-
-```bash
-cd warpconvnet/models
-python examples/scannet.py train.batch_size=12 model=mink_unet
-```
-
 ### ModelNet Classification
 
 ```bash
 python examples/modelnet.py
+```
+
+### ScanNet Semantic Segmentation
+
+```bash
+pip install warpconvnet[models]
+cd warpconvnet/models
+python examples/scannet.py train.batch_size=12 model=mink_unet
 ```
 
 ## Docker Usage
@@ -118,18 +121,18 @@ python scripts/serve_docs.py
 
 ## License
 
-NVIDIA Proprietary. See DISCLAIMER at top of README.
+Apache 2.0
 
 ## Citation
 
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{warpconvnet2024,
+@misc{warpconvnet2025,
   author = {Chris Choy and NVIDIA Research},
   title = {WarpConvNet: High-Performance 3D Deep Learning Library},
-  year = {2024},
+  year = {2025},
   publisher = {NVIDIA Corporation},
-  howpublished = {\url{https://gitlab-master.nvidia.com/3dmmllm/warp}}
+  howpublished = {\url{https://github.com/NVlabs/warpconvnet}}
 }
 ```

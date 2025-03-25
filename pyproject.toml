@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "build", "wheel"]
+requires = ["setuptools>=61", "build", "wheel", "torch==2.5.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,7 +15,7 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang>=1.5", "torch-scatter", "jaxtyping"]
+dependencies = ["numpy", "torch", "warp-lang>=1.6.2", "jaxtyping", "torch-scatter"]
 dynamic = ["version"]
 
 [project.urls]
@@ -25,7 +25,6 @@ Documentation = "https://gitlab.nvidia.com/3dmmllm/warpconvnet/docs"
 [project.optional-dependencies]
 dev = [
     "pre-commit",
-    "coverage[toml]",
     "pytest>=7.4.0",
     "pytest-benchmark>=4.0.0",
     "pytest-cov>=4.1.0",
@@ -43,6 +42,8 @@ models = [
     "wandb",
     "hydra-core",
     "omegaconf",
+    "pytorch-lightning",
+    "torchmetrics",
 ]
 
 all = [
@@ -61,28 +62,6 @@ include = ["warpconvnet*", "scripts*"]
 [tool.setuptools.dynamic]
 version = { file = ["VERSION.md"] }
 readme = { file = ["README.md"], content-type = "text/markdown" }
-
-[tool.coverage.run]
-source = ["warpconvnet"]
-disable_warnings = [
-    "module-not-measured",
-    "module-not-imported",
-    "no-data-collected",
-    "couldnt-parse",
-]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "@wp",
-    "@warp",
-    "if 0:",
-    "if __name__ == .__main__.:",
-]
-omit = [
-    "*/warpconvnet/examples/*",
-    "*/warpconvnet/tests/*",
-]
 
 [tool.pytest.ini_options]
 markers = [
