@@ -1,3 +1,6 @@
+# # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# # SPDX-License-Identifier: Apache-2.0
+
 DEFAULT_IMAGE_NAME="gitlab-master.nvidia.com/3dmmllm/warp"
 DEFAULT_IMAGE_TAG="latest"
 DEFAULT_IMAGE_FULL_NAME="${DEFAULT_IMAGE_NAME}:${DEFAULT_IMAGE_TAG}"

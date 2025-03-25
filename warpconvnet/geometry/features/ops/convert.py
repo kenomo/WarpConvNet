@@ -1,14 +1,17 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 from typing import Literal, Optional, Union, TYPE_CHECKING
 from jaxtyping import Float, Int
 
 import torch
 from torch import Tensor
 
-from .batch_copy import copy_batch_torch, copy_batch_warp
+from ..batch_copy import copy_batch_torch, copy_batch_warp
 
 if TYPE_CHECKING:
-    from .cat import CatFeatures
-    from .pad import PadFeatures
+    from ..cat import CatFeatures
+    from ..pad import PadFeatures
 
 
 def cat_to_pad_tensor(
@@ -37,8 +40,8 @@ def cat_to_pad_tensor(
 
 def cat_to_pad(cat_features: "CatFeatures", pad_multiple: Optional[int] = None) -> "PadFeatures":
     """Convert concatenated features to padded format."""
-    from .pad import PadFeatures
-    from .cat import CatFeatures
+    from ..pad import PadFeatures
+    from ..cat import CatFeatures
 
     assert isinstance(
         cat_features, CatFeatures
@@ -77,7 +80,7 @@ def pad_to_cat_tensor(
 
 def pad_to_cat(pad_features: "PadFeatures") -> "CatFeatures":
     """Convert padded features to concatenated format."""
-    from .cat import CatFeatures
+    from ..cat import CatFeatures
 
     batched_tensor = pad_to_cat_tensor(pad_features.batched_tensor, pad_features.offsets)
     return CatFeatures(batched_tensor, pad_features.offsets)
@@ -88,8 +91,8 @@ def to_batched_features(
     offsets: Int[Tensor, "B+1"],  # noqa: F821
     device: Optional[str] = None,
 ) -> Union["CatFeatures", "PadFeatures"]:
-    from .cat import CatFeatures
-    from .pad import PadFeatures
+    from ..cat import CatFeatures
+    from ..pad import PadFeatures
 
     if isinstance(features, Tensor):
         if features.ndim == 2:
