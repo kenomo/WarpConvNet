@@ -15,12 +15,13 @@ class REDUCTIONS(Enum):
     MAX = "max"
     MEAN = "mean"
     SUM = "sum"
+    PROD = "prod"
     VAR = "var"
     STD = "std"
     RANDOM = "random"
 
 
-REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "var", "std", "random"]
+REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "prod", "var", "std", "random"]
 
 
 def _var(
@@ -51,6 +52,8 @@ def row_reduction(
         out_feature = _var(features, neighbor_row_splits)[0]
     elif reduction == REDUCTIONS.STD:
         out_feature = torch.sqrt(_var(features, neighbor_row_splits)[0] + eps)
+    elif reduction == REDUCTIONS.PROD:
+        raise NotImplementedError("Product reduction is not implemented")
     elif reduction == REDUCTIONS.RANDOM:
         num_per_row = neighbor_row_splits.diff()
         rand_idx = (

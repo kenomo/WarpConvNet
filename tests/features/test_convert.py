@@ -6,7 +6,7 @@ import torch
 import warp as wp
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from warpconvnet.geometry.features.convert import cat_to_pad_tensor, cat_to_pad, pad_to_cat
+from warpconvnet.geometry.features.ops.convert import cat_to_pad_tensor, cat_to_pad, pad_to_cat
 from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.features.cat import CatFeatures
 

@@ -6,12 +6,12 @@ from jaxtyping import Float
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.features.cat import (
+from warpconvnet.geometry.features.ops.convert import (
     CatFeatures,
+    cat_to_pad_tensor,
+    pad_to_cat_tensor,
 )
-from warpconvnet.geometry.features.convert import cat_to_pad_tensor
 from warpconvnet.geometry.features.pad import PadFeatures
-from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 
 
 def bmm(

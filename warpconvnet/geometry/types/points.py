@@ -24,7 +24,7 @@ from warpconvnet.geometry.coords.ops.voxel import (
     voxel_downsample_csr_mapping,
     voxel_downsample_random_indices,
 )
-from warpconvnet.geometry.features.convert import to_batched_features
+from warpconvnet.geometry.features.ops.convert import to_batched_features
 from warpconvnet.nn.functional.encodings import sinusoidal_encoding
 from warpconvnet.nn.functional.point_pool import point_pool
 from warpconvnet.ops.reductions import REDUCTIONS, REDUCTION_TYPES_STR, row_reduction

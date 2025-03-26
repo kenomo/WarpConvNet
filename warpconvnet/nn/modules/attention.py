@@ -11,15 +11,15 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
-from warpconvnet.geometry.features.cat import (
-    CatFeatures,
-)
-from warpconvnet.geometry.features.convert import cat_to_pad_tensor
-from warpconvnet.geometry.features.patch import CatPatchFeatures
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
+from warpconvnet.geometry.features.ops.convert import (
+    CatFeatures,
+    cat_to_pad_tensor,
+    pad_to_cat_tensor,
+)
+from warpconvnet.geometry.features.patch import CatPatchFeatures
 from warpconvnet.nn.modules.normalizations import LayerNorm, RMSNorm
-from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 from warpconvnet.types import NestedTensor
 
 

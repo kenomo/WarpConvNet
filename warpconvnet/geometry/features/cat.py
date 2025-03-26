@@ -4,10 +4,8 @@
 from typing import List, Optional
 from jaxtyping import Float
 
-from torch import Tensor
-
 from warpconvnet.geometry.base.features import Features
-from .convert import cat_to_pad
+from warpconvnet.geometry.features.ops.convert import cat_to_pad
 
 
 class CatFeatures(Features):

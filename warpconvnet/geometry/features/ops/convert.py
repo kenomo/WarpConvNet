@@ -12,10 +12,11 @@ from ..batch_copy import copy_batch_torch, copy_batch_warp
 if TYPE_CHECKING:
     from ..cat import CatFeatures
     from ..pad import PadFeatures
+    from ..grid import GridFeatures
 
 
 def cat_to_pad_tensor(
-    in_features: Float[Tensor, "N F"],
+    in_features: Float[Tensor, "N F"],  # noqa: F821
     row_splits: Int[Tensor, "B+1"],  # noqa: F821
     backend: Literal["torch", "warp"] = "torch",
     num_copy_per_thread: Optional[int] = 256,  # constant
@@ -87,12 +88,20 @@ def pad_to_cat(pad_features: "PadFeatures") -> "CatFeatures":
 
 
 def to_batched_features(
-    features: Union["CatFeatures", "PadFeatures", Tensor],
+    features: Union["CatFeatures", "PadFeatures", "GridFeatures", Tensor],
     offsets: Int[Tensor, "B+1"],  # noqa: F821
     device: Optional[str] = None,
-) -> Union["CatFeatures", "PadFeatures"]:
+) -> Union["CatFeatures", "PadFeatures", "GridFeatures"]:
     from ..cat import CatFeatures
     from ..pad import PadFeatures
+
+    # Import dynamically to avoid circular import
+    try:
+        from ..grid import GridFeatures
+
+        supports_grid_features = True
+    except ImportError:
+        supports_grid_features = False
 
     if isinstance(features, Tensor):
         if features.ndim == 2:
@@ -102,9 +111,17 @@ def to_batched_features(
         else:
             raise ValueError(f"Invalid features tensor shape {features.shape}")
     else:
-        assert isinstance(
-            features, (CatFeatures, PadFeatures)
-        ), f"Features must be a tensor or a CatBatchedFeatures or PadBatchedFeatures, got {type(features)}"
-        if device is not None:
-            features = features.to(device)
-        return features
+        # Check if it's already a valid feature type
+        valid_types = [CatFeatures, PadFeatures]
+        if supports_grid_features:
+            valid_types.append(GridFeatures)
+
+        if any(isinstance(features, t) for t in valid_types):
+            if device is not None:
+                features = features.to(device)
+            return features
+        else:
+            valid_types_str = ", ".join([t.__name__ for t in valid_types])
+            raise TypeError(
+                f"Features must be a tensor or one of {valid_types_str}, " f"got {type(features)}"
+            )

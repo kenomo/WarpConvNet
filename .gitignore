@@ -24,3 +24,11 @@ __pycache__/
 
 # Documentation build
 site/
+
+# Datasets
+data/
+
+# Temporary ignores. Restore before committing.
+docs/
+figconvnet/
+scratch/

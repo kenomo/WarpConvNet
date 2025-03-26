@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 
 from warpconvnet.geometry.base.features import Features
-from warpconvnet.geometry.features.convert import to_batched_features
+from warpconvnet.geometry.features.ops.convert import to_batched_features
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 
 from .coords import Coords

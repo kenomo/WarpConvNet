@@ -15,7 +15,7 @@ from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton
 from warpconvnet.geometry.features.cat import CatFeatures
 from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
-from warpconvnet.geometry.features.convert import to_batched_features
+from warpconvnet.geometry.features.ops.convert import to_batched_features
 from warpconvnet.geometry.coords.ops.batch_index import offsets_from_batch_index
 from warpconvnet.utils.ravel import ravel_multi_index
 

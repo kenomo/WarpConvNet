@@ -6,14 +6,12 @@ from jaxtyping import Float, Int
 from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
+import torch.nn.functional as F
 
 from warpconvnet.geometry.base.features import Features
-from warpconvnet.geometry.features.convert import cat_to_pad_tensor
-from warpconvnet.geometry.features.convert import pad_to_cat_tensor
 from warpconvnet.geometry.utils.list_to_batch import list_to_pad_tensor
-from .convert import pad_to_cat, cat_to_pad
+from warpconvnet.geometry.features.ops.convert import pad_to_cat, cat_to_pad
 
 
 @dataclass
