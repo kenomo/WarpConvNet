@@ -12,11 +12,12 @@ import torch
 from torch import Tensor
 
 from warpconvnet.geometry.features.grid import GridMemoryFormat
-from warpconvnet.geometry.types.grid import Grid
+from warpconvnet.geometry.types.grid import Grid, points_to_grid
+from warpconvnet.geometry.types.points import Points
 
 
 @dataclass
-class FactorizedGrid:
+class FactorGrid:
     """A group of grid geometries with different factorized memory formats.
 
     This class implements the core concept of FIGConvNet where the 3D space
@@ -82,7 +83,7 @@ class FactorizedGrid:
         batch_size: int = 1,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
-    ) -> "FactorizedGrid":
+    ) -> "FactorGrid":
         """Create a new factorized grid geometry with initialized geometries.
 
         Args:
@@ -138,9 +139,9 @@ class FactorizedGrid:
         """Return the device of the geometries."""
         return self.geometries[0].device
 
-    def to(self, device: torch.device) -> "FactorizedGrid":
+    def to(self, device: torch.device) -> "FactorGrid":
         """Move all geometries to the specified device."""
-        return FactorizedGrid([geo.to(device) for geo in self.geometries])
+        return FactorGrid([geo.to(device) for geo in self.geometries])
 
     def __getitem__(self, idx: int) -> Grid:
         """Get a specific geometry from the group."""
@@ -168,3 +169,37 @@ class FactorizedGrid:
     def shapes(self) -> List[Dict[str, Union[int, Tuple[int, ...]]]]:
         """Get shape information for all geometries."""
         return [geo.shape for geo in self.geometries]
+
+
+def points_to_factor_grid(
+    points: Points,
+    grid_shapes: List[Tuple[int, int, int]],
+    memory_formats: List[Union[GridMemoryFormat, str]],
+    search_radius: Optional[float] = None,
+    k: Optional[int] = None,
+    search_type: str = "radius",
+    reduction: str = "mean",
+) -> FactorGrid:
+    """Convert points to a factorized grid geometry.
+
+    Args:
+        points: Points to convert
+        grid_shapes: List of grid resolutions (H, W, D)
+        memory_formats: List of factorized formats to use
+
+    Returns:
+        Factorized grid geometry
+    """
+    geometries = []
+    for grid_shape, memory_format in zip(grid_shapes, memory_formats):
+        geometry = points_to_grid(
+            points,
+            grid_shape,
+            memory_format,
+            search_radius=search_radius,
+            k=k,
+            search_type=search_type,
+            reduction=reduction,
+        )
+        geometries.append(geometry)
+    return FactorGrid(geometries)

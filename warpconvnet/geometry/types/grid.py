@@ -9,6 +9,7 @@ from typing import Dict, Literal, Optional, Tuple, Union
 
 from jaxtyping import Float, Int
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
@@ -157,6 +158,72 @@ class Grid(Geometry):
             )
         return self
 
+    def strided_vertices(self, grid_shape: Tuple[int, int, int]) -> Tensor:
+        """Get vertices at a different resolution through striding or interpolation.
+
+        Args:
+            resolution: Target resolution (H, W, D)
+
+        Returns:
+            Tensor: Grid vertices at the requested resolution
+        """
+        curr_grid_shape = self.grid_shape
+        if curr_grid_shape == grid_shape:
+            return self.grid_coords.coordinates
+
+        # Get the full coordinate tensor
+        vertices = self.grid_coords.coordinates
+
+        # Compute the stride
+        if (
+            curr_grid_shape[0] % grid_shape[0] == 0
+            and curr_grid_shape[1] % grid_shape[1] == 0
+            and curr_grid_shape[2] % grid_shape[2] == 0
+        ):
+            # If the current resolution is divisible by the target resolution,
+            # we can use striding to get the vertices
+            stride = (
+                curr_grid_shape[0] // grid_shape[0],
+                curr_grid_shape[1] // grid_shape[1],
+                curr_grid_shape[2] // grid_shape[2],
+            )
+
+            # Reshape to 5D tensor (B, H, W, D, 3) for striding
+            B = self.batch_size
+            H, W, D = curr_grid_shape
+            vertices_5d = vertices.reshape(B, H, W, D, 3)
+
+            # Apply stride
+            strided_vertices = vertices_5d[:, :: stride[0], :: stride[1], :: stride[2], :]
+
+            return strided_vertices
+        else:
+            # Use grid_sample 3D to interpolate the vertices
+            from warpconvnet.geometry.coords.grid import grid_init
+
+            # Create sample points using normalized coordinates (-1 to 1)
+            grid_points = grid_init(
+                bb_max=(1, 1, 1), bb_min=(-1, -1, -1), resolution=grid_shape
+            )  # (res[0], res[1], res[2], 3)
+            grid_points = grid_points.unsqueeze(0).to(vertices.device)
+
+            # Reshape to (B, 3, H, W, D) for grid_sample
+            B = self.batch_size
+            H, W, D = curr_grid_shape
+            vertices_5d = vertices.reshape(B, H, W, D, 3).permute(0, 4, 1, 2, 3)
+
+            # Apply grid_sample
+            sampled_vertices = F.grid_sample(
+                vertices_5d,
+                grid_points.expand(B, -1, -1, -1, -1),
+                align_corners=True,
+            )
+
+            # Reshape back to (B, H', W', D', 3)
+            sampled_vertices = sampled_vertices.permute(0, 2, 3, 4, 1)
+
+            return sampled_vertices
+
     @property
     def shape(self) -> Dict[str, Union[int, Tuple[int, ...]]]:
         """Get the shape information."""
@@ -228,11 +295,153 @@ def _point_to_grid_mapping(
     return results
 
 
+def _process_radius_search_results(
+    search_results: RealSearchResult,
+    neighbor_indices: Int[Tensor, "Q"],  # noqa: F821
+    point_features: Float[Tensor, "N C"],  # noqa: F821
+    grid_features: Float[Tensor, "B H W D C"],  # noqa: F821
+    grid_coords: GridCoords,
+    W: int,
+    D: int,
+    reduction: str,
+) -> Float[Tensor, "B H W D C"]:  # noqa: F821
+    """Process radius search results and update grid features.
+
+    Args:
+        search_results: Search results containing neighbor information
+        neighbor_indices: Indices of neighboring points
+        point_features: Features of all points
+        grid_features: Output grid features tensor to be modified
+        grid_coords: Grid coordinates
+        W: Grid width
+        D: Grid depth
+        reduction: Reduction method to apply ('mean', 'max', 'sum', 'mul')
+    """
+    # Process each grid cell
+    for grid_idx, start_idx in enumerate(search_results.neighbor_row_splits[:-1]):
+        end_idx = search_results.neighbor_row_splits[grid_idx + 1]
+
+        # Skip if no neighbors found
+        if start_idx == end_idx:
+            continue
+
+        # Get indices of neighboring points
+        point_indices = neighbor_indices[start_idx:end_idx]
+
+        # Get the corresponding point features
+        neighbor_features = point_features[point_indices]
+
+        # Calculate batch and cell indices
+        batch_idx = torch.searchsorted(grid_coords.offsets, grid_idx, right=True) - 1
+        cell_idx = grid_idx - grid_coords.offsets[batch_idx]
+
+        # Compute grid indices
+        h_idx = cell_idx // (W * D)
+        w_idx = (cell_idx % (W * D)) // D
+        d_idx = cell_idx % D
+
+        # Apply reduction
+        if reduction == "mean":
+            reduced_features = torch.mean(neighbor_features, dim=0)
+        elif reduction == "max":
+            reduced_features = torch.max(neighbor_features, dim=0)[0]
+        elif reduction == "sum":
+            reduced_features = torch.sum(neighbor_features, dim=0)
+        elif reduction == "mul":
+            reduced_features = torch.prod(neighbor_features, dim=0)
+        else:
+            raise ValueError(f"Unsupported reduction: {reduction}")
+
+        # Set grid features
+        grid_features[batch_idx, h_idx, w_idx, d_idx] = reduced_features
+
+    return grid_features
+
+
+def _process_knn_search_results(
+    neighbor_indices: Tensor,
+    point_features: Tensor,
+    grid_features: Tensor,
+    grid_coords: GridCoords,
+    H: int,
+    W: int,
+    D: int,
+    reduction: str,
+) -> None:
+    """Process KNN search results and update grid features.
+
+    Args:
+        neighbor_indices: Indices of neighboring points
+        point_features: Features of all points
+        grid_features: Output grid features tensor to be modified
+        grid_coords: Grid coordinates
+        H: Grid height
+        W: Grid width
+        D: Grid depth
+        reduction: Reduction method to apply ('mean', 'max', 'sum')
+    """
+    total_grid_cells = H * W * D
+
+    # Calculate batch and spatial indices for all grid cells
+    # Make sure arange is on the same device as offsets
+    batch_indices = (
+        torch.searchsorted(
+            grid_coords.offsets,
+            torch.arange(total_grid_cells, device=grid_coords.offsets.device),
+            right=True,
+        )
+        - 1
+    )
+    cell_indices = (
+        torch.arange(total_grid_cells, device=grid_coords.offsets.device)
+        - grid_coords.offsets[batch_indices]
+    )
+
+    # Compute 3D grid indices
+    h_indices = cell_indices // (W * D)
+    w_indices = (cell_indices % (W * D)) // D
+    d_indices = cell_indices % D
+
+    # Process each grid cell
+    for i in range(total_grid_cells):
+        # Get neighboring point indices
+        point_indices = neighbor_indices[i]
+
+        # Skip invalid indices
+        valid_mask = point_indices >= 0
+        if not torch.any(valid_mask):
+            continue
+
+        point_indices = point_indices[valid_mask]
+
+        # Get point features
+        neighbor_features = point_features[point_indices]
+
+        # Apply reduction
+        if reduction == "mean":
+            reduced_features = torch.mean(neighbor_features, dim=0)
+        elif reduction == "max":
+            reduced_features = torch.max(neighbor_features, dim=0)[0]
+        elif reduction == "sum":
+            reduced_features = torch.sum(neighbor_features, dim=0)
+        else:
+            raise ValueError(f"Unsupported reduction: {reduction}")
+
+        # Set grid features
+        batch_idx = batch_indices[i]
+        h_idx = h_indices[i]
+        w_idx = w_indices[i]
+        d_idx = d_indices[i]
+
+        grid_features[batch_idx, h_idx, w_idx, d_idx] = reduced_features
+
+    return grid_features
+
+
 def points_to_grid_features(
     points: Points,
-    grid_shape: Tuple[int, int, int],
+    grid_coords: GridCoords,
     memory_format: GridMemoryFormat = GridMemoryFormat.b_x_y_z_c,
-    bounds: Optional[Tuple[Tensor, Tensor]] = None,
     search_radius: Optional[float] = None,
     k: int = 8,
     search_type: str = "radius",
@@ -242,9 +451,8 @@ def points_to_grid_features(
 
     Args:
         points: Input point geometry
-        grid_shape: Grid shape (H, W, D)
+        grid_coords: Grid coordinates
         memory_format: Memory format for grid features
-        bounds: Min and max bounds for the grid
         search_radius: Search radius for radius search
         k: Number of neighbors for kNN search
         search_type: Search type ('radius' or 'knn')
@@ -256,14 +464,6 @@ def points_to_grid_features(
     batch_size = points.batch_size
     device = points.device
     num_channels = points.num_channels
-
-    # Create grid coordinates
-    grid_coords = GridCoords.create_regular_grid(
-        grid_shape,
-        bounds=bounds,
-        batch_size=batch_size,
-        device=device,
-    )
 
     # Map points to grid
     point_coords = points.batched_coordinates.batched_tensor
@@ -279,7 +479,7 @@ def points_to_grid_features(
         search_radius=search_radius,
         k=k,
         search_type=search_type,
-        search_grid_dim=max(grid_shape),
+        search_grid_dim=None,  # For hash grid
     )
 
     # Get neighbor indices
@@ -289,11 +489,10 @@ def points_to_grid_features(
     point_features = points.batched_features.batched_tensor
 
     # Initialize grid features
-    H, W, D = grid_shape
-    total_grid_points = H * W * D
+    H, W, D = grid_coords.grid_shape
 
     if memory_format == GridMemoryFormat.b_x_y_z_c:
-        grid_features = torch.zeros(
+        grid_tensor = torch.zeros(
             (batch_size, H, W, D, num_channels),
             device=device,
             dtype=point_features.dtype,
@@ -301,7 +500,7 @@ def points_to_grid_features(
     else:
         # For other memory formats, we'll first create in standard format
         # and then convert
-        grid_features = torch.zeros(
+        grid_tensor = torch.zeros(
             (batch_size, H, W, D, num_channels),
             device=device,
             dtype=point_features.dtype,
@@ -309,104 +508,27 @@ def points_to_grid_features(
 
     # Process search results differently based on search type
     if search_type == "radius":
-        # For radius search, we have a split array
-        if hasattr(search_results, "neighbor_row_splits"):
-            # Process each grid cell
-            for grid_idx, start_idx in enumerate(search_results.neighbor_row_splits[:-1]):
-                end_idx = search_results.neighbor_row_splits[grid_idx + 1]
-
-                # Skip if no neighbors found
-                if start_idx == end_idx:
-                    continue
-
-                # Get indices of neighboring points
-                point_indices = neighbor_indices[start_idx:end_idx]
-
-                # Get the corresponding point features
-                neighbor_features = point_features[point_indices]
-
-                # Calculate batch and cell indices
-                batch_idx = torch.searchsorted(grid_coords.offsets, grid_idx, right=True) - 1
-                cell_idx = grid_idx - grid_coords.offsets[batch_idx]
-
-                # Compute grid indices
-                h_idx = cell_idx // (W * D)
-                w_idx = (cell_idx % (W * D)) // D
-                d_idx = cell_idx % D
-
-                # Apply reduction
-                if reduction == "mean":
-                    reduced_features = torch.mean(neighbor_features, dim=0)
-                elif reduction == "max":
-                    reduced_features = torch.max(neighbor_features, dim=0)[0]
-                elif reduction == "sum":
-                    reduced_features = torch.sum(neighbor_features, dim=0)
-                elif reduction == "prod":
-                    reduced_features = torch.prod(neighbor_features, dim=0)
-                else:
-                    raise ValueError(f"Unsupported reduction: {reduction}")
-
-                # Set grid features
-                grid_features[batch_idx, h_idx, w_idx, d_idx] = reduced_features
-        else:
-            # Fallback for older versions without row_splits
-            raise NotImplementedError("Radius search without neighbor_row_splits is not supported")
-    else:
-        # For KNN search, we have a fixed number of neighbors per grid cell
-        total_grid_cells = grid_coords.batched_tensor.shape[0]
-
-        # Calculate batch and spatial indices for all grid cells
-        # Make sure arange is on the same device as offsets
-        batch_indices = (
-            torch.searchsorted(
-                grid_coords.offsets,
-                torch.arange(total_grid_cells, device=grid_coords.offsets.device),
-                right=True,
-            )
-            - 1
+        grid_tensor = _process_radius_search_results(
+            search_results,
+            neighbor_indices,
+            point_features,
+            grid_tensor,
+            grid_coords,
+            W,
+            D,
+            reduction,
         )
-        cell_indices = (
-            torch.arange(total_grid_cells, device=grid_coords.offsets.device)
-            - grid_coords.offsets[batch_indices]
+    else:  # knn search
+        grid_tensor = _process_knn_search_results(
+            neighbor_indices,
+            point_features,
+            grid_tensor,
+            grid_coords,
+            H,
+            W,
+            D,
+            reduction,
         )
-
-        # Compute 3D grid indices
-        h_indices = cell_indices // (W * D)
-        w_indices = (cell_indices % (W * D)) // D
-        d_indices = cell_indices % D
-
-        # Process each grid cell
-        for i in range(total_grid_cells):
-            # Get neighboring point indices
-            point_indices = neighbor_indices[i]
-
-            # Skip invalid indices
-            valid_mask = point_indices >= 0
-            if not torch.any(valid_mask):
-                continue
-
-            point_indices = point_indices[valid_mask]
-
-            # Get point features
-            neighbor_features = point_features[point_indices]
-
-            # Apply reduction
-            if reduction == "mean":
-                reduced_features = torch.mean(neighbor_features, dim=0)
-            elif reduction == "max":
-                reduced_features = torch.max(neighbor_features, dim=0)[0]
-            elif reduction == "sum":
-                reduced_features = torch.sum(neighbor_features, dim=0)
-            else:
-                raise ValueError(f"Unsupported reduction: {reduction}")
-
-            # Set grid features
-            batch_idx = batch_indices[i]
-            h_idx = h_indices[i]
-            w_idx = w_indices[i]
-            d_idx = d_indices[i]
-
-            grid_features[batch_idx, h_idx, w_idx, d_idx] = reduced_features
 
     # Convert to target memory format if needed
     if memory_format != GridMemoryFormat.b_x_y_z_c:
@@ -414,19 +536,19 @@ def points_to_grid_features(
         C = num_channels
 
         if memory_format == GridMemoryFormat.b_c_x_y_z:
-            grid_features = grid_features.permute(0, 4, 1, 2, 3)
+            grid_tensor = grid_tensor.permute(0, 4, 1, 2, 3)
         elif memory_format == GridMemoryFormat.b_zc_x_y:
-            grid_features = grid_features.permute(0, 3, 4, 1, 2).reshape(B, D * C, H, W)
+            grid_tensor = grid_tensor.permute(0, 3, 4, 1, 2).reshape(B, D * C, H, W)
         elif memory_format == GridMemoryFormat.b_xc_y_z:
-            grid_features = grid_features.permute(0, 1, 4, 2, 3).reshape(B, H * C, W, D)
+            grid_tensor = grid_tensor.permute(0, 1, 4, 2, 3).reshape(B, H * C, W, D)
         elif memory_format == GridMemoryFormat.b_yc_x_z:
-            grid_features = grid_features.permute(0, 2, 4, 1, 3).reshape(B, W * C, H, D)
+            grid_tensor = grid_tensor.permute(0, 2, 4, 1, 3).reshape(B, W * C, H, D)
         else:
             raise ValueError(f"Unsupported memory format: {memory_format}")
 
     # Create GridFeatures
     return GridFeatures(
-        grid_features, grid_coords.offsets, memory_format, grid_shape, num_channels
+        grid_tensor, grid_coords.offsets, memory_format, grid_coords.grid_shape, num_channels
     )
 
 
@@ -469,9 +591,8 @@ def points_to_grid(
     # Convert point features to grid features
     grid_features = points_to_grid_features(
         points,
-        grid_shape,
+        grid_coords,
         memory_format=memory_format,
-        bounds=bounds,
         search_radius=search_radius,
         k=k,
         search_type=search_type,

@@ -201,6 +201,67 @@ class Points(Geometry):
             **self.extra_attributes,
         )
 
+    def expand_batch_size(self, batch_size: int) -> "Points":
+        """Expand the point cloud to the specified batch size.
+
+        This method efficiently replicates the point cloud to create
+        a larger batch. Useful for broadcasting operations.
+
+        Args:
+            batch_size: Target batch size
+
+        Returns:
+            Points: A new Points instance with expanded batch size
+        """
+        if batch_size == 1 or batch_size == self.batch_size:
+            return self
+
+        # Create expanded coordinates and features
+        expanded_coords = self.coordinate_tensor.expand(batch_size, -1, -1).contiguous()
+        expanded_features = self.feature_tensor.expand(batch_size, -1, -1).contiguous()
+
+        # Calculate new offsets based on points per batch
+        points_per_batch = self.coordinate_tensor.shape[0] // self.batch_size
+        new_offsets = torch.zeros(batch_size + 1, device=self.device, dtype=torch.long)
+        for i in range(1, batch_size + 1):
+            new_offsets[i] = i * points_per_batch
+
+        return self.__class__(
+            batched_coordinates=RealCoords(
+                batched_tensor=expanded_coords,
+                offsets=new_offsets,
+            ),
+            batched_features=CatFeatures(
+                batched_tensor=expanded_features,
+                offsets=new_offsets,
+            ),
+            **self.extra_attributes,
+        )
+
+    def contiguous(self) -> "Points":
+        """Ensure coordinates and features are contiguous in memory.
+
+        This is important for memory access patterns and can improve
+        performance for operations that require contiguous memory.
+
+        Returns:
+            Points: A new Points instance with contiguous tensors
+        """
+        if self.coordinate_tensor.is_contiguous() and self.feature_tensor.is_contiguous():
+            return self
+
+        return self.__class__(
+            batched_coordinates=RealCoords(
+                batched_tensor=self.coordinate_tensor.contiguous(),
+                offsets=self.offsets,
+            ),
+            batched_features=CatFeatures(
+                batched_tensor=self.feature_tensor.contiguous(),
+                offsets=self.offsets,
+            ),
+            **self.extra_attributes,
+        )
+
     def neighbors(
         self,
         search_args: RealSearchConfig,

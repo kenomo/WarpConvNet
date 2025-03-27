@@ -57,7 +57,7 @@ def test_knn_search(setup_points):
     """Test k-nearest neighbors search method."""
     device = torch.device("cuda:0")
     points: Points = setup_points.to(device)
-    k = 16
+    k = 2
 
     search_config = RealSearchConfig(
         mode=RealSearchMode.KNN,

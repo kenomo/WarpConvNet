@@ -13,12 +13,12 @@ import torch.nn.functional as F
 
 from warpconvnet.geometry.features.grid import GridMemoryFormat
 from warpconvnet.geometry.types.grid import Grid
-from warpconvnet.geometry.types.factorized_grid import FactorizedGrid
+from warpconvnet.geometry.types.factor_grid import FactorGrid
 from warpconvnet.geometry.types.points import Points
 
 
 def grid_to_points(
-    grid: Union[Grid, FactorizedGrid],
+    grid: Union[Grid, FactorGrid],
     points: Points,
     mode: str = "bilinear",
 ) -> Points:
@@ -34,7 +34,7 @@ def grid_to_points(
     """
     # If we have a factorized grid, use the first one for sampling
     # (in the future, could average results from all grids)
-    if isinstance(grid, FactorizedGrid):
+    if isinstance(grid, FactorGrid):
         grid = grid[0]
 
     batch_size = grid.batch_size

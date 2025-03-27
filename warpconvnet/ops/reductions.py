@@ -15,13 +15,13 @@ class REDUCTIONS(Enum):
     MAX = "max"
     MEAN = "mean"
     SUM = "sum"
-    PROD = "prod"
+    MUL = "mul"
     VAR = "var"
     STD = "std"
     RANDOM = "random"
 
 
-REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "prod", "var", "std", "random"]
+REDUCTION_TYPES_STR = Literal["min", "max", "mean", "sum", "mul", "var", "std", "random"]
 
 
 def _var(
@@ -46,14 +46,18 @@ def row_reduction(
         len(features) == neighbor_row_splits[-1].item()
     ), f"Features length {len(features)} must match the last row split {neighbor_row_splits[-1].item()}"
 
-    if reduction in [REDUCTIONS.MIN, REDUCTIONS.MAX, REDUCTIONS.MEAN, REDUCTIONS.SUM]:
+    if reduction in [
+        REDUCTIONS.MIN,
+        REDUCTIONS.MAX,
+        REDUCTIONS.MEAN,
+        REDUCTIONS.SUM,
+        REDUCTIONS.MUL,
+    ]:
         out_feature = segment_csr(features, neighbor_row_splits, reduce=str(reduction.value))
     elif reduction == REDUCTIONS.VAR:
         out_feature = _var(features, neighbor_row_splits)[0]
     elif reduction == REDUCTIONS.STD:
         out_feature = torch.sqrt(_var(features, neighbor_row_splits)[0] + eps)
-    elif reduction == REDUCTIONS.PROD:
-        raise NotImplementedError("Product reduction is not implemented")
     elif reduction == REDUCTIONS.RANDOM:
         num_per_row = neighbor_row_splits.diff()
         rand_idx = (

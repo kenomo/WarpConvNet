@@ -11,6 +11,19 @@ from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.ops.grid import create_grid_coordinates
 
 
+def grid_init(
+    bb_max: Tuple[float, float, float],
+    bb_min: Tuple[float, float, float],
+    resolution: Tuple[int, int, int],
+) -> Float[Tensor, "res[0] res[1] res[2] 3"]:  # noqa: F821
+    """Initialize grid coordinates."""
+    H, W, D = resolution
+    x = torch.linspace(bb_min[0], bb_max[0], W)
+    y = torch.linspace(bb_min[1], bb_max[1], H)
+    z = torch.linspace(bb_min[2], bb_max[2], D)
+    return torch.stack(torch.meshgrid(x, y, z, indexing="ij"), dim=-1)
+
+
 class GridCoords(Coords):
     grid_shape: Tuple[int, int, int]
     min_bound: Float[Tensor, "3"]  # noqa: F821
@@ -145,3 +158,6 @@ class GridCoords(Coords):
                 else (self.min_bound.to(device), self.max_bound.to(device))
             ),
         )
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(grid_shape={self.grid_shape}, min_bound={self.min_bound}, max_bound={self.max_bound}, batch_size={self.batch_size})"

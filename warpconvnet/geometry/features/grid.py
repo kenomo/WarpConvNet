@@ -89,6 +89,8 @@ class GridFeatures(Features):
     ):
         super().__init__(tensor, offsets)
         self.memory_format = memory_format
+        if grid_shape is not None:
+            assert len(grid_shape) == 3, "grid_shape must be a tuple of 3 integers"
 
         # Determine grid shape and number of channels based on memory format
         if memory_format == GridMemoryFormat.b_x_y_z_c:
@@ -142,9 +144,39 @@ class GridFeatures(Features):
         return self._grid_shape
 
     @property
+    def resolution(self) -> Tuple[int, int, int]:
+        """Return the 3D grid resolution (alias for grid_shape)."""
+        return self._grid_shape
+
+    @property
     def num_channels(self) -> int:
         """Return the number of feature channels."""
         return self._num_channels
+
+    def channel_size(self, memory_format: Optional[GridMemoryFormat] = None) -> int:
+        """Get the channel size for a specific memory format.
+
+        Args:
+            memory_format: Target memory format (use current format if None)
+
+        Returns:
+            Number of channels in the specified format
+        """
+        if memory_format is None:
+            memory_format = self.memory_format
+
+        if memory_format == GridMemoryFormat.b_x_y_z_c:
+            return self._num_channels
+        elif memory_format == GridMemoryFormat.b_c_x_y_z:
+            return self._num_channels
+        elif memory_format == GridMemoryFormat.b_xc_y_z:
+            return self._num_channels * self._grid_shape[0]
+        elif memory_format == GridMemoryFormat.b_yc_x_z:
+            return self._num_channels * self._grid_shape[1]
+        elif memory_format == GridMemoryFormat.b_zc_x_y:
+            return self._num_channels * self._grid_shape[2]
+        else:
+            raise ValueError(f"Unsupported memory format: {memory_format}")
 
     def to_standard_format(self) -> Tensor:
         """Convert features to standard b_x_y_z_c format regardless of current format."""
@@ -189,9 +221,9 @@ class GridFeatures(Features):
             and (self.offsets == other.offsets).all()
         )
 
-    def to(self, device: torch.device) -> "GridFeatures":
-        """Move the features to the specified device."""
-        tensor = self.batched_tensor.to(device)
+    def to(self, device: torch.device, dtype: Optional[torch.dtype] = None) -> "GridFeatures":
+        """Move the features to the specified device and optionally convert dtype."""
+        tensor = self.batched_tensor.to(device=device, dtype=dtype if dtype is not None else None)
         offsets = self.offsets.to(device)
         return GridFeatures(
             tensor, offsets, self.memory_format, self._grid_shape, self._num_channels
@@ -232,6 +264,61 @@ class GridFeatures(Features):
             offsets[i] = offsets[i - 1] + elements_per_batch
 
         return cls(tensor, offsets, memory_format, grid_shape, num_channels)
+
+    @staticmethod
+    def from_conv_output(
+        conv_output: Tensor,
+        offsets: Tensor,
+        memory_format: GridMemoryFormat,
+        grid_shape: Tuple[int, int, int],
+        num_channels: int,
+    ) -> "GridFeatures":
+        """Initialize GridFeatures from the output of a convolutional layer.
+
+        Args:
+            conv_output: Output tensor from a convolutional layer
+            offsets: Batch offsets tensor
+            memory_format: The memory format of the grid features
+            grid_shape: Tuple of spatial dimensions (H, W, D)
+            num_channels: The number of output channels from the convolution
+
+        Returns:
+            A new GridFeatures object with the given memory format
+        """
+        # Infer spatial dimensions based on the memory format
+        rem = 0
+        if memory_format == GridMemoryFormat.b_zc_x_y:
+            B, DC, H, W = conv_output.shape
+            D, rem = divmod(DC, num_channels)
+            assert (
+                D == grid_shape[2]
+            ), f"Spatial dimension D does not match: {D} != {grid_shape[2]}"
+        elif memory_format == GridMemoryFormat.b_xc_y_z:
+            B, HC, W, D = conv_output.shape
+            H, rem = divmod(HC, num_channels)
+            assert (
+                H == grid_shape[0]
+            ), f"Spatial dimension H does not match: {H} != {grid_shape[0]}"
+        elif memory_format == GridMemoryFormat.b_yc_x_z:
+            B, WC, H, D = conv_output.shape
+            W, rem = divmod(WC, num_channels)
+            assert (
+                W == grid_shape[1]
+            ), f"Spatial dimension W does not match: {W} != {grid_shape[1]}"
+        elif memory_format == GridMemoryFormat.b_c_x_y_z:
+            B, C, H, W, D = conv_output.shape
+            assert C == num_channels, f"Number of channels does not match: {C} != {num_channels}"
+        else:
+            raise ValueError(f"Unsupported memory format: {memory_format}")
+        assert rem == 0, "Number of channels does not divide evenly"
+
+        return GridFeatures(
+            tensor=conv_output,
+            offsets=offsets,
+            memory_format=memory_format,
+            grid_shape=grid_shape,
+            num_channels=num_channels,
+        )
 
     @staticmethod
     def create_factorized_formats(
