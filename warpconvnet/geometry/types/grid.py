@@ -40,12 +40,15 @@ class Grid(Geometry):
         self,
         batched_coordinates: GridCoords,
         batched_features: Union[GridFeatures, Tensor],
-        memory_format: GridMemoryFormat = GridMemoryFormat.b_x_y_z_c,
+        memory_format: Optional[GridMemoryFormat] = None,
         grid_shape: Optional[Tuple[int, int, int]] = None,
         num_channels: Optional[int] = None,
         **kwargs,
     ):
         if isinstance(batched_features, Tensor):
+            assert (
+                memory_format is not None
+            ), "Memory format must be provided if features are a tensor"
             if grid_shape is None:
                 grid_shape = batched_coordinates.grid_shape
 
@@ -77,6 +80,13 @@ class Grid(Geometry):
                 grid_shape,
                 num_channels,
             )
+        else:
+            assert (
+                memory_format is None or memory_format == batched_features.memory_format
+            ), f"Memory format must be None or match the GridFeatures memory format: {batched_features.memory_format}. Provided: {memory_format}"
+
+        # Check that the grid is valid
+        self.check(batched_coordinates, batched_features)
 
         # Ensure offsets match
         assert (
@@ -85,7 +95,21 @@ class Grid(Geometry):
 
         # Initialize base class
         super().__init__(batched_coordinates, batched_features, **kwargs)
-        self.memory_format = memory_format
+
+    def check(self, coords: GridCoords, features: GridFeatures):
+        """
+        Check if the grid dimensions are consistent
+        """
+        assert coords.shape[-1] == 3
+
+        num_coords = coords.numel() // 3
+        num_features = features.numel() // features.num_channels
+        assert (
+            num_coords == num_features
+        ), f"Number of coordinates ({num_coords}) must match number of features ({num_features})"
+        assert (
+            coords.grid_shape == features.grid_shape
+        ), f"Grid shape ({coords.grid_shape}) must match feature grid shape ({features.grid_shape})"
 
     @classmethod
     def create_from_grid_shape(
@@ -149,6 +173,27 @@ class Grid(Geometry):
         """Get the number of feature channels."""
         return self.grid_features.num_channels
 
+    @property
+    def memory_format(self) -> GridMemoryFormat:
+        """Get the memory format."""
+        return self.grid_features.memory_format
+
+    def channel_size(self, memory_format: Optional[GridMemoryFormat] = None):
+        if memory_format is None:
+            memory_format = self.memory_format
+        if memory_format == GridMemoryFormat.b_x_y_z_c:
+            return self.num_channels
+        elif memory_format == GridMemoryFormat.b_c_x_y_z:
+            return self.num_channels
+        elif memory_format == GridMemoryFormat.b_xc_y_z:
+            return self.num_channels * self.grid_shape[0]
+        elif memory_format == GridMemoryFormat.b_yc_x_z:
+            return self.num_channels * self.grid_shape[1]
+        elif memory_format == GridMemoryFormat.b_zc_x_y:
+            return self.num_channels * self.grid_shape[2]
+        else:
+            raise ValueError(f"Unsupported memory format: {memory_format}")
+
     def to_memory_format(self, memory_format: GridMemoryFormat) -> "Grid":
         """Convert to a different memory format."""
         if memory_format != self.memory_format:
@@ -157,72 +202,6 @@ class Grid(Geometry):
                 memory_format=memory_format,
             )
         return self
-
-    def strided_vertices(self, grid_shape: Tuple[int, int, int]) -> Tensor:
-        """Get vertices at a different resolution through striding or interpolation.
-
-        Args:
-            resolution: Target resolution (H, W, D)
-
-        Returns:
-            Tensor: Grid vertices at the requested resolution
-        """
-        curr_grid_shape = self.grid_shape
-        if curr_grid_shape == grid_shape:
-            return self.grid_coords.coordinates
-
-        # Get the full coordinate tensor
-        vertices = self.grid_coords.coordinates
-
-        # Compute the stride
-        if (
-            curr_grid_shape[0] % grid_shape[0] == 0
-            and curr_grid_shape[1] % grid_shape[1] == 0
-            and curr_grid_shape[2] % grid_shape[2] == 0
-        ):
-            # If the current resolution is divisible by the target resolution,
-            # we can use striding to get the vertices
-            stride = (
-                curr_grid_shape[0] // grid_shape[0],
-                curr_grid_shape[1] // grid_shape[1],
-                curr_grid_shape[2] // grid_shape[2],
-            )
-
-            # Reshape to 5D tensor (B, H, W, D, 3) for striding
-            B = self.batch_size
-            H, W, D = curr_grid_shape
-            vertices_5d = vertices.reshape(B, H, W, D, 3)
-
-            # Apply stride
-            strided_vertices = vertices_5d[:, :: stride[0], :: stride[1], :: stride[2], :]
-
-            return strided_vertices
-        else:
-            # Use grid_sample 3D to interpolate the vertices
-            from warpconvnet.geometry.coords.grid import grid_init
-
-            # Create sample points using normalized coordinates (-1 to 1)
-            grid_points = grid_init(
-                bb_max=(1, 1, 1), bb_min=(-1, -1, -1), resolution=grid_shape
-            )  # (res[0], res[1], res[2], 3)
-            grid_points = grid_points.unsqueeze(0).to(vertices.device)
-
-            # Reshape to (B, 3, H, W, D) for grid_sample
-            B = self.batch_size
-            H, W, D = curr_grid_shape
-            vertices_5d = vertices.reshape(B, H, W, D, 3).permute(0, 4, 1, 2, 3)
-
-            # Apply grid_sample
-            sampled_vertices = F.grid_sample(
-                vertices_5d,
-                grid_points.expand(B, -1, -1, -1, -1),
-                align_corners=True,
-            )
-
-            # Reshape back to (B, H', W', D', 3)
-            sampled_vertices = sampled_vertices.permute(0, 2, 3, 4, 1)
-
-            return sampled_vertices
 
     @property
     def shape(self) -> Dict[str, Union[int, Tuple[int, ...]]]:

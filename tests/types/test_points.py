@@ -164,3 +164,46 @@ def test_from_coordinates():
     points = Points.from_list_of_coordinates(coords, encoding_channels=10, encoding_range=1)
     assert points.batched_coordinates.batched_tensor.shape == (B * N, D)
     assert points.batched_features.batched_tensor.shape == (B * N, 10 * D)
+
+
+def test_contiguous(setup_points):
+    """Test making point coordinates and features contiguous."""
+    points, _ = setup_points
+
+    # Create a non-contiguous tensor by transposing then back
+    non_contiguous_coords = points.coordinate_tensor.transpose(0, 1).transpose(0, 1)
+    non_contiguous_features = points.feature_tensor.transpose(0, 1).transpose(0, 1)
+
+    # Verify tensors are not contiguous after this operation
+    if non_contiguous_coords.is_contiguous() and non_contiguous_features.is_contiguous():
+        # If still contiguous, use another method to make non-contiguous
+        non_contiguous_coords = non_contiguous_coords.expand_as(non_contiguous_coords)
+        non_contiguous_features = non_contiguous_features.expand_as(non_contiguous_features)
+
+    # Create a new points object with non-contiguous tensors
+    from warpconvnet.geometry.coords.real import RealCoords
+    from warpconvnet.geometry.features.cat import CatFeatures
+
+    non_contiguous_points = Points(
+        batched_coordinates=RealCoords(
+            batched_tensor=non_contiguous_coords,
+            offsets=points.offsets.clone(),
+        ),
+        batched_features=CatFeatures(
+            batched_tensor=non_contiguous_features,
+            offsets=points.offsets.clone(),
+        ),
+    )
+
+    # Make contiguous
+    contiguous_points = non_contiguous_points.contiguous()
+
+    # Verify tensors are now contiguous
+    assert contiguous_points.coordinate_tensor.is_contiguous()
+    assert contiguous_points.feature_tensor.is_contiguous()
+
+    # Verify data is the same
+    assert torch.allclose(
+        non_contiguous_points.coordinate_tensor, contiguous_points.coordinate_tensor
+    )
+    assert torch.allclose(non_contiguous_points.feature_tensor, contiguous_points.feature_tensor)

@@ -35,6 +35,7 @@ class GridMemoryFormat(Enum):
 
     b_x_y_z_c = auto()
     b_c_x_y_z = auto()
+    b_c_z_x_y = auto()  # Channels, Z, X, Y which is consistent with the pytorch conv3d format
 
     # Factorized 3D formats
     b_zc_x_y = auto()
@@ -46,6 +47,7 @@ class GridMemoryFormat(Enum):
 FORMAT_TO_STR = {
     GridMemoryFormat.b_x_y_z_c: "b_x_y_z_c",
     GridMemoryFormat.b_c_x_y_z: "b_c_x_y_z",
+    GridMemoryFormat.b_c_z_x_y: "b_c_z_x_y",
     GridMemoryFormat.b_zc_x_y: "b_zc_x_y",
     GridMemoryFormat.b_xc_y_z: "b_xc_y_z",
     GridMemoryFormat.b_yc_x_z: "b_yc_x_z",
@@ -56,10 +58,17 @@ FORMAT_TO_STR = {
 FORMAT_TO_AXIS = {
     GridMemoryFormat.b_x_y_z_c: -1,  # No compression
     GridMemoryFormat.b_c_x_y_z: -1,  # No compression
+    GridMemoryFormat.b_c_z_x_y: -1,  # No compression
     GridMemoryFormat.b_zc_x_y: 2,  # Z-axis compressed
     GridMemoryFormat.b_xc_y_z: 0,  # X-axis compressed
     GridMemoryFormat.b_yc_x_z: 1,  # Y-axis compressed
 }
+
+NON_COMPRESSED_FORMATS = [
+    GridMemoryFormat.b_x_y_z_c,
+    GridMemoryFormat.b_c_x_y_z,
+    GridMemoryFormat.b_c_z_x_y,
+]
 
 
 class GridFeatures(Features):
@@ -87,56 +96,60 @@ class GridFeatures(Features):
         grid_shape: Optional[Tuple[int, int, int]] = None,
         num_channels: Optional[int] = None,
     ):
-        super().__init__(tensor, offsets)
-        self.memory_format = memory_format
-        if grid_shape is not None:
-            assert len(grid_shape) == 3, "grid_shape must be a tuple of 3 integers"
+        """
 
-        # Determine grid shape and number of channels based on memory format
+        Args:
+            tensor: Feature tensor in the specified memory format
+            offsets: Offsets for batched data
+            memory_format: The memory layout of the tensor
+            grid_shape: The 3D resolution of the grid (H, W, D). Even if the memory format is factorized (e.g. b_zc_x_y), permuted (e.g. b_c_z_x_y), or standard (e.g. b_x_y_z_c), the grid_shape is always the original shape of the grid in the order of (H, W, D) == (X, Y, Z)
+            num_channels: Number of feature channels
+        """
+
+        # Determine grid shape of the feature tensor
+        B, H, W, D, C = None, None, None, None, None
         if memory_format == GridMemoryFormat.b_x_y_z_c:
             assert tensor.ndim == 5, f"Expected 5D tensor for b_x_y_z_c format, got {tensor.ndim}D"
-            self._grid_shape = tensor.shape[1:4]
-            self._num_channels = tensor.shape[4]
+            B, H, W, D, C = tensor.shape
         elif memory_format == GridMemoryFormat.b_c_x_y_z:
             assert tensor.ndim == 5, f"Expected 5D tensor for b_c_x_y_z format, got {tensor.ndim}D"
-            self._grid_shape = tensor.shape[2:5]
-            self._num_channels = tensor.shape[1]
+            B, C, H, W, D = tensor.shape
+        elif memory_format == GridMemoryFormat.b_c_z_x_y:
+            assert tensor.ndim == 5, f"Expected 5D tensor for b_c_z_x_y format, got {tensor.ndim}D"
+            B, C, D, H, W = tensor.shape
+        elif memory_format == GridMemoryFormat.b_zc_x_y:
+            assert tensor.ndim == 4, f"Expected 4D tensor for b_zc_x_y format, got {tensor.ndim}D"
+            assert num_channels is not None, "num_channels must be provided for b_zc_x_y format"
+            B, ZC, H, W = tensor.shape
+            D, C = divmod(ZC, num_channels)
+        elif memory_format == GridMemoryFormat.b_xc_y_z:
+            assert tensor.ndim == 4, f"Expected 4D tensor for b_xc_y_z format, got {tensor.ndim}D"
+            assert num_channels is not None, "num_channels must be provided for b_xc_y_z format"
+            B, XC, W, D = tensor.shape
+            H, C = divmod(XC, num_channels)
+        elif memory_format == GridMemoryFormat.b_yc_x_z:
+            assert tensor.ndim == 4, f"Expected 4D tensor for b_yc_x_z format, got {tensor.ndim}D"
+            assert num_channels is not None, "num_channels must be provided for b_yc_x_z format"
+            B, YC, H, D = tensor.shape
+            W, C = divmod(YC, num_channels)
         else:
-            # For factorized formats, we need explicit grid_shape and num_channels
-            assert grid_shape is not None, "grid_shape must be provided for factorized formats"
-            assert num_channels is not None, "num_channels must be provided for factorized formats"
+            raise ValueError(f"Unsupported memory format: {memory_format}")
+
+        # Check the input grid_shape matches the inferred grid_shape
+        if grid_shape is not None:
+            assert len(grid_shape) == 3, "grid_shape must be a tuple of 3 integers"
             assert (
-                tensor.ndim == 4
-            ), f"Expected 4D tensor for factorized format, got {tensor.ndim}D"
+                H == grid_shape[0] and W == grid_shape[1] and D == grid_shape[2]
+            ), f"Input grid_shape ({grid_shape}) does not match inferred grid_shape ({H}, {W}, {D})"
 
-            self._grid_shape = grid_shape
-            self._num_channels = num_channels
+        # Batch size check
+        assert B == offsets.shape[0] - 1, f"Batch size mismatch: {B} != {offsets.shape[0] - 1}"
 
-            # Validate tensor shape based on memory format
-            if memory_format == GridMemoryFormat.b_zc_x_y:
-                B, ZC, H, W = tensor.shape
-                assert (
-                    H == grid_shape[0] and W == grid_shape[1]
-                ), f"Expected shape ({grid_shape[0]}, {grid_shape[1]}), got ({H}, {W})"
-                assert (
-                    ZC == grid_shape[2] * num_channels
-                ), f"Expected Z*C={grid_shape[2]*num_channels}, got {ZC}"
-            elif memory_format == GridMemoryFormat.b_xc_y_z:
-                B, XC, W, D = tensor.shape
-                assert (
-                    W == grid_shape[1] and D == grid_shape[2]
-                ), f"Expected shape ({grid_shape[1]}, {grid_shape[2]}), got ({W}, {D})"
-                assert (
-                    XC == grid_shape[0] * num_channels
-                ), f"Expected X*C={grid_shape[0]*num_channels}, got {XC}"
-            elif memory_format == GridMemoryFormat.b_yc_x_z:
-                B, YC, H, D = tensor.shape
-                assert (
-                    H == grid_shape[0] and D == grid_shape[2]
-                ), f"Expected shape ({grid_shape[0]}, {grid_shape[2]}), got ({H}, {D})"
-                assert (
-                    YC == grid_shape[1] * num_channels
-                ), f"Expected Y*C={grid_shape[1]*num_channels}, got {YC}"
+        # Initialize the parent class and save the attributes
+        super().__init__(tensor, offsets)
+        self.memory_format = memory_format
+        self._grid_shape = (H, W, D)
+        self._num_channels = C
 
     @property
     def grid_shape(self) -> Tuple[int, int, int]:
@@ -151,6 +164,7 @@ class GridFeatures(Features):
     @property
     def num_channels(self) -> int:
         """Return the number of feature channels."""
+        # Since the parent class num_channels is the last dimension of the tensor, we need to return the correct one based on the memory format
         return self._num_channels
 
     def channel_size(self, memory_format: Optional[GridMemoryFormat] = None) -> int:
@@ -165,9 +179,11 @@ class GridFeatures(Features):
         if memory_format is None:
             memory_format = self.memory_format
 
-        if memory_format == GridMemoryFormat.b_x_y_z_c:
-            return self._num_channels
-        elif memory_format == GridMemoryFormat.b_c_x_y_z:
+        if memory_format in [
+            GridMemoryFormat.b_x_y_z_c,
+            GridMemoryFormat.b_c_x_y_z,
+            GridMemoryFormat.b_c_z_x_y,
+        ]:
             return self._num_channels
         elif memory_format == GridMemoryFormat.b_xc_y_z:
             return self._num_channels * self._grid_shape[0]
@@ -198,6 +214,21 @@ class GridFeatures(Features):
         """
         if self.memory_format == target_format:
             return self
+
+        # Special case for non compressed formats
+        if (
+            self.memory_format in NON_COMPRESSED_FORMATS
+            and target_format in NON_COMPRESSED_FORMATS
+        ):
+            # Only perform permutations
+            axes = FORMAT_TO_STR[self.memory_format].split("_")
+            target_axes = FORMAT_TO_STR[target_format].split("_")
+            perm = [axes.index(axis) for axis in target_axes]
+            return GridFeatures(
+                self.batched_tensor.permute(perm),
+                self.offsets,
+                target_format,
+            )
 
         # First convert to standard format if not already
         standard = self.to_standard_format()
@@ -278,7 +309,7 @@ class GridFeatures(Features):
         Args:
             conv_output: Output tensor from a convolutional layer
             offsets: Batch offsets tensor
-            memory_format: The memory format of the grid features
+            memory_format: The memory format of the conv_output tensor
             grid_shape: Tuple of spatial dimensions (H, W, D)
             num_channels: The number of output channels from the convolution
 

@@ -178,3 +178,92 @@ def test_points_to_factor_grid(setup_point_geometry):
     for i, fmt in enumerate(memory_formats):
         assert factorized[i].memory_format == fmt
         assert factorized[i].grid_shape == grid_shapes[i]
+
+
+def test_strided_vertices(setup_device):
+    """Test strided_vertices method for different resolutions."""
+    device = setup_device
+    original_grid_shape = (16, 32, 64)
+    num_channels = NUM_CHANNELS
+    batch_size = 2
+
+    # Create a grid with a specific shape
+    grid = Grid.create_from_grid_shape(
+        original_grid_shape,
+        num_channels,
+        memory_format=GridMemoryFormat.b_x_y_z_c,
+        batch_size=batch_size,
+        device=device,
+    )
+
+    # Test with exact divisible resolution (striding case)
+    divisible_resolution = (8, 16, 32)  # Half of the original in each dimension
+    strided_vertices = grid.strided_vertices(divisible_resolution)
+
+    # Check shape
+    assert strided_vertices.shape[1:4] == divisible_resolution
+
+    # Compare with manual striding
+    original_vertices = grid.grid_coords.batched_tensor
+    B, H, W, D = batch_size, *original_grid_shape
+    original_reshaped = original_vertices.reshape(B, H, W, D, 3)
+    manually_strided = original_reshaped[:, ::2, ::2, ::2, :]
+    assert torch.allclose(strided_vertices, manually_strided)
+
+    # Test with non-divisible resolution (interpolation case)
+    non_divisible_resolution = (7, 15, 30)
+    interpolated_vertices = grid.strided_vertices(non_divisible_resolution)
+
+    # Check shape
+    assert interpolated_vertices.shape[1:4] == non_divisible_resolution
+
+    # Verify the interpolated vertices are within the bounds of the original
+    # Get min and max of original vertices
+    min_coords = original_vertices.reshape(-1, 3).min(dim=0)[0]
+    max_coords = original_vertices.reshape(-1, 3).max(dim=0)[0]
+
+    # Check min and max of interpolated vertices
+    interp_min = interpolated_vertices.reshape(-1, 3).min(dim=0)[0]
+    interp_max = interpolated_vertices.reshape(-1, 3).max(dim=0)[0]
+
+    # Interpolated vertices should be within the bounds of the original vertices
+    assert torch.all(interp_min >= min_coords)
+    assert torch.all(interp_max <= max_coords)
+
+
+def test_channel_size(setup_device):
+    """Test channel_size method for different memory formats."""
+    device = setup_device
+    grid_shape = (4, 8, 16)
+    num_channels = NUM_CHANNELS
+    batch_size = 2
+
+    # Create grid with standard memory format
+    grid = Grid.create_from_grid_shape(
+        grid_shape,
+        num_channels,
+        memory_format=GridMemoryFormat.b_x_y_z_c,
+        batch_size=batch_size,
+        device=device,
+    )
+
+    # Test channel size for different memory formats
+    # Standard formats should return the original channel count
+    assert grid.grid_features.channel_size(GridMemoryFormat.b_x_y_z_c) == num_channels
+    assert grid.grid_features.channel_size(GridMemoryFormat.b_c_x_y_z) == num_channels
+
+    # Factorized formats should return channels * corresponding dimension
+    assert (
+        grid.grid_features.channel_size(GridMemoryFormat.b_xc_y_z) == num_channels * grid_shape[0]
+    )
+    assert (
+        grid.grid_features.channel_size(GridMemoryFormat.b_yc_x_z) == num_channels * grid_shape[1]
+    )
+    assert (
+        grid.grid_features.channel_size(GridMemoryFormat.b_zc_x_y) == num_channels * grid_shape[2]
+    )
+
+    # Convert to a factorized format and test again
+    z_factorized = grid.to_memory_format(GridMemoryFormat.b_zc_x_y)
+    assert z_factorized.grid_features.channel_size() == num_channels * grid_shape[2]
+    assert z_factorized.grid_features.channel_size(GridMemoryFormat.b_x_y_z_c) == num_channels

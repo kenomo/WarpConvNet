@@ -57,10 +57,11 @@ class BatchedTensor:
         if isinstance(offsets, list):
             offsets = torch.LongTensor(offsets)
 
-        self.offsets = offsets.cpu()
+        # Prevent from triggering __getattribute__ used in GridCoords
+        object.__setattr__(self, "offsets", offsets.cpu())
         if device is not None:
             batched_tensor = batched_tensor.to(device)
-        self.batched_tensor = batched_tensor
+        object.__setattr__(self, "batched_tensor", batched_tensor)
 
         self.check()
 
