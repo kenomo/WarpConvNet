@@ -210,7 +210,7 @@ class GridCoords(Coords):
             }
             return self.__class__(
                 batched_tensor=torch.zeros((1, 3), device=new_device),
-                offsets=torch.tensor([0, 1], dtype=torch.long, device="cpu"),
+                offsets=self.offsets,
                 grid_shape=self._grid_shape,
                 bounds=self._bounds,
                 device=new_device,

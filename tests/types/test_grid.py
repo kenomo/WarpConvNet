@@ -38,9 +38,9 @@ def test_grid_init(setup_device):
     batch_size = 2
 
     # Create from grid shape
-    geometry = Grid.create_from_grid_shape(
-        grid_shape,
-        NUM_CHANNELS,
+    geometry = Grid.from_shape(
+        grid_shape=grid_shape,
+        num_channels=NUM_CHANNELS,
         memory_format=GridMemoryFormat.b_x_y_z_c,
         batch_size=batch_size,
         device=device,
@@ -79,7 +79,11 @@ def test_grid_creation_with_tensor(setup_device):
     offsets = torch.tensor([0, elements_per_batch, 2 * elements_per_batch], device=device)
 
     # Create grid coordinates
-    coords = GridCoords.create_regular_grid(grid_shape, batch_size=batch_size, device=device)
+    coords = GridCoords.from_shape(
+        grid_shape=grid_shape,
+        batch_size=batch_size,
+        device=device,
+    )
 
     # Test with standard format tensor
     tensor = torch.rand(batch_size, H, W, D, num_channels, device=device)

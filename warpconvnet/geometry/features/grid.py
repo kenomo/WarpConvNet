@@ -90,7 +90,7 @@ class GridFeatures(Features):
 
     def __init__(
         self,
-        tensor: Tensor,
+        batched_tensor: Tensor,
         offsets: Tensor,
         memory_format: GridMemoryFormat = GridMemoryFormat.b_x_y_z_c,
         grid_shape: Optional[Tuple[int, int, int]] = None,
@@ -109,29 +109,44 @@ class GridFeatures(Features):
         # Determine grid shape of the feature tensor
         B, H, W, D, C = None, None, None, None, None
         if memory_format == GridMemoryFormat.b_x_y_z_c:
-            assert tensor.ndim == 5, f"Expected 5D tensor for b_x_y_z_c format, got {tensor.ndim}D"
-            B, H, W, D, C = tensor.shape
+            assert (
+                batched_tensor.ndim == 5
+            ), f"Expected 5D tensor for b_x_y_z_c format, got {batched_tensor.ndim}D"
+            B, H, W, D, C = batched_tensor.shape
         elif memory_format == GridMemoryFormat.b_c_x_y_z:
-            assert tensor.ndim == 5, f"Expected 5D tensor for b_c_x_y_z format, got {tensor.ndim}D"
-            B, C, H, W, D = tensor.shape
+            assert (
+                batched_tensor.ndim == 5
+            ), f"Expected 5D tensor for b_c_x_y_z format, got {batched_tensor.ndim}D"
+            B, C, H, W, D = batched_tensor.shape
         elif memory_format == GridMemoryFormat.b_c_z_x_y:
-            assert tensor.ndim == 5, f"Expected 5D tensor for b_c_z_x_y format, got {tensor.ndim}D"
-            B, C, D, H, W = tensor.shape
+            assert (
+                batched_tensor.ndim == 5
+            ), f"Expected 5D tensor for b_c_z_x_y format, got {batched_tensor.ndim}D"
+            B, C, D, H, W = batched_tensor.shape
         elif memory_format == GridMemoryFormat.b_zc_x_y:
-            assert tensor.ndim == 4, f"Expected 4D tensor for b_zc_x_y format, got {tensor.ndim}D"
+            assert (
+                batched_tensor.ndim == 4
+            ), f"Expected 4D tensor for b_zc_x_y format, got {batched_tensor.ndim}D"
             assert num_channels is not None, "num_channels must be provided for b_zc_x_y format"
-            B, ZC, H, W = tensor.shape
-            D, C = divmod(ZC, num_channels)
+            B, ZC, H, W = batched_tensor.shape
+            D, _ = divmod(ZC, num_channels)
+            C = num_channels
         elif memory_format == GridMemoryFormat.b_xc_y_z:
-            assert tensor.ndim == 4, f"Expected 4D tensor for b_xc_y_z format, got {tensor.ndim}D"
+            assert (
+                batched_tensor.ndim == 4
+            ), f"Expected 4D tensor for b_xc_y_z format, got {batched_tensor.ndim}D"
             assert num_channels is not None, "num_channels must be provided for b_xc_y_z format"
-            B, XC, W, D = tensor.shape
-            H, C = divmod(XC, num_channels)
+            B, XC, W, D = batched_tensor.shape
+            H, _ = divmod(XC, num_channels)
+            C = num_channels
         elif memory_format == GridMemoryFormat.b_yc_x_z:
-            assert tensor.ndim == 4, f"Expected 4D tensor for b_yc_x_z format, got {tensor.ndim}D"
+            assert (
+                batched_tensor.ndim == 4
+            ), f"Expected 4D tensor for b_yc_x_z format, got {batched_tensor.ndim}D"
             assert num_channels is not None, "num_channels must be provided for b_yc_x_z format"
-            B, YC, H, D = tensor.shape
-            W, C = divmod(YC, num_channels)
+            B, YC, H, D = batched_tensor.shape
+            W, _ = divmod(YC, num_channels)
+            C = num_channels
         else:
             raise ValueError(f"Unsupported memory format: {memory_format}")
 
@@ -146,7 +161,7 @@ class GridFeatures(Features):
         assert B == offsets.shape[0] - 1, f"Batch size mismatch: {B} != {offsets.shape[0] - 1}"
 
         # Initialize the parent class and save the attributes
-        super().__init__(tensor, offsets)
+        super().__init__(batched_tensor, offsets)
         self.memory_format = memory_format
         self._grid_shape = (H, W, D)
         self._num_channels = C
@@ -225,9 +240,11 @@ class GridFeatures(Features):
             target_axes = FORMAT_TO_STR[target_format].split("_")
             perm = [axes.index(axis) for axis in target_axes]
             return GridFeatures(
-                self.batched_tensor.permute(perm),
-                self.offsets,
-                target_format,
+                batched_tensor=self.batched_tensor.permute(perm),
+                offsets=self.offsets,
+                memory_format=target_format,
+                grid_shape=self._grid_shape,
+                num_channels=self._num_channels,
             )
 
         # First convert to standard format if not already
@@ -237,7 +254,11 @@ class GridFeatures(Features):
         tensor = convert_from_standard_format(standard, target_format, self._grid_shape)
 
         return GridFeatures(
-            tensor, self.offsets, target_format, self._grid_shape, self._num_channels
+            batched_tensor=tensor,
+            offsets=self.offsets,
+            memory_format=target_format,
+            grid_shape=self._grid_shape,
+            num_channels=self._num_channels,
         )
 
     def equal_shape(self, other: "GridFeatures") -> bool:
@@ -294,7 +315,13 @@ class GridFeatures(Features):
         for i in range(1, batch_size + 1):
             offsets[i] = offsets[i - 1] + elements_per_batch
 
-        return cls(tensor, offsets, memory_format, grid_shape, num_channels)
+        return cls(
+            batched_tensor=tensor,
+            offsets=offsets,
+            memory_format=memory_format,
+            grid_shape=grid_shape,
+            num_channels=num_channels,
+        )
 
     @staticmethod
     def from_conv_output(
@@ -344,7 +371,7 @@ class GridFeatures(Features):
         assert rem == 0, "Number of channels does not divide evenly"
 
         return GridFeatures(
-            tensor=conv_output,
+            batched_tensor=conv_output,
             offsets=offsets,
             memory_format=memory_format,
             grid_shape=grid_shape,

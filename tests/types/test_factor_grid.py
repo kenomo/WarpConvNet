@@ -82,7 +82,7 @@ def test_factorized_grid_validation(setup_device):
     batch_size = 2
 
     # Create standard geometry
-    standard_geo = Grid.create_from_grid_shape(
+    standard_geo = Grid.from_shape(
         grid_shape,
         num_channels,
         memory_format=GridMemoryFormat.b_x_y_z_c,
@@ -188,7 +188,7 @@ def test_strided_vertices(setup_device):
     batch_size = 2
 
     # Create a grid with a specific shape
-    grid = Grid.create_from_grid_shape(
+    grid = Grid.from_shape(
         original_grid_shape,
         num_channels,
         memory_format=GridMemoryFormat.b_x_y_z_c,
@@ -239,7 +239,7 @@ def test_channel_size(setup_device):
     batch_size = 2
 
     # Create grid with standard memory format
-    grid = Grid.create_from_grid_shape(
+    grid = Grid.from_shape(
         grid_shape,
         num_channels,
         memory_format=GridMemoryFormat.b_x_y_z_c,

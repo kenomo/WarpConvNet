@@ -88,7 +88,7 @@ class Grid(Geometry):
         # Check that the grid is valid
         self.check(batched_coordinates, batched_features)
 
-        # Ensure offsets match
+        # Ensure offsets match if coordinates are not lazy
         assert (
             batched_coordinates.offsets == batched_features.offsets
         ).all(), "Coordinate and feature offsets must match"
@@ -112,7 +112,7 @@ class Grid(Geometry):
         ), f"Grid shape ({coords.grid_shape}) must match feature grid shape ({features.grid_shape})"
 
     @classmethod
-    def create_from_grid_shape(
+    def from_shape(
         cls,
         grid_shape: Tuple[int, int, int],
         num_channels: int,
@@ -123,7 +123,8 @@ class Grid(Geometry):
         dtype: Optional[torch.dtype] = None,
         **kwargs,
     ) -> "Grid":
-        """Create a new GridGeometry with initialized grid coordinates and features.
+        """
+        Create a new Grid geometry from a grid shape. The coordinates will be lazily initialized and the features will be created as an empty tensor.
 
         Args:
             grid_shape: Grid resolution (H, W, D)
@@ -138,12 +139,23 @@ class Grid(Geometry):
         Returns:
             Initialized grid geometry
         """
-        # Create coordinates
-        coords = GridCoords.create_regular_grid(grid_shape, bounds, batch_size, device)
+        # Create coordinates. By default, data will be lazily initialized and coordinates will be flattened.
+        coords = GridCoords.from_shape(
+            grid_shape=grid_shape,
+            bounds=bounds,
+            batch_size=batch_size,
+            device=device,
+            flatten=True,
+        )
 
         # Create empty features with same offsets
         features = GridFeatures.create_empty(
-            grid_shape, num_channels, batch_size, memory_format, device, dtype
+            grid_shape=grid_shape,
+            num_channels=num_channels,
+            batch_size=batch_size,
+            memory_format=memory_format,
+            device=device,
+            dtype=dtype,
         )
 
         # Make sure offsets match
@@ -296,6 +308,7 @@ def _process_radius_search_results(
         D: Grid depth
         reduction: Reduction method to apply ('mean', 'max', 'sum', 'mul')
     """
+    # TODO(cchoy) 2025-04-08: accelerate with a warp kernel
     # Process each grid cell
     for grid_idx, start_idx in enumerate(search_results.neighbor_row_splits[:-1]):
         end_idx = search_results.neighbor_row_splits[grid_idx + 1]
@@ -445,13 +458,17 @@ def points_to_grid_features(
     num_channels = points.num_channels
 
     # Map points to grid
-    point_coords = points.batched_coordinates.batched_tensor
-    point_offsets = points.batched_coordinates.offsets
+    point_coords_tensor = points.coordinate_tensor
+    point_offsets = points.offsets
+    # Flatten grid coords
+    assert (
+        grid_coords.batched_tensor.ndim == 2
+    ), f"Grid coords must be 2D, got {grid_coords.batched_tensor.ndim}D"
     grid_coords_tensor = grid_coords.batched_tensor
     grid_offsets = grid_coords.offsets
 
     search_results = _point_to_grid_mapping(
-        point_coords,
+        point_coords_tensor,
         point_offsets,
         grid_coords_tensor,
         grid_offsets,
@@ -560,11 +577,12 @@ def points_to_grid(
     batch_size = points.batch_size
     device = points.device
 
-    grid_coords = GridCoords.create_regular_grid(
-        grid_shape,
+    grid_coords = GridCoords.from_shape(
+        grid_shape=grid_shape,
         bounds=bounds,
         batch_size=batch_size,
         device=device,
+        flatten=True,
     )
 
     # Convert point features to grid features

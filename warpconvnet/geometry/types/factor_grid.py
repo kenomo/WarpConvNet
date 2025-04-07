@@ -110,7 +110,7 @@ class FactorGrid:
         for grid_shape, memory_format in zip(grid_shapes, memory_formats):
             if isinstance(memory_format, str):
                 memory_format = GridMemoryFormat(memory_format)
-            geometry = Grid.create_from_grid_shape(
+            geometry = Grid.from_shape(
                 grid_shape,
                 num_channels,
                 memory_format=memory_format,
