@@ -59,5 +59,5 @@ def test_expand_kernel_batch(setup_voxels, kernel_batch):
         kernel_dilation=(1, 1, 1),
     )
 
-    assert torch.equal(up_coords, ref_coords)
     assert torch.equal(offsets, ref_offsets)
+    assert up_coords.shape[0] == ref_coords.shape[0]

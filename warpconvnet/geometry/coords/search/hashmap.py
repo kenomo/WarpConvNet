@@ -444,6 +444,7 @@ class VectorHashTable:
             search_keys = wp.from_torch(search_keys)
         return self._hash_struct.search(search_keys)
 
+    @property
     def unique_index(self) -> Int[Tensor, "N"]:  # noqa: F821
         """Get sorted unique indices from the hash table.
 
@@ -458,3 +459,15 @@ class VectorHashTable:
 
     def hashmap_struct(self) -> HashStruct:
         return self._hash_struct
+
+    @property
+    def vector_keys(self) -> wp.array2d:
+        """Return the 2D vector keys of the hash table."""
+        return self._hash_struct.vector_keys
+
+    @property
+    def unique_vector_keys(self) -> Int[Tensor, "N D+1"]:  # noqa: F821
+        """Return the unique 2D vector keys of the hash table."""
+        th_vec_keys = wp.to_torch(self.vector_keys)
+        th_unique_vec_keys = th_vec_keys[self.unique_index]
+        return th_unique_vec_keys

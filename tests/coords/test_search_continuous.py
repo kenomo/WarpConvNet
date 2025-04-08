@@ -53,6 +53,7 @@ def test_radius_search(setup_points):
     assert search_result.neighbor_row_splits[-1] == len(search_result.neighbor_indices)
 
 
+@pytest.mark.slow
 def test_knn_search(setup_points):
     """Test k-nearest neighbors search method."""
     device = torch.device("cuda:0")

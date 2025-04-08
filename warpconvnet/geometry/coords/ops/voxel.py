@@ -43,7 +43,7 @@ def voxel_downsample_hashmap(
         unique_indices: sorted indices of unique voxels.
     """
     hash_table = VectorHashTable.from_keys(coords)
-    unique_indices = hash_table.unique_index()
+    unique_indices = hash_table.unique_index
     return unique_indices
 
 

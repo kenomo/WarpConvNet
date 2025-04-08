@@ -56,6 +56,8 @@ def expand_coords(
         unique_coords = torch.cat([unique_coords, new_batched_coords[not_in_hashtable]], dim=0)
         # Update hashtable with new unique coordinates
         hashtable = VectorHashTable.from_keys(wp.from_torch(unique_coords))
+        # Get the unique coordinates
+        unique_coords = hashtable.unique_vector_keys
 
     # sort the coordinates and return the coordinate and offset
     # sort the batch index

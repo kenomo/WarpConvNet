@@ -433,6 +433,9 @@ def init_grid_feature(
     if memory_format == GridMemoryFormat.b_c_x_y_z:
         return torch.zeros((batch_size, num_channels, H, W, D), device=device, dtype=dtype)
 
+    if memory_format == GridMemoryFormat.b_c_z_x_y:
+        return torch.zeros((batch_size, num_channels, D, H, W), device=device, dtype=dtype)
+
     if memory_format == GridMemoryFormat.b_zc_x_y:
         return torch.zeros((batch_size, D * num_channels, H, W), device=device, dtype=dtype)
 

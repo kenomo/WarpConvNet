@@ -56,7 +56,7 @@ class TestVoxelOps(unittest.TestCase):
         device = "cuda:0"
         voxel_size = 0.025
         pc = self.pc.to(device)
-        st: Voxels = pc.to_sparse(voxel_size)
+        st: Voxels = pc.to_voxels(voxel_size)
 
         # Find the mapping
         up_map, down_map, valid = voxel_downsample_mapping(
