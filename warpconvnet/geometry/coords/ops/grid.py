@@ -15,6 +15,7 @@ def create_grid_coordinates(
     batch_size: int = 1,
     device: Optional[torch.device] = None,
     flatten: bool = True,
+    dtype: torch.dtype = torch.float32,
 ) -> Tuple[Float[Tensor, "N 3"], Int[Tensor, "B+1"]]:  # noqa: F821
     """Create coordinate tensor for a regular grid.
 
@@ -40,9 +41,9 @@ def create_grid_coordinates(
         max_bound = max_bound.to(device)
 
     # Create regular grid in the range [0, 1]
-    h_coords = torch.linspace(0, 1, H, device=device)
-    w_coords = torch.linspace(0, 1, W, device=device)
-    d_coords = torch.linspace(0, 1, D, device=device)
+    h_coords = torch.linspace(0, 1, H, device=device, dtype=dtype)
+    w_coords = torch.linspace(0, 1, W, device=device, dtype=dtype)
+    d_coords = torch.linspace(0, 1, D, device=device, dtype=dtype)
 
     # Create meshgrid
     grid_h, grid_w, grid_d = torch.meshgrid(h_coords, w_coords, d_coords, indexing="ij")

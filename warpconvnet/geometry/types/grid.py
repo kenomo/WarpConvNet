@@ -54,19 +54,19 @@ class Grid(Geometry):
                     num_channels = batched_features.shape[-1]
                 elif memory_format == GridMemoryFormat.b_c_x_y_z:
                     num_channels = batched_features.shape[1]
+                elif memory_format == GridMemoryFormat.b_c_z_x_y:
+                    num_channels = batched_features.shape[1]
+                elif memory_format == GridMemoryFormat.b_zc_x_y:
+                    zc = batched_features.shape[1]
+                    num_channels = zc // grid_shape[2]
+                elif memory_format == GridMemoryFormat.b_xc_y_z:
+                    xc = batched_features.shape[1]
+                    num_channels = xc // grid_shape[0]
+                elif memory_format == GridMemoryFormat.b_yc_x_z:
+                    yc = batched_features.shape[1]
+                    num_channels = yc // grid_shape[1]
                 else:
-                    # For factorized formats, we need to infer from tensor shape and grid shape
-                    if memory_format == GridMemoryFormat.b_zc_x_y:
-                        zc = batched_features.shape[1]
-                        num_channels = zc // grid_shape[2]
-                    elif memory_format == GridMemoryFormat.b_xc_y_z:
-                        xc = batched_features.shape[1]
-                        num_channels = xc // grid_shape[0]
-                    elif memory_format == GridMemoryFormat.b_yc_x_z:
-                        yc = batched_features.shape[1]
-                        num_channels = yc // grid_shape[1]
-                    else:
-                        raise ValueError(f"Unsupported memory format: {memory_format}")
+                    raise ValueError(f"Unsupported memory format: {memory_format}")
 
             # Create GridFeatures with same offsets as coordinates
             batched_features = GridFeatures(
@@ -177,6 +177,11 @@ class Grid(Geometry):
         return self.grid_coords.grid_shape
 
     @property
+    def bounds(self) -> Tuple[Tensor, Tensor]:
+        """Get the bounds of the grid."""
+        return self.grid_coords.bounds
+
+    @property
     def num_channels(self) -> int:
         """Get the number of feature channels."""
         return self.grid_features.num_channels
@@ -229,3 +234,44 @@ class Grid(Geometry):
             self.grid_features.to(device),
             self.memory_format,
         )
+
+    def replace(
+        self,
+        batched_coordinates: Optional[GridCoords] = None,
+        batched_features: Optional[Union[GridFeatures, Tensor]] = None,
+        **kwargs,
+    ) -> "Grid":
+        """Create a new instance with replaced coordinates and/or features."""
+        # Convert the batched_features to a GridFeatures if it is a tensor
+        if isinstance(batched_features, Tensor):
+            assert batched_features.ndim == 5, "Batched features must be a 5D tensor"
+            # Based on the memory format, we have to check the shape of the tensor
+            if self.memory_format == GridMemoryFormat.b_x_y_z_c:
+                in_H, in_W, in_D, in_C = batched_features.shape[1:5]
+                assert in_H == self.grid_shape[0]
+                assert in_W == self.grid_shape[1]
+                assert in_D == self.grid_shape[2]
+                assert in_C == self.num_channels
+            elif self.memory_format == GridMemoryFormat.b_c_x_y_z:
+                in_C, in_H, in_W, in_D = batched_features.shape[1:5]
+                assert in_C == self.num_channels
+                assert in_H == self.grid_shape[0]
+                assert in_W == self.grid_shape[1]
+                assert in_D == self.grid_shape[2]
+            elif self.memory_format == GridMemoryFormat.b_c_z_x_y:
+                in_C, in_D, in_H, in_W = batched_features.shape[1:5]
+                assert in_C == self.num_channels
+                assert in_D == self.grid_shape[2]
+                assert in_H == self.grid_shape[0]
+                assert in_W == self.grid_shape[1]
+            else:
+                raise ValueError(f"Unsupported memory format: {self.memory_format}")
+
+            batched_features = GridFeatures(
+                batched_tensor=batched_features,
+                offsets=self.grid_features.offsets,
+                memory_format=self.memory_format,
+                grid_shape=self.grid_shape,
+                num_channels=in_C,
+            )
+        return super().replace(batched_coordinates, batched_features, **kwargs)

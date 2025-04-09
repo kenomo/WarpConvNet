@@ -236,3 +236,20 @@ def test_voxel_dtype_conversion(setup_voxels, in_dtype, out_dtype):
     # Test operations maintain dtype
     result = converted + 1.0
     assert result.features.dtype == out_dtype
+
+
+def test_extra_attributes():
+    # Test for extra attribute in the Geometry base class
+    # Critical for X.replace() to work
+    device = "cuda:0"
+    B, min_N, max_N, C = 3, 1000, 10000, 7
+    Ns = torch.randint(min_N, max_N, (B,))
+    voxel_size = 0.01
+    coords = [torch.floor(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
+    features = [torch.rand((N, C)) for N in Ns]
+    voxels = Voxels(coords, features, device=device, test_attribute="test", voxel_size=voxel_size)
+    # Add extra attribute
+    replaced = voxels.replace(batched_features=voxels.batched_features + 1)
+    # Check that the extra attribute is present
+    assert replaced.extra_attributes["test_attribute"] == "test"
+    assert replaced.voxel_size == voxel_size

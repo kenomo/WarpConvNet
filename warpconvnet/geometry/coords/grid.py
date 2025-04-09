@@ -1,16 +1,30 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Optional, Tuple, Union
-from jaxtyping import Float, Int
+from typing import Optional, Tuple
+from jaxtyping import Int
 
+from dataclasses import dataclass
 import numpy as np
+from copy import deepcopy
+
 import torch
 from torch import Tensor
 
 from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.base.batched import BatchedTensor
 from warpconvnet.geometry.coords.ops.grid import create_grid_coordinates
+
+
+@dataclass
+class GridCoordsLazyInit:
+    batch_size: int = 1
+    flatten: bool = True
+    device: torch.device = torch.device("cpu")
+    dtype: torch.dtype = torch.float32
+
+    def replace(self, **kwargs):
+        return GridCoordsLazyInit(**{**self.__dict__, **kwargs})
 
 
 class GridCoords(Coords):
@@ -26,9 +40,7 @@ class GridCoords(Coords):
         offsets: Tensor,
         grid_shape: Tuple[int, int, int],
         bounds: Optional[Tuple[Tensor, Tensor]] = None,
-        device: Optional[torch.device] = None,
-        is_lazy: bool = False,
-        lazy_params: Optional[dict] = None,
+        lazy_init: Optional[GridCoordsLazyInit] = None,
     ):
         """Internal initialization method.
 
@@ -38,33 +50,29 @@ class GridCoords(Coords):
         Args:
             batched_tensor: Coordinate tensor (real or dummy)
             offsets: Offset tensor (real or dummy)
-            grid_shape: Shape of the grid (H, W, D)
+            grid_shape: Shape of the grid (H, W, D) or (X, Y, Z)
             bounds: Min and max bounds (default: unit cube)
-            device: Device to create tensors on
-            is_lazy: Whether this is a lazily initialized instance
-            lazy_params: Parameters for lazy initialization
+            lazy_init: Parameters for lazy initialization
         """
         # Set initialization flag first to avoid triggering lazy init
         # during parent class initialization
-        self._is_initialized = not is_lazy
+        self._is_initialized = lazy_init is None
         self.grid_shape = grid_shape
 
         # Set bounds
         if bounds is None:
             # Default to unit cube
-            min_bound = torch.zeros(3, device=device or batched_tensor.device)
-            max_bound = torch.ones(3, device=device or batched_tensor.device)
+            min_bound = torch.zeros(3)
+            max_bound = torch.ones(3)
         else:
-            min_bound = bounds[0].to(device or batched_tensor.device)
-            max_bound = bounds[1].to(device or batched_tensor.device)
+            min_bound = bounds[0].to("cpu")
+            max_bound = bounds[1].to("cpu")
+
+        self.bounds = (min_bound, max_bound)
 
         # Store lazy initialization parameters if needed
-        if is_lazy and lazy_params:
-            self._grid_shape = grid_shape
-            self._batch_size = lazy_params.get("batch_size", 1)
-            self._device = device
-            self._flatten = lazy_params.get("flatten", True)
-            self._bounds = (min_bound, max_bound)
+        if lazy_init is not None:
+            self._lazy_params = lazy_init
         else:
             assert (
                 batched_tensor.ndim == 5 or batched_tensor.ndim == 2
@@ -74,10 +82,13 @@ class GridCoords(Coords):
             ), f"Last dimension must be 3. Got {batched_tensor.shape}"
             if batched_tensor.ndim == 5:
                 assert batched_tensor.shape[1:4] == grid_shape
-            self._flatten = batched_tensor.ndim == 2
 
         # Call parent's __init__ directly to avoid attribute lookup problems
-        BatchedTensor.__init__(self, batched_tensor, offsets)
+        BatchedTensor.__init__(
+            self,
+            batched_tensor=batched_tensor,
+            offsets=offsets,
+        )
 
     @classmethod
     def from_tensor(
@@ -88,6 +99,10 @@ class GridCoords(Coords):
         bounds: Optional[Tuple[Tensor, Tensor]] = None,
     ) -> "GridCoords":
         """Create grid coordinates from an existing tensor.
+
+        This is a convenience method for creating GridCoords from a pre-created
+        coordinate tensor. Since the coordinate tensor is created, it is eagerly
+        initialized.
 
         Args:
             tensor: Pre-created coordinate tensor of shape (B,H,W,D,3) or (N,3)
@@ -103,8 +118,6 @@ class GridCoords(Coords):
             offsets=offsets,
             grid_shape=grid_shape,
             bounds=bounds,
-            device=tensor.device,
-            is_lazy=False,
         )
 
     @classmethod
@@ -131,26 +144,25 @@ class GridCoords(Coords):
             GridCoords: Lazily initialized grid coordinates
         """
         # Create minimal dummy tensors
-        dummy_tensor = torch.zeros((1, 3), device=device)
+        dummy_tensor = torch.zeros((1, 3))
         # Create the offset using the batch size and grid shape
         num_elements = np.prod(grid_shape)
         offsets = torch.tensor(
             [i * num_elements for i in range(batch_size + 1)], dtype=torch.long, device="cpu"
         )
 
-        lazy_params = {
-            "batch_size": batch_size,
-            "flatten": flatten,
-        }
+        lazy_init = GridCoordsLazyInit(
+            batch_size=batch_size,
+            flatten=flatten,
+            device=device,
+        )
 
         return cls(
             batched_tensor=dummy_tensor,
             offsets=offsets,
             grid_shape=grid_shape,
             bounds=bounds,
-            device=device,
-            is_lazy=True,
-            lazy_params=lazy_params,
+            lazy_init=lazy_init,
         )
 
     def _ensure_initialized(self):
@@ -158,11 +170,12 @@ class GridCoords(Coords):
         if not self._is_initialized:
             # Create the actual coordinate tensor
             coords, offsets = create_grid_coordinates(
-                self._grid_shape,
-                self._bounds,
-                self._batch_size,
-                self._device,
-                self._flatten,
+                self.grid_shape,
+                self.bounds,
+                self.batch_size,
+                device=self._lazy_params.device,
+                flatten=self._lazy_params.flatten,
+                dtype=self._lazy_params.dtype,
             )
 
             # Replace dummy tensors
@@ -179,11 +192,7 @@ class GridCoords(Coords):
     # Override __getattribute__ to intercept attribute access
     def __getattribute__(self, name):
         # First get the _is_initialized flag (if it exists)
-        try:
-            is_initialized = object.__getattribute__(self, "_is_initialized")
-        except AttributeError:
-            # During initialization, this attribute might not exist yet
-            is_initialized = True
+        is_initialized = object.__getattribute__(self, "_is_initialized")
 
         # If accessing tensor attributes and not initialized, ensure initialization
         if not is_initialized and name in ("batched_tensor"):
@@ -192,7 +201,7 @@ class GridCoords(Coords):
             object.__getattribute__(self, "_ensure_initialized")()
 
         # Use default attribute lookup
-        return object.__getattribute__(self, name)
+        return super().__getattribute__(name)
 
     # Override other key methods
     def __getitem__(self, idx):
@@ -203,23 +212,20 @@ class GridCoords(Coords):
         """Handle device transfers while preserving lazy status."""
         if not self.is_initialized:
             # Create a new lazy GridCoords with updated device
-            new_device = device if device is not None else self._device
-            lazy_params = {
-                "batch_size": self._batch_size,
-                "flatten": self._flatten,
-            }
+            lazy_init = self._lazy_params.replace(
+                device=device if device is not None else self._lazy_params.device,
+                dtype=dtype if dtype is not None else self._lazy_params.dtype,
+            )
             return self.__class__(
-                batched_tensor=torch.zeros((1, 3), device=new_device),
+                batched_tensor=self.batched_tensor,
                 offsets=self.offsets,
-                grid_shape=self._grid_shape,
-                bounds=self._bounds,
-                device=new_device,
-                is_lazy=True,
-                lazy_params=lazy_params,
+                grid_shape=self.grid_shape,
+                bounds=self.bounds,
+                lazy_init=lazy_init,
             )
 
         # Otherwise use standard implementation
-        return super().to(device, dtype)
+        return super().to(device=device, dtype=dtype)
 
     def check(self):
         """Override check to allow lazy initialization."""
@@ -228,18 +234,11 @@ class GridCoords(Coords):
             return
         super().check()
 
+    # Override properties defined in BatchedTensor to avoid initialization
     @property
-    def batch_size(self):
-        """Override batch_size to avoid initialization."""
+    def device(self) -> torch.device:
         if not self.is_initialized:
-            return self._batch_size
-        return super().batch_size
-
-    @property
-    def device(self):
-        """Override device to avoid initialization."""
-        if not self.is_initialized:
-            return self._device
+            return self._lazy_params.device
         return super().device
 
     @property
@@ -247,47 +246,59 @@ class GridCoords(Coords):
         """Override shape to avoid initialization."""
         if not self.is_initialized:
             # Return expected shape without initializing tensor
-            H, W, D = self._grid_shape
-            if self._flatten:
+            H, W, D = self.grid_shape
+            if self._lazy_params.flatten:
                 # If flattened, shape is (N, 3) where N is batch_size * H * W * D
-                return (self._batch_size * H * W * D, 3)
+                return (self._lazy_params.batch_size * H * W * D, 3)
             else:
                 # If not flattened, shape would depend on batch size
-                return (self._batch_size, H, W, D, 3)
+                return (self._lazy_params.batch_size, H, W, D, 3)
         return super().shape
 
+    @property
+    def dtype(self):
+        if not self.is_initialized:
+            return self._lazy_params.dtype
+        return super().dtype
+
     def half(self):
-        self._ensure_initialized()
-        return GridCoords.from_tensor(
-            self.batched_tensor.half(), self.offsets, self.grid_shape, self._bounds
-        )
+        if not self.is_initialized:
+            lazy_init = self._lazy_params.replace(dtype=torch.float16)
+            return GridCoords.from_tensor(
+                self.batched_tensor.half(), self.offsets, self.grid_shape, self.bounds, lazy_init
+            )
+        return super().half()
 
     def float(self):
-        self._ensure_initialized()
-        return GridCoords.from_tensor(
-            self.batched_tensor.float(), self.offsets, self.grid_shape, self._bounds
-        )
+        if not self.is_initialized:
+            lazy_init = self._lazy_params.replace(dtype=torch.float32)
+            return GridCoords.from_tensor(
+                self.batched_tensor.float(), self.offsets, self.grid_shape, self.bounds, lazy_init
+            )
+        return super().float()
 
     def double(self):
-        self._ensure_initialized()
-        return GridCoords.from_tensor(
-            self.batched_tensor.double(), self.offsets, self.grid_shape, self._bounds
-        )
+        if not self.is_initialized:
+            lazy_init = self._lazy_params.replace(dtype=torch.float64)
+            return GridCoords.from_tensor(
+                self.batched_tensor.double(), self.offsets, self.grid_shape, self.bounds, lazy_init
+            )
+        return super().double()
 
     def numel(self):
         """Override numel to avoid initialization."""
         if not self.is_initialized:
             # Calculate expected number of elements
-            H, W, D = self._grid_shape
-            return self._batch_size * H * W * D * 3
+            H, W, D = self.grid_shape
+            return self._lazy_params.batch_size * H * W * D * 3
         return super().numel()
 
     def __len__(self):
         """Override len to avoid initialization."""
         if not self.is_initialized:
             # Calculate expected length
-            H, W, D = self._grid_shape
-            return self._batch_size * H * W * D
+            H, W, D = self.grid_shape
+            return self.batch_size * H * W * D
         return super().__len__()
 
     # Methods specific to GridCoords that need to be preserved
@@ -318,7 +329,7 @@ class GridCoords(Coords):
     # Prevent unwanted initialization
     def __repr__(self):
         if not self.is_initialized:
-            return f"{self.__class__.__name__}(grid_shape={self.grid_shape}, lazy=True, device={self._device})"
+            return f"{self.__class__.__name__}(grid_shape={self.grid_shape}, lazy=True, device={self.device})"
         return super().__repr__()
 
     def __str__(self):

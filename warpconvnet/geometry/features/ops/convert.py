@@ -94,14 +94,7 @@ def to_batched_features(
 ) -> Union["CatFeatures", "PadFeatures", "GridFeatures"]:
     from ..cat import CatFeatures
     from ..pad import PadFeatures
-
-    # Import dynamically to avoid circular import
-    try:
-        from ..grid import GridFeatures
-
-        supports_grid_features = True
-    except ImportError:
-        supports_grid_features = False
+    from ..grid import GridFeatures
 
     if isinstance(features, Tensor):
         if features.ndim == 2:
@@ -111,10 +104,7 @@ def to_batched_features(
         else:
             raise ValueError(f"Invalid features tensor shape {features.shape}")
     else:
-        # Check if it's already a valid feature type
-        valid_types = [CatFeatures, PadFeatures]
-        if supports_grid_features:
-            valid_types.append(GridFeatures)
+        valid_types = [CatFeatures, PadFeatures, GridFeatures]
 
         if any(isinstance(features, t) for t in valid_types):
             if device is not None:

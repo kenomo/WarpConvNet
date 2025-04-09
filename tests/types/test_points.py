@@ -207,3 +207,18 @@ def test_contiguous(setup_points):
         non_contiguous_points.coordinate_tensor, contiguous_points.coordinate_tensor
     )
     assert torch.allclose(non_contiguous_points.feature_tensor, contiguous_points.feature_tensor)
+
+
+def test_extra_attributes():
+    # Test for extra attribute in the Geometry base class
+    # Critical for X.replace() to work
+    device = "cuda:0"
+    B, min_N, max_N, C = 3, 1000, 10000, 7
+    Ns = torch.randint(min_N, max_N, (B,))
+    coords = [torch.rand((N, 3)) for N in Ns]
+    features = [torch.rand((N, C)) for N in Ns]
+    points = Points(coords, features, device=device, test_attribute="test")
+    # Add extra attribute
+    replaced = points.replace(batched_features=points.batched_features + 1)
+    # Check that the extra attribute is present
+    assert replaced.extra_attributes["test_attribute"] == "test"

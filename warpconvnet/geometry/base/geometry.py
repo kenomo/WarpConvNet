@@ -188,11 +188,11 @@ class Geometry:
 
     @property
     def offsets(self):
-        return self.batched_coordinates.offsets
+        return self.batched_features.offsets
 
     @property
     def device(self):
-        return self.batched_coordinates.device
+        return self.batched_features.device
 
     @property
     def num_channels(self):

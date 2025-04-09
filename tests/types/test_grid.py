@@ -8,7 +8,8 @@ import warp as wp
 from warpconvnet.geometry.features.grid import GridMemoryFormat
 from warpconvnet.geometry.coords.grid import GridCoords
 from warpconvnet.geometry.types.points import Points
-from warpconvnet.geometry.types.grid import Grid, points_to_grid
+from warpconvnet.geometry.types.grid import Grid
+from warpconvnet.geometry.types.conversion.to_grid import points_to_grid
 
 NUM_CHANNELS = 7
 
@@ -51,6 +52,7 @@ def test_grid_init(setup_device):
     assert geometry.num_channels == NUM_CHANNELS
     assert geometry.memory_format == GridMemoryFormat.b_x_y_z_c
     assert geometry.batch_size == batch_size
+    assert geometry.device == device
 
     # Check device moving
     if torch.cuda.is_available():
@@ -131,3 +133,21 @@ def test_points_to_grid(setup_point_geometry):
         assert grid.grid_shape == grid_shape
         assert grid.num_channels == NUM_CHANNELS
         assert grid.batch_size == points.batch_size
+
+
+def test_extra_attributes():
+    # Test for extra attribute in the Geometry base class
+    # Critical for X.replace() to work
+    device = "cuda:0"
+    grid_shape = (4, 6, 8)
+    bounds = (torch.zeros(3), torch.ones(3))
+    grid = Grid.from_shape(
+        grid_shape, num_channels=NUM_CHANNELS, bounds=bounds, device=device, test_attribute="test"
+    )
+    # Add extra attribute
+    replaced = grid.replace(batched_features=grid.features + 1)
+    # Check that the extra attribute is present
+    assert replaced.extra_attributes["test_attribute"] == "test"
+    assert replaced.bounds == bounds
+    # Check if it is_lazy
+    assert not replaced.grid_coords.is_initialized
