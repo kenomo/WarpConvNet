@@ -20,7 +20,7 @@ repos:
 
   # python code formatting
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 25.1.0
     hooks:
       - id: black
         args: [--line-length, "99"]
@@ -34,7 +34,7 @@ repos:
 
   # python check (PEP8), programming errors and code complexity
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.1.1
+    rev: 7.2.0
     hooks:
       - id: flake8
         args:
@@ -88,7 +88,7 @@ repos:
 
   # bash and sbatch script formatter
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.10.0-2
+    rev: v3.11.0-1
     hooks:
       - id: shfmt
         args: ["-i", "4", "-ci", "-bn", "-sr"]
@@ -97,7 +97,7 @@ repos:
 
   # md formatting
   - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.21
+    rev: 0.7.22
     hooks:
       - id: mdformat
         args: ["--number"]
@@ -109,7 +109,7 @@ repos:
 
   # word spelling linter
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    rev: v2.4.1
     hooks:
       - id: codespell
         args:
@@ -136,3 +136,13 @@ repos:
             "--extend-ignore=E203,E402,E501,F401,F722,F841",
             "--exclude=logs/*,data/*",
           ]
+
+  # - repo: local
+  #   hooks:
+  #     - id: forbid-internal-files
+  #       name: Prevent committing files in internal/ directory
+  #       entry: |
+  #         bash -c 'files=$(git diff --cached --name-only --diff-filter=ACMRTUXB | grep "^internal/"); if [ -n "$files" ]; then echo "ERROR: Attempting to commit files in internal/ directory:" >&2; echo "$files" >&2; exit 1; fi'
+  #       language: system
+  #       stages: [commit]
+  #       files: '^internal/'
