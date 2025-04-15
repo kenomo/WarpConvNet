@@ -3,6 +3,7 @@
 
 import pytest
 import torch
+import warp as wp
 
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.geometry.types.voxels import Voxels
@@ -13,6 +14,9 @@ from warpconvnet.geometry.types.conversion.to_grid import (
 )
 from warpconvnet.geometry.coords.grid import GridCoords
 from warpconvnet.geometry.features.grid import GridFeatures
+
+
+wp.init()
 
 
 @pytest.fixture
@@ -32,7 +36,7 @@ def sample_points():
     features = torch.tensor([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]], dtype=torch.float32)
     # features = torch.arange(6, dtype=torch.float32).unsqueeze(1) + 1.0
     offsets = torch.tensor([0, 6], dtype=torch.int64)
-    return Points(coords, features, offsets)
+    return Points(coords, features, offsets, device="cuda")
 
 
 @pytest.fixture
@@ -51,7 +55,7 @@ def sample_voxels():
     offsets = torch.tensor([0, 4], dtype=torch.int64)
     voxel_size = torch.tensor([1.0, 1.0, 1.0], dtype=torch.float32)
     origin = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
-    return Voxels(coords, features, offsets, voxel_size=voxel_size, origin=origin)
+    return Voxels(coords, features, offsets, voxel_size=voxel_size, origin=origin, device="cuda")
 
 
 @pytest.mark.parametrize("reduction", ["mean", "max", "sum"])
@@ -115,8 +119,6 @@ def test_voxels_to_grid(sample_voxels, memory_format, reduction):
         grid_shape=grid_shape,
         grid_bounds=grid_bounds,
         memory_format=memory_format,
-        search_radius=None,  # Use default radius search behavior from _points_to_grid_features
-        search_type="radius",
         reduction=reduction,
     )
 

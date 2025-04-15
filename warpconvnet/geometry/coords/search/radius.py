@@ -196,6 +196,14 @@ def batched_radius_search(
         neighbor_distance: [Q]
         neighbor_split: [B + 1]
     """
+    # It only supports GPU for now
+    assert isinstance(ref_positions, torch.Tensor) and isinstance(
+        query_positions, torch.Tensor
+    ), "Only torch.Tensor is supported for batched radius search"
+    assert (
+        ref_positions.device.type == "cuda" and query_positions.device.type == "cuda"
+    ), "Only GPU is supported for batched radius search"
+
     B = len(ref_offsets) - 1
     assert B == len(query_offsets) - 1
     assert (

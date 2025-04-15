@@ -6,11 +6,9 @@ from jaxtyping import Float, Int
 
 import torch
 from torch import Tensor
-import math
 
-# Note: Do not import warpconvnet directly here to avoid circular imports
-
-REDUCTION_TYPES = Literal["mean", "max", "sum", "mul"]
+from warpconvnet.utils.ravel import ravel_multi_index
+from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS
 
 
 def _point_to_grid_mapping(
@@ -76,7 +74,7 @@ def _process_radius_search_results(
     grid_coords: "GridCoords",
     W: int,
     D: int,
-    reduction: REDUCTION_TYPES,
+    reduction: REDUCTION_TYPES_STR,
 ) -> Float[Tensor, "B H W D C"]:  # noqa: F821
     """Process radius search results and update grid features.
 
@@ -97,6 +95,8 @@ def _process_radius_search_results(
     assert isinstance(
         search_results, RealSearchResult
     ), f"Expected RealSearchResult, got {type(search_results)}"
+    reduction_type = REDUCTIONS(reduction)
+
     for grid_idx, start_idx in enumerate(search_results.neighbor_row_splits[:-1]):
         end_idx = search_results.neighbor_row_splits[grid_idx + 1]
 
@@ -120,16 +120,16 @@ def _process_radius_search_results(
         d_idx = cell_idx % D
 
         # Apply reduction
-        if reduction == "mean":
+        if reduction_type == REDUCTIONS.MEAN:
             reduced_features = torch.mean(neighbor_features, dim=0)
-        elif reduction == "max":
+        elif reduction_type == REDUCTIONS.MAX:
             reduced_features = torch.max(neighbor_features, dim=0)[0]
-        elif reduction == "sum":
+        elif reduction_type == REDUCTIONS.SUM:
             reduced_features = torch.sum(neighbor_features, dim=0)
-        elif reduction == "mul":
+        elif reduction_type == REDUCTIONS.MUL:
             reduced_features = torch.prod(neighbor_features, dim=0)
         else:
-            raise ValueError(f"Unsupported reduction: {reduction}")
+            raise ValueError(f"Unsupported reduction: {reduction} for radius search")
 
         # Set grid features
         grid_features[batch_idx, h_idx, w_idx, d_idx] = reduced_features
@@ -145,7 +145,7 @@ def _process_knn_search_results(
     H: int,
     W: int,
     D: int,
-    reduction: REDUCTION_TYPES,
+    reduction: REDUCTION_TYPES_STR,
 ) -> None:
     """Process KNN search results and update grid features.
 
@@ -159,6 +159,8 @@ def _process_knn_search_results(
         D: Grid depth
         reduction: Reduction method to apply ('mean', 'max', 'sum')
     """
+    # TODO(cchoy) 2025-04-08: accelerate with a warp kernel
+    reduction_type = REDUCTIONS(reduction)
     total_grid_cells = H * W * D
 
     # Calculate batch and spatial indices for all grid cells
@@ -197,16 +199,16 @@ def _process_knn_search_results(
         neighbor_features = point_features[point_indices]
 
         # Apply reduction
-        if reduction == "mean":
+        if reduction_type == REDUCTIONS.MEAN:
             reduced_features = torch.mean(neighbor_features, dim=0)
-        elif reduction == "max":
+        elif reduction_type == REDUCTIONS.MAX:
             reduced_features = torch.max(neighbor_features, dim=0)[0]
-        elif reduction == "sum":
+        elif reduction_type == REDUCTIONS.SUM:
             reduced_features = torch.sum(neighbor_features, dim=0)
-        elif reduction == "mul":
+        elif reduction_type == REDUCTIONS.MUL:
             reduced_features = torch.prod(neighbor_features, dim=0)
         else:
-            raise ValueError(f"Unsupported reduction: {reduction}")
+            raise ValueError(f"Unsupported reduction: {reduction} for knn search")
 
         # Set grid features
         batch_idx = batch_indices[i]
@@ -226,7 +228,7 @@ def _points_to_grid_features(
     search_radius: Optional[float] = None,
     k: int = 8,
     search_type: Literal["radius", "knn"] = "radius",
-    reduction: REDUCTION_TYPES = "mean",
+    reduction: REDUCTION_TYPES_STR = "mean",
 ) -> "GridFeatures":
     """Convert point features to grid features.
 
@@ -260,6 +262,7 @@ def _points_to_grid_features(
     # Map points to grid
     point_coords_tensor = points.coordinate_tensor
     point_offsets = points.offsets
+
     # Flatten grid coords
     assert (
         grid_coords.batched_tensor.ndim == 2
@@ -356,7 +359,7 @@ def points_to_grid(
     search_radius: Optional[float] = None,
     k: int = 8,
     search_type: Literal["radius", "knn"] = "radius",
-    reduction: REDUCTION_TYPES = "mean",
+    reduction: REDUCTION_TYPES_STR = "mean",
 ) -> "Grid":
     """Convert point features to a grid.
 
@@ -411,10 +414,8 @@ def voxels_to_grid(
     grid_shape: Tuple[int, int, int],
     grid_bounds: Optional[Tuple[Tensor, Tensor]] = None,
     memory_format: Optional["GridMemoryFormat"] = None,
-    search_radius: Optional[float] = None,
-    k: int = 8,
-    search_type: Literal["radius", "knn"] = "radius",
-    reduction: REDUCTION_TYPES = "mean",
+    search_type: Literal["cell"] = "cell",
+    reduction: REDUCTION_TYPES_STR = "mean",
 ) -> "Grid":
     """Convert voxel features to a grid.
 
@@ -423,13 +424,16 @@ def voxels_to_grid(
         grid_shape: Grid shape (H, W, D)
         memory_format: Memory format for grid features
         bounds: Min and max bounds for the grid
+        search_radius: Search radius for radius search
+        k: Number of neighbors for kNN search
+        search_type: Search type ('cell')
+        reduction: Reduction method defined in REDUCTION_TYPES_STR
 
     Returns:
         Grid: Grid with the specified memory format
     """
-    from warpconvnet.geometry.coords.grid import GridCoords
     from warpconvnet.geometry.types.voxels import Voxels
-    from warpconvnet.geometry.types.grid import Grid, GridMemoryFormat
+    from warpconvnet.geometry.types.grid import Grid, GridMemoryFormat, GridFeatures
 
     assert isinstance(voxels, Voxels), f"Expected Voxels, got {type(voxels)}"
 
@@ -440,45 +444,62 @@ def voxels_to_grid(
     batch_size = voxels.batch_size
     device = voxels.device
 
-    grid_coords = GridCoords.from_shape(
+    grid = Grid.from_shape(
         grid_shape=grid_shape,
+        num_channels=voxels.num_channels,
         bounds=grid_bounds,
         batch_size=batch_size,
         device=device,
         flatten=True,
     )
+    grid_feats = grid.features
 
-    # Treat voxels as points.
-    from warpconvnet.geometry.types.conversion.to_points import voxels_to_points
+    if search_type == "cell":
+        from warpconvnet.geometry.coords.ops.batch_index import batch_index_from_offset
 
-    # points = voxels.to_point()
-    points = voxels_to_points(voxels)
+        # Find cell indices that voxels belong to
+        voxel_coords: Int[Tensor, "N 3"] = voxels.coordinate_tensor  # noqa: F821
+        voxel_offsets: Int[Tensor, "B + 1"] = voxels.offsets  # noqa: F821
+        device: torch.device = voxels.device
+        # Use the coordinate to find the cell index
+        grid_dimension = grid_bounds[1] - grid_bounds[0]
+        grid_shape_pt = torch.tensor(grid_shape)
+        cell_size = grid_dimension / grid_shape_pt
+        # Find the cell index for each voxel
+        cell_indices: Int[Tensor, "N 3"] = (  # noqa: F821
+            voxel_coords - grid_bounds[0].to(device)
+        ) / cell_size.to(device)
+        # Out of bound indices should be clamped to the nearest bound
+        cell_indices = torch.floor(cell_indices).long()
+        # Clamp to Nx3 to 3-vector applied on the last dimension separately
+        cell_indices = torch.minimum(cell_indices, (grid_shape_pt - 1).to(device))
+        # Convert to integer indices
+        batch_indices = batch_index_from_offset(voxel_offsets)
 
-    # if search type is radius, calculate a default radius based on voxel size unless provided externally
-    default_radius = None
-    if search_type == "radius" and search_radius is None:
-        assert (
-            hasattr(voxels, "voxel_size") and voxels.voxel_size > 0
-        ), f"Voxels must have a voxel size to use radius search. Got voxel: {voxels}"
-        # Use sqrt(3)/2 * voxel size as radius + epsilon to ensure corner points are captured
-        if isinstance(voxels.voxel_size, torch.Tensor):
-            voxel_size = voxels.voxel_size[0].item()
-        elif isinstance(voxels.voxel_size, (float, int)):
-            voxel_size = float(voxels.voxel_size)
-        default_radius = (
-            math.sqrt(3) * voxel_size / 2.0 + 1e-6
-        )  # include a small epsilon to include corner points
+        # multi index ravel
+        cell_flat_indices = ravel_multi_index(cell_indices, grid_shape_pt)
+        batched_flat_indices = (
+            batch_indices * grid_shape_pt[0] * grid_shape_pt[1] * grid_shape_pt[2]
+        )
+        batched_cell_flat_indices = cell_flat_indices + batched_flat_indices.to(device)
 
-    # Convert voxel features to grid features
-    grid_features = _points_to_grid_features(
-        points,
-        grid_coords,
-        memory_format=memory_format,
-        search_radius=default_radius,
-        k=k,
-        search_type=search_type,
-        reduction=reduction,
-    )
+        # fill in the grid features using the cell indices
+        # BxHxWxDxC -> (BxHxWxD)xC
+        flat_grid_feats_view = grid_feats.view(-1, grid_feats.shape[4])
+        # This will randomly select one of the voxel features for each grid cell
+        # TODO(cchoy) 2025-04-10: reduction should be applied here
+        flat_grid_feats_view[batched_cell_flat_indices] = voxels.batched_features.batched_tensor
 
-    # Create and return grid geometry
-    return Grid(grid_coords, grid_features, memory_format)
+        # Restore the
+        # Replace the grid features with the reduced features
+        return grid.replace(
+            batched_features=GridFeatures(
+                grid_feats,
+                grid.offsets,
+                memory_format=GridMemoryFormat.b_x_y_z_c,
+                grid_shape=grid_shape,
+                num_channels=voxels.num_channels,
+            ).to_memory_format(memory_format)
+        )
+    else:
+        raise ValueError(f"Unsupported search type: {search_type}")

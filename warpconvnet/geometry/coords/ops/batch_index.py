@@ -95,9 +95,19 @@ def batch_index_from_offset(
     offsets: Int[Tensor, "B+1"],  # noqa: F821
     device: Optional[str] = None,
     backend: Literal["auto", "torch", "warp"] = "auto",
+    force_cpu_threshold: int = 16384,
 ) -> Int[Tensor, "N"]:  # noqa: F821
     assert isinstance(offsets, torch.Tensor), "offsets must be a torch.Tensor"
     assert backend in ["auto", "torch", "warp"], "backend must be either torch or warp"
+
+    # cchoy: This function will be inefficient for small offsets[-1].
+    # TODO(cchoy): benchmark torch vs warp for small offsets[-1].
+    # Force use torch cpu implementation for small offsets[-1].
+    if force_cpu_threshold > 0 and offsets[-1].item() < force_cpu_threshold and backend == "auto":
+        result = batch_index_from_offset(offsets, device="cpu", backend="torch")
+        if device is not None:
+            result = result.to(device)
+        return result
 
     if backend == "auto":
         if device is None or "cpu" in device:
@@ -105,12 +115,10 @@ def batch_index_from_offset(
         else:
             backend = "warp"
 
-    # offset to int
+    # force offsets to int
     offsets = offsets.int()
 
-    if device is not None:
-        offsets = offsets.to(device)
-
+    # ------ Torch Implementation ------
     if backend == "torch":
         batch_index = (
             torch.arange(len(offsets) - 1)
@@ -119,10 +127,12 @@ def batch_index_from_offset(
         )
         return batch_index
 
-    if device is None:
-        device = str(offsets.device)
-
+    # ------ Warp GPU Kernel ------
     # Assert this is not cpu
+    if device is not None:
+        offsets = offsets.to(device)
+
+    device: str = str(offsets.device)  # warp requires string device
     assert "cpu" not in device, "device must be a cuda device"
 
     N = offsets[-1].item()
