@@ -23,7 +23,7 @@ class SparsePool(BaseSpatialModule):
         kernel_size: int,
         stride: int,
         reduce: Literal["max", "min", "mean", "sum", "random"] = "max",
-        out_code_backend: str = "morton",
+        out_code_backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
     ):
         super().__init__()
         self.kernel_size = kernel_size
@@ -45,13 +45,23 @@ class SparsePool(BaseSpatialModule):
 
 
 class SparseMaxPool(SparsePool):
-    def __init__(self, kernel_size: int, stride: int, out_code_backend: str = "morton"):
-        super().__init__(kernel_size, stride, "max")
+    def __init__(
+        self,
+        kernel_size: int,
+        stride: int,
+        out_code_backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
+    ):
+        super().__init__(kernel_size, stride, "max", out_code_backend=out_code_backend)
 
 
 class SparseMinPool(SparsePool):
-    def __init__(self, kernel_size: int, stride: int, out_code_backend: str = "morton"):
-        super().__init__(kernel_size, stride, "min")
+    def __init__(
+        self,
+        kernel_size: int,
+        stride: int,
+        out_code_backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
+    ):
+        super().__init__(kernel_size, stride, "min", out_code_backend=out_code_backend)
 
 
 class GlobalPool(BaseSpatialModule):
@@ -92,7 +102,7 @@ class PointToSparseWrapper(BaseSpatialModule):
         inner_module: BaseSpatialModule,
         voxel_size: float,
         reduction: Union[REDUCTIONS, REDUCTION_TYPES_STR] = REDUCTIONS.MEAN,
-        unique_method: Literal["morton", "ravel", "torch"] = "torch",
+        unique_method: Literal["morton", "ravel", "torch"] = "morton",
         concat_unpooled_pc: bool = True,
     ):
         super().__init__()
@@ -107,7 +117,7 @@ class PointToSparseWrapper(BaseSpatialModule):
             pc,
             reduction=self.reduction,
             downsample_voxel_size=self.voxel_size,
-            return_type="sparse",
+            return_type="voxel",
             return_to_unique=True,
             unique_method=self.unique_method,
         )

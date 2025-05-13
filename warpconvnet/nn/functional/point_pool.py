@@ -226,6 +226,7 @@ def point_pool(
     assert (
         downsample_max_num_points is not None or downsample_voxel_size is not None
     ), "Either downsample_num_points or downsample_voxel_size must be provided."
+    assert return_type in ["point", "voxel"], "return_type must be either point or voxel."
     if return_type == "voxel":
         assert (
             not avereage_pooled_coordinates

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import warnings
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Literal
 
 import torch
 
@@ -27,7 +27,7 @@ def sparse_reduce(
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
     reduction: Union[REDUCTIONS, str] = REDUCTIONS.MAX,
     kernel_search_batch_size: Optional[int] = None,
-    out_code_backend: str = "unique",
+    out_code_backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
 ) -> Voxels:
     """
     Max pooling for spatially sparse tensors.
