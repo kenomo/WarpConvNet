@@ -33,6 +33,7 @@ from warpconvnet.utils.cuda_utils import load_kernel
 
 _KERNEL_CACHE = {}
 _BLOCK_SIZE = 16
+_MAX_GRID_Y = 65535
 
 # Dtype mapping for kernel template
 _DTYPE_TO_CPP_STR = {
@@ -175,7 +176,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
             blocks_y = math.ceil(num_active_pairs / threads_y)
             blocks_x = math.ceil(C_out / threads_x)
 
-            if blocks_y > 0 and blocks_x > 0:
+            if blocks_y > 0 and blocks_x > 0 and blocks_y < _MAX_GRID_Y:
                 matmul_kernel(
                     (blocks_x, blocks_y, 1),
                     (threads_x, threads_y, 1),
@@ -191,6 +192,30 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
                         out_map_k_cp,
                     ),
                 )
+            elif blocks_y >= _MAX_GRID_Y:
+                num_iters = math.ceil(blocks_y / _MAX_GRID_Y)
+                for iter_idx in range(num_iters):
+                    start_idx = iter_idx * _MAX_GRID_Y * threads_y
+                    end_idx = min(start_idx + _MAX_GRID_Y * threads_y, num_active_pairs)
+                    curr_active_pairs = end_idx - start_idx
+                    if curr_active_pairs == 0:
+                        continue
+
+                    matmul_kernel(
+                        (blocks_x, math.ceil(curr_active_pairs / threads_y), 1),
+                        (threads_x, threads_y, 1),
+                        (
+                            batched_features_cp,
+                            C_in,
+                            curr_active_pairs,
+                            current_weight_k_cp,
+                            C_out,
+                            C_in,
+                            output_feature_tensor_cp,
+                            in_map_k_cp[start_idx:end_idx],
+                            out_map_k_cp[start_idx:end_idx],
+                        ),
+                    )
 
         # output_feature_tensor is already updated in-place by output_feature_tensor_cp
         # No need to recreate from_dlpack unless output_feature_tensor_cp was a copy,
@@ -285,7 +310,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
             blocks_x = math.ceil(C_in / threads_x)
             blocks_y = math.ceil(num_active_pairs / threads_y)
 
-            if blocks_y > 0 and blocks_x > 0:
+            if blocks_y > 0 and blocks_x > 0 and blocks_y < _MAX_GRID_Y:
                 matmul2_kernel(
                     (blocks_x, blocks_y, 1),
                     (threads_x, threads_y, 1),
@@ -305,6 +330,34 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
                         out_map_k_cp,
                     ),
                 )
+            elif blocks_y >= _MAX_GRID_Y:
+                num_iters = math.ceil(blocks_y / _MAX_GRID_Y)
+                for iter_idx in range(num_iters):
+                    start_idx = iter_idx * _MAX_GRID_Y * threads_y
+                    end_idx = min(start_idx + _MAX_GRID_Y * threads_y, num_active_pairs)
+                    curr_active_pairs = end_idx - start_idx
+                    if curr_active_pairs == 0:
+                        continue
+
+                    matmul2_kernel(
+                        (blocks_x, math.ceil(curr_active_pairs / threads_y), 1),
+                        (threads_x, threads_y, 1),
+                        (
+                            grad_output_cp,
+                            C_out,
+                            curr_active_pairs,
+                            current_weight_k_cp,
+                            C_out,
+                            C_in,
+                            batched_features_cp,
+                            C_in,
+                            curr_active_pairs,
+                            grad_in_features_cp,
+                            grad_weight_k_cp,
+                            in_map_k_cp[start_idx:end_idx],
+                            out_map_k_cp[start_idx:end_idx],
+                        ),
+                    )
 
         # Gradients are accumulated in-place in grad_in_features and grad_weight_tensor
         # via their CuPy counterparts.
