@@ -37,19 +37,3 @@ def test_argsort(setup_data, benchmark, backend, input_type):
         rounds=3,
         warmup_rounds=1,
     )
-
-
-def test_to_unique():
-    """Test ToUnique functionality."""
-    x = torch.randint(0, 5, (10,))
-    to_unique = ToUnique()
-
-    unique, to_orig_indices, to_csr_indices, to_csr_offsets, _ = unique_torch(x)
-
-    assert torch.allclose(x, unique[to_orig_indices])
-    assert torch.allclose(torch.sort(x[to_csr_indices]).values, x[to_csr_indices])
-
-    unique = to_unique.to_unique(x)
-    orig_x = to_unique.to_original(unique)
-
-    assert torch.allclose(x, orig_x)

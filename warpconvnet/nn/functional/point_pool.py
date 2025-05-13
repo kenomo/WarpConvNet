@@ -314,7 +314,7 @@ def point_pool_by_code(
         reduction = REDUCTIONS(reduction)
 
     # get the unique indices
-    to_unique = ToUnique(return_to_unique_indices=return_to_unique, unique_method="torch")
+    to_unique = ToUnique(return_to_unique_indices=return_to_unique)
     unique_code = to_unique.to_unique(code)
 
     # get the coordinates

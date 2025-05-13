@@ -72,7 +72,8 @@ class IntCoords(Coords):
             assert isinstance(self.tensor_stride, (int, tuple))
 
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "IntCoords":
-        perm, rank = morton_code(self.batched_tensor, self.offsets, ordering)  # noqa: F821
+        assert ordering == POINT_ORDERING.Z_ORDER, "Only Z-ordering is supported atm"
+        rank, perm = morton_code(self.batched_tensor, self.offsets, return_to_morton=True)
         return self.__class__(self.batched_tensor[perm], self.offsets)
 
     def neighbors(

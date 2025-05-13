@@ -53,7 +53,7 @@ def voxel_downsample_csr_mapping(
     batched_points: Float[Tensor, "N 3"],  # noqa: F722,F821
     offsets: Int[Tensor, "B + 1"],  # noqa: F722,F821
     voxel_size: float,
-    unique_method: Literal["torch", "ravel", "morton"] = "torch",
+    unique_method: Literal["torch", "ravel", "morton"] | None = None,
 ) -> Tuple[
     Int[Tensor, "M 3"],  # noqa: F821
     Int[Tensor, "B+1"],  # noqa: F821
@@ -93,7 +93,7 @@ def voxel_downsample_csr_mapping(
         batch_index = batch_index_from_offset(offsets).to(device)
         voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
-    to_unique = ToUnique(unique_method=unique_method, return_to_unique_indices=True)
+    to_unique = ToUnique(return_to_unique_indices=True, unique_method=unique_method)
     unique_coords, to_csr_indices, to_csr_offsets = to_unique.to_unique_csr(voxel_coords, dim=0)
 
     if B == 1:
