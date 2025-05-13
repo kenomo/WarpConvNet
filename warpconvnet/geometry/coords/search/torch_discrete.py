@@ -114,8 +114,8 @@ def _kernel_map_search_to_result(
     num_total_maps = offsets[-1].item()
 
     # Allocate output tensors
-    in_maps = torch.empty(num_total_maps, device=target_device, dtype=torch.int32)
-    out_maps = torch.empty(num_total_maps, device=target_device, dtype=torch.int32)
+    in_maps = cp.empty(num_total_maps, dtype=cp.int32)
+    out_maps = cp.empty(num_total_maps, dtype=cp.int32)
 
     if num_total_maps > 0:
         # Launch CUDA kernel to gather results
@@ -124,26 +124,26 @@ def _kernel_map_search_to_result(
 
         # Ensure tensors are contiguous for kernel launch if necessary (CuPy might handle non-contiguous? Check docs)
         # Let's assume contiguous for safety for now.
-        found_in_coord_index_cont = found_in_coord_index.contiguous()
-        mapped_indices_cont = mapped_indices.contiguous()
-        offsets_cont = offsets.contiguous()
+        found_in_coord_index_cont = cp.from_dlpack(found_in_coord_index.contiguous())
+        mapped_indices_cont = cp.from_dlpack(mapped_indices.contiguous())
+        offsets_cont = cp.from_dlpack(offsets.contiguous())
 
         map_results_kernel(
             (grid_size,),
             (threads_per_block,),
             (
-                found_in_coord_index_cont.data_ptr(),
-                mapped_indices_cont.data_ptr(),
-                offsets_cont.data_ptr(),
-                in_maps.data_ptr(),
-                out_maps.data_ptr(),
+                found_in_coord_index_cont,
+                mapped_indices_cont,
+                offsets_cont,
+                in_maps,
+                out_maps,
                 K,  # num_kernel_offsets
                 M,  # num_query_coords
             ),
         )
         # torch.cuda.synchronize(target_device) # Optional sync needed?
 
-    return IntSearchResult(in_maps, out_maps, offsets)
+    return IntSearchResult(torch.from_dlpack(in_maps), torch.from_dlpack(out_maps), offsets)
 
 
 @torch.no_grad()
@@ -177,34 +177,33 @@ def _kernel_map_from_offsets(
     key_dim = batched_query_coords.shape[1]
     num_kernel_offsets = kernel_offsets.shape[0]
 
-    # Allocate output tensor
-    found_in_coord_index = torch.empty(
-        (num_kernel_offsets, num_query_coords),
-        dtype=torch.int32,
-        device=target_device,
-    )
-
     # Get the appropriate kernel based on hash method
     kernel = _get_kernel_map_offset_kernel(hashtable.hash_method)
     threads_per_block = 256
     grid_size = math.ceil(num_query_coords / threads_per_block)
 
     # Ensure contiguous tensors for kernel launch
-    table_kvs_cont = hashtable._table_kvs.contiguous()
-    vector_keys_cont = hashtable._vector_keys.contiguous()
-    query_coords_cont = batched_query_coords.contiguous()
-    kernel_offsets_cont = kernel_offsets.contiguous()
+    table_kvs_cont = cp.from_dlpack(hashtable._table_kvs.contiguous())
+    vector_keys_cont = cp.from_dlpack(hashtable._vector_keys.contiguous())
+    query_coords_cont = cp.from_dlpack(batched_query_coords.contiguous())
+    kernel_offsets_cont = cp.from_dlpack(kernel_offsets.contiguous())
+
+    # Allocate output tensor
+    found_in_coord_index = cp.empty(
+        (num_kernel_offsets, num_query_coords),
+        dtype=table_kvs_cont.dtype,
+    )
 
     # Launch the kernel
     kernel(
         (grid_size,),
         (threads_per_block,),
         (
-            table_kvs_cont.data_ptr(),
-            vector_keys_cont.data_ptr(),
-            query_coords_cont.data_ptr(),
-            kernel_offsets_cont.data_ptr(),
-            found_in_coord_index.data_ptr(),  # Output
+            table_kvs_cont,
+            vector_keys_cont,
+            query_coords_cont,
+            kernel_offsets_cont,
+            found_in_coord_index,  # Output
             num_query_coords,  # N
             key_dim,  # D+1
             num_kernel_offsets,  # K
@@ -213,7 +212,7 @@ def _kernel_map_from_offsets(
     )
     # torch.cuda.synchronize(target_device) # Optional
 
-    return _kernel_map_search_to_result(found_in_coord_index, return_type)
+    return _kernel_map_search_to_result(torch.from_dlpack(found_in_coord_index), return_type)
 
 
 @torch.no_grad()
@@ -247,39 +246,38 @@ def _kernel_map_from_size(
         num_query_coords = batched_query_coords.shape[0]
         num_kernels = kernel_sizes[0] * kernel_sizes[1] * kernel_sizes[2]
 
-        # Allocate output tensor
-        found_in_coord_index = torch.empty(
-            (num_kernels, num_query_coords),  # Shape K x N
-            dtype=torch.int32,
-            device=target_device,
-        )
-
         kernel = _get_kernel_map_size_4d_kernel(hashtable.hash_method)
         threads_per_block = 256
         grid_size = math.ceil(num_query_coords / threads_per_block)
 
         # Prepare kernel arguments
-        table_kvs_cont = hashtable._table_kvs.contiguous()
-        vector_keys_cont = hashtable._vector_keys.contiguous()
-        query_coords_cont = batched_query_coords.contiguous()
+        table_kvs_cont = cp.from_dlpack(hashtable._table_kvs.contiguous())
+        vector_keys_cont = cp.from_dlpack(hashtable._vector_keys.contiguous())
+        query_coords_cont = cp.from_dlpack(batched_query_coords.contiguous())
         kernel_size_arg = cp.array(kernel_sizes, dtype=cp.int32)
+
+        # Allocate output tensor
+        found_in_coord_index = cp.empty(
+            (num_kernels, num_query_coords),  # Shape K x N
+            dtype=table_kvs_cont.dtype,
+        )
 
         kernel(
             (grid_size,),
             (threads_per_block,),
             (
-                table_kvs_cont.data_ptr(),
-                vector_keys_cont.data_ptr(),
-                query_coords_cont.data_ptr(),
+                table_kvs_cont,
+                vector_keys_cont,
+                query_coords_cont,
                 kernel_size_arg,  # Pass cp.int3
-                found_in_coord_index.data_ptr(),
+                found_in_coord_index,
                 num_query_coords,
                 hashtable.capacity,
             ),
         )
-        # torch.cuda.synchronize(target_device) # Optional
+        # torch.cuda.synchronize(target_device)
 
-        return _kernel_map_search_to_result(found_in_coord_index, return_type)
+        return _kernel_map_search_to_result(torch.from_dlpack(found_in_coord_index), return_type)
 
     # --- Generic Case (Fallback to offset method) ---
     else:
@@ -401,7 +399,7 @@ def generate_kernel_map(
     kernel_dilation: Optional[Tuple[int, ...]] = None,
     kernel_search_batch_size: Optional[int] = None,
     kernel_center_offset: Optional[Tuple[int, ...]] = None,
-    method: Literal["query", "offset", "size"] = "size",  # Added "size" back as an option
+    method: Literal["query", "offset", "size"] = "size",  # Size is the default fastest method
     hash_method: HashMethod = HashMethod.CITY,  # Allow selecting hash method
 ) -> IntSearchResult:
     """

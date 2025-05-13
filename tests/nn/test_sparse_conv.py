@@ -7,7 +7,7 @@ import warp as wp
 
 from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
-from warpconvnet.geometry.coords.search.discrete import generate_kernel_map
+from warpconvnet.geometry.coords.search.torch_discrete import generate_kernel_map
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_conv import (
     SPATIALLY_SPARSE_CONV_ALGO_MODE,
@@ -97,7 +97,7 @@ def test_generate_kernel_map(setup_voxels):
         assert in_map.shape[0] == out_map.shape[0]
 
     # Manual verification with hashmap
-    in_hashmap = TorchHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
+    in_hashmap = TorchHashTable.from_keys(batch_indexed_in_coords)
     kernel_offsets = _generate_kernel_offsets((3, 3, 3), (1, 1, 1), device)
 
     batch_indexed_output_coords = batch_indexed_output_coords * torch.tensor(
@@ -109,7 +109,7 @@ def test_generate_kernel_map(setup_voxels):
 
     for i, (in_map, out_map) in enumerate(kernel_map):
         offseted_out_coords = batch_indexed_output_coords + kernel_offsets[i]
-        indices = wp.to_torch(in_hashmap.search(wp.from_torch(offseted_out_coords)))
+        indices = in_hashmap.search(offseted_out_coords)
         valid_bool = (indices >= 0).to(device)
         num_valid = valid_bool.sum().item()
         found_in_map = indices[valid_bool]

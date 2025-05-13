@@ -260,7 +260,7 @@ __global__ void kernel_map_size_4d_templated(
     const int* __restrict__ table_kvs,            // Hash table key-value store (capacity, 2)
     const int* __restrict__ vector_keys,          // Original stored keys (num_in_keys, 4)
     const int* __restrict__ query_coords,         // Coordinates to query (num_query_coords, 4)
-    int3 kernel_size,                           // Kernel dimensions (kx, ky, kz)
+    const int* __restrict__ kernel_sizes,                           // Kernel dimensions (kx, ky, kz)
     int* __restrict__ found_in_coord_index, // Output array (kx*ky*kz, num_query_coords)
     int num_query_coords,
     int table_capacity)
@@ -277,9 +277,9 @@ __global__ void kernel_map_size_4d_templated(
     // Calculate center offset for kernel (handle even sizes like Warp)
     // If even, center is 0, effectively shifting the kernel relative to the query point.
     int3 center;
-    center.x = (kernel_size.x % 2 != 0) ? kernel_size.x / 2 : 0;
-    center.y = (kernel_size.y % 2 != 0) ? kernel_size.y / 2 : 0;
-    center.z = (kernel_size.z % 2 != 0) ? kernel_size.z / 2 : 0;
+    center.x = (kernel_sizes[0] % 2 != 0) ? kernel_sizes[0] / 2 : 0;
+    center.y = (kernel_sizes[1] % 2 != 0) ? kernel_sizes[1] / 2 : 0;
+    center.z = (kernel_sizes[2] % 2 != 0) ? kernel_sizes[2] / 2 : 0;
 
     int kernel_map_idx = 0; // Index into the K dimension of the output
     int temp_coord[4]; // Stack allocation for the temporary coordinate
@@ -288,9 +288,9 @@ __global__ void kernel_map_size_4d_templated(
     temp_coord[0] = base_query_coord_ptr[0];
 
     // Iterate through the 3D kernel dimensions
-    for (int i = 0; i < kernel_size.x; ++i) {
-        for (int j = 0; j < kernel_size.y; ++j) {
-            for (int k = 0; k < kernel_size.z; ++k) {
+    for (int i = 0; i < kernel_sizes[0]; ++i) {
+        for (int j = 0; j < kernel_sizes[1]; ++j) {
+            for (int k = 0; k < kernel_sizes[2]; ++k) {
 
                 // Calculate the coordinate to search for
                 temp_coord[1] = base_query_coord_ptr[1] + i - center.x;
@@ -320,28 +320,28 @@ __global__ void kernel_map_size_4d_templated(
 // kernel_map_size_4d wrappers
 extern "C" __global__ void kernel_map_size_4d_fnv1a(
     const int* table_kvs, const int* vector_keys, const int* query_coords,
-    int3 kernel_size, int* found_in_coord_index,
+    const int* kernel_sizes, int* found_in_coord_index,
     int num_query_coords, int table_capacity)
 {
     kernel_map_size_4d_templated<FNV1AHash>(
-        table_kvs, vector_keys, query_coords, kernel_size, found_in_coord_index,
+        table_kvs, vector_keys, query_coords, kernel_sizes, found_in_coord_index,
         num_query_coords, table_capacity);
 }
 extern "C" __global__ void kernel_map_size_4d_city(
     const int* table_kvs, const int* vector_keys, const int* query_coords,
-    int3 kernel_size, int* found_in_coord_index,
+    const int* kernel_sizes, int* found_in_coord_index,
     int num_query_coords, int table_capacity)
 {
     kernel_map_size_4d_templated<CityHash>(
-        table_kvs, vector_keys, query_coords, kernel_size, found_in_coord_index,
+        table_kvs, vector_keys, query_coords, kernel_sizes, found_in_coord_index,
         num_query_coords, table_capacity);
 }
 extern "C" __global__ void kernel_map_size_4d_murmur(
     const int* table_kvs, const int* vector_keys, const int* query_coords,
-    int3 kernel_size, int* found_in_coord_index,
+    const int* kernel_sizes, int* found_in_coord_index,
     int num_query_coords, int table_capacity)
 {
     kernel_map_size_4d_templated<MurmurHash>(
-        table_kvs, vector_keys, query_coords, kernel_size, found_in_coord_index,
+        table_kvs, vector_keys, query_coords, kernel_sizes, found_in_coord_index,
         num_query_coords, table_capacity);
 }
