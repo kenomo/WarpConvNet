@@ -10,7 +10,7 @@ from torch import Tensor
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.real import RealCoords
-from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.features.cat import CatFeatures
 from warpconvnet.geometry.features.pad import PadFeatures
@@ -255,7 +255,7 @@ class Voxels(Geometry):
         return self.__class__(coords, feats, **self.extra_attributes)
 
     @property
-    def coordinate_hashmap(self) -> VectorHashTable:
+    def coordinate_hashmap(self) -> TorchHashTable:
         return self.batched_coordinates.hashmap
 
     @property

@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 
 from warpconvnet.geometry.base.coords import Coords
-from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
 from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
@@ -20,7 +20,7 @@ class IntCoords(Coords):
     voxel_size: float
     voxel_origin: Float[Tensor, "D"]  # noqa: F821
     tensor_stride: Optional[Tuple[int, ...]]
-    _hashmap: Optional[VectorHashTable]
+    _hashmap: Optional[TorchHashTable]
 
     def __init__(
         self,
@@ -97,10 +97,10 @@ class IntCoords(Coords):
         return self.__class__(self.batched_tensor[unique_indices], batch_offsets)
 
     @property
-    def hashmap(self) -> VectorHashTable:
+    def hashmap(self) -> TorchHashTable:
         if not hasattr(self, "_hashmap") or self._hashmap is None:
             bcoords = batch_indexed_coordinates(self.batched_tensor, self.offsets)
-            self._hashmap = VectorHashTable.from_keys(bcoords)
+            self._hashmap = TorchHashTable.from_keys(bcoords)
         return self._hashmap
 
     @property

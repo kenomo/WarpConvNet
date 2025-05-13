@@ -5,7 +5,7 @@ import pytest
 import torch
 import warp as wp
 
-from warpconvnet.geometry.coords.search.hashmap import HashMethod
+from warpconvnet.geometry.coords.search.torch_hashmap import HashMethod
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates

@@ -6,7 +6,7 @@ import torch
 import warp as wp
 
 from warpconvnet.geometry.coords.ops.stride import stride_coords
-from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.search.discrete import generate_kernel_map
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_conv import (
@@ -97,7 +97,7 @@ def test_generate_kernel_map(setup_voxels):
         assert in_map.shape[0] == out_map.shape[0]
 
     # Manual verification with hashmap
-    in_hashmap = VectorHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
+    in_hashmap = TorchHashTable.from_keys(wp.from_torch(batch_indexed_in_coords))
     kernel_offsets = _generate_kernel_offsets((3, 3, 3), (1, 1, 1), device)
 
     batch_indexed_output_coords = batch_indexed_output_coords * torch.tensor(

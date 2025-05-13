@@ -7,7 +7,7 @@ import warp as wp
 from pytest_benchmark.fixture import BenchmarkFixture
 
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
-from warpconvnet.geometry.coords.search.discrete import (
+from warpconvnet.geometry.coords.search.torch_discrete import (
     _kernel_map_from_direct_queries,
     _kernel_map_from_offsets,
     _kernel_map_from_size,
@@ -47,7 +47,7 @@ def test_kernel_map_from_offset(setup_voxels):
     voxel_hashmap = voxels.coordinate_hashmap
 
     kernel_map: IntSearchResult = _kernel_map_from_offsets(
-        voxel_hashmap._hash_struct,
+        voxel_hashmap,
         bcoords,
         kernel_offsets,
     )
@@ -67,7 +67,7 @@ def test_kernel_map_from_size(setup_voxels):
     kernel_sizes = (3, 3, 3)
 
     kernel_map: IntSearchResult = _kernel_map_from_size(
-        voxel_hashmap._hash_struct,
+        voxel_hashmap,
         bcoords,
         kernel_sizes,
     )
@@ -96,19 +96,19 @@ def test_compare_kernel_map_methods(setup_voxels):
 
     # Get results from all three methods
     kernel_map_offsets = _kernel_map_from_offsets(
-        voxel_hashmap._hash_struct,
+        voxel_hashmap,
         bcoords,
         kernel_offsets,
     )
 
     kernel_map_size = _kernel_map_from_size(
-        voxel_hashmap._hash_struct,
+        voxel_hashmap,
         bcoords,
         kernel_size,
     )
 
     kernel_map_direct = _kernel_map_from_direct_queries(
-        voxel_hashmap._hash_struct,
+        voxel_hashmap,
         bcoords,
         kernel_size=kernel_size,
         kernel_dilation=kernel_dilation,
@@ -149,7 +149,7 @@ class TestKernelMapPerformance:
 
         def run_benchmark():
             return _kernel_map_from_offsets(
-                voxel_hashmap._hash_struct,
+                voxel_hashmap,
                 bcoords,
                 kernel_offsets,
                 return_type="offsets",
@@ -165,7 +165,7 @@ class TestKernelMapPerformance:
 
         def run_benchmark():
             return _kernel_map_from_size(
-                voxel_hashmap._hash_struct,
+                voxel_hashmap,
                 bcoords,
                 kernel_size,
                 return_type="offsets",
@@ -182,7 +182,7 @@ class TestKernelMapPerformance:
 
         def run_benchmark():
             return _kernel_map_from_direct_queries(
-                voxel_hashmap._hash_struct,
+                voxel_hashmap,
                 bcoords,
                 kernel_size=kernel_size,
                 kernel_dilation=kernel_dilation,

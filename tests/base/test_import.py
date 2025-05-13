@@ -29,7 +29,7 @@ from warpconvnet.geometry.coords.search.cache import (
 )
 
 from warpconvnet.geometry.coords.search.continuous import neighbor_search
-from warpconvnet.geometry.coords.search.discrete import (
+from warpconvnet.geometry.coords.search.torch_discrete import (
     kernel_offsets_from_size,
     generate_kernel_map,
 )

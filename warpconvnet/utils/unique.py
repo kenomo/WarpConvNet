@@ -9,7 +9,7 @@ import warp as wp
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.search.hashmap import HashMethod, VectorHashTable
+from warpconvnet.geometry.coords.search.torch_hashmap import HashMethod, TorchHashTable
 from warpconvnet.geometry.coords.ops.serialization import morton_code
 from warpconvnet.utils.ravel import ravel_multi_index
 
@@ -103,7 +103,7 @@ def unique_ravel(
 def unique_hashmap(
     bcoords: Int[Tensor, "N 4"],  # noqa: F821
     hash_method: HashMethod = HashMethod.CITY,
-) -> Tuple[Int[Tensor, "M"], VectorHashTable]:  # noqa: F821
+) -> Tuple[Int[Tensor, "M"], TorchHashTable]:  # noqa: F821
     """
     Args:
         bcoords: Batched coordinates.
@@ -117,8 +117,8 @@ def unique_hashmap(
     assert "cuda" in str(
         bcoords.device
     ), f"Batched coordinates must be on cuda device, got {bcoords.device}"
-    table = VectorHashTable(2 * len(bcoords), hash_method)
-    table.insert(wp.from_torch(bcoords))
+    table = TorchHashTable(2 * len(bcoords), hash_method)
+    table.insert(bcoords)
     return table.unique_index, table  # this is a torch tensor
 
 

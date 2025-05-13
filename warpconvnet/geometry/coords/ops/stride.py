@@ -18,7 +18,7 @@ from warpconvnet.utils.unique import unique_hashmap, unique_inverse
 def stride_coords(
     batch_indexed_coords: Int[Tensor, "N D+1"],
     stride: Tuple[int, ...],
-    backend: Literal["hashmap", "ravel", "unique", "morton"] = "unique",
+    backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
 ) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Downsample the coordinates by the stride.

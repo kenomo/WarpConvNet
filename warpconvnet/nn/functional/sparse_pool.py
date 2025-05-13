@@ -9,7 +9,7 @@ import torch
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
-from warpconvnet.geometry.coords.search.discrete import (
+from warpconvnet.geometry.coords.search.torch_discrete import (
     generate_kernel_map,
 )
 from warpconvnet.geometry.types.voxels import (

@@ -9,7 +9,7 @@ import warp as wp
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.search.hashmap import VectorHashTable
+from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.search.knn import batched_knn_search
 from warpconvnet.geometry.coords.ops.batch_index import (
     batch_index_from_indicies,
@@ -42,7 +42,7 @@ def voxel_downsample_hashmap(
     Returns:
         unique_indices: sorted indices of unique voxels.
     """
-    hash_table = VectorHashTable.from_keys(coords)
+    hash_table = TorchHashTable.from_keys(coords)
     unique_indices = hash_table.unique_index
     return unique_indices
 
@@ -221,16 +221,15 @@ def voxel_downsample_mapping(
         down_batched_points = down_batched_points.int()
 
     # Get the batch index
-    wp_up_bcoords = batch_indexed_coordinates(up_batched_points, up_offsets, return_type="warp")
-    wp_down_bcoords = batch_indexed_coordinates(
-        down_batched_points, down_offsets, return_type="warp"
+    up_bcoords = batch_indexed_coordinates(up_batched_points, up_offsets, return_type="torch")
+    down_bcoords = batch_indexed_coordinates(
+        down_batched_points, down_offsets, return_type="torch"
     )
 
-    down_table = VectorHashTable.from_keys(wp_down_bcoords)
+    down_table = TorchHashTable.from_keys(down_bcoords)
     # Get the map that maps up_batched_points[up_map] ~= down_batched_points.
-    wp_down_map = down_table.search(wp_up_bcoords)
+    down_map = down_table.search(up_bcoords)
     # remove invalid mappings (i.e. i < 0)
-    down_map = wp.to_torch(wp_down_map)
     valid = down_map >= 0
     if find_nearest_for_invalid and not valid.all():
         # Find the nearest valid point

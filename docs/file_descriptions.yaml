@@ -76,12 +76,15 @@
 ./warpconvnet/geometry/coords/search/cache.py: "Neighbor search result cache classes"
 ./warpconvnet/geometry/coords/search/continuous.py: "Continuous radius search operations (imports both knn and radius)"
 ./warpconvnet/geometry/coords/search/discrete.py: "Discrete kernel map operations"
-./warpconvnet/geometry/coords/search/hashmap.py: "Hashmap class used for IntCoords"
+./warpconvnet/geometry/coords/search/warp_hashmap.py: "Warp Hashmap class used for IntCoords"
+./warpconvnet/geometry/coords/search/torch_hashmap.py: "Torch Hashmap class used for IntCoords"
 ./warpconvnet/geometry/coords/search/knn.py: "Continuous KNN search operations"
 ./warpconvnet/geometry/coords/search/radius.py: "Continuous radius search operations"
 ./warpconvnet/geometry/coords/search/search_configs.py: "Search argument classes"
 ./warpconvnet/geometry/coords/search/search_results.py: "Search result wrapper classes"
 ./warpconvnet/geometry/coords/search/utils.py: "Helper functions for search operations"
+./warpconvnet/geometry/coords/search/cuda: "CUDA related files for search"
+./warpconvnet/geometry/coords/search/cuda/hashmap_kernels.cu: "CUDA kernels for the hashmap"
 ./warpconvnet/geometry/coords/grid.py: "GridCoords class (extends batched.py)"
 ./warpconvnet/geometry/coords/__init__.py: ""
 ./warpconvnet/geometry/coords/integer.py: "IntCoords class (extends batched.py)"
@@ -138,6 +141,7 @@
 ./warpconvnet/ops/reductions.py: ""
 ./warpconvnet/utils: ""
 ./warpconvnet/utils/argsort.py: ""
+./warpconvnet/utils/cuda_utils.py: "Utility functions for loading/compiling custom CUDA kernels using CuPy"
 ./warpconvnet/utils/__init__.py: ""
 ./warpconvnet/utils/nested.py: ""
 ./warpconvnet/utils/ntuple.py: ""
@@ -157,4 +161,4 @@
 ./README.md: ""
 ./VERSION.md: ""
 
-# Add new files/directories here with their descriptions 
+# Add new files/directories here with their descriptions

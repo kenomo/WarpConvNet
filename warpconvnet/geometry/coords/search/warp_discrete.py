@@ -12,7 +12,7 @@ import warp.utils
 from jaxtyping import Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.search.hashmap import HashStruct, VectorHashTable, search_func
+from warpconvnet.geometry.coords.search.warp_hashmap import HashStruct, WarpHashTable, search_func
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
 from warpconvnet.utils.ntuple import ntuple
 
@@ -98,6 +98,7 @@ def kernel_offsets_from_size(
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     center_offset: Optional[Tuple[int, ...]] = None,
+    device: Optional[str] = None,
 ) -> Int[Tensor, "K D+1"]:
     """
     Generate the kernel offsets for the spatially sparse convolution.
@@ -124,7 +125,7 @@ def kernel_offsets_from_size(
     # Add batch dimension (zeros)
     offsets = [torch.zeros_like(offsets[0])] + offsets
 
-    return torch.stack(offsets, dim=1)
+    return torch.stack(offsets, dim=1).to(device)
 
 
 @wp.kernel
@@ -230,8 +231,14 @@ def _kernel_map_from_offsets(
         dtype=wp.int32,
         device=device_wp,
     )
-    batched_query_coords_wp = wp.from_torch(batched_query_coords)
-    kernel_offsets_wp = wp.from_torch(kernel_offsets)
+    if isinstance(batched_query_coords, torch.Tensor):
+        batched_query_coords_wp = wp.from_torch(batched_query_coords)
+    else:
+        batched_query_coords_wp = batched_query_coords
+    if isinstance(kernel_offsets, torch.Tensor):
+        kernel_offsets_wp = wp.from_torch(kernel_offsets)
+    else:
+        kernel_offsets_wp = kernel_offsets
     scratch_coords_wp = wp.empty_like(batched_query_coords_wp)
 
     # Launch the kernel
@@ -281,7 +288,10 @@ def _kernel_map_from_size(
 
     if num_dims == 4:
         # Use existing vec4i implementation for 4D coordinates
-        batched_query_coords_wp = wp.from_torch(batched_query_coords, dtype=wp.vec4i)
+        if isinstance(batched_query_coords, torch.Tensor):
+            batched_query_coords_wp = wp.from_torch(batched_query_coords, dtype=wp.vec4i)
+        else:
+            batched_query_coords_wp = batched_query_coords
         kernel_sizes_wp = wp.vec3i(kernel_sizes)
 
         wp.launch(
@@ -422,7 +432,7 @@ def generate_kernel_map(
     """
     # Create a vector hashtable for the batched coordinates
     batch_indexed_in_coords_wp = wp.from_torch(batch_indexed_in_coords)
-    hashtable = VectorHashTable.from_keys(batch_indexed_in_coords_wp)
+    hashtable = WarpHashTable.from_keys(batch_indexed_in_coords_wp)
 
     str_device = str(batch_indexed_out_coords.device)
     num_spatial_dims = batch_indexed_out_coords.shape[1] - 1

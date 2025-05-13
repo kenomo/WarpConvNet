@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from torch import Tensor
 
-from warpconvnet.geometry.coords.search.discrete import _int_sequence_hash, string_hash
+from warpconvnet.geometry.coords.search.torch_discrete import _int_sequence_hash, string_hash
 from warpconvnet.geometry.coords.search.utils import _int_tensor_hash
 
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult, RealSearchResult
