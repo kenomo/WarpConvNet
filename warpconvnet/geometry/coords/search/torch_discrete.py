@@ -152,6 +152,7 @@ def _kernel_map_from_offsets(
     batched_query_coords: Int[Tensor, "N D_1"],
     kernel_offsets: Int[Tensor, "K D_1"],
     return_type: Literal["indices", "offsets"] = "offsets",
+    threads_per_block: int = 256,
 ) -> Int[Tensor, "K N"] | IntSearchResult:
     """
     Compute the kernel map (input index, output index) for each kernel offset using TorchHashTable.
@@ -179,7 +180,6 @@ def _kernel_map_from_offsets(
 
     # Get the appropriate kernel based on hash method
     kernel = _get_kernel_map_offset_kernel(hashtable.hash_method)
-    threads_per_block = 256
     grid_size = math.ceil(num_query_coords / threads_per_block)
 
     # Ensure contiguous tensors for kernel launch
@@ -221,6 +221,7 @@ def _kernel_map_from_size(
     batched_query_coords: Int[Tensor, "N D_1"],
     kernel_sizes: Tuple[int, ...],
     return_type: Literal["indices", "offsets"] = "offsets",
+    threads_per_block: int = 256,
 ) -> Int[Tensor, "K N"] | IntSearchResult:
     """
     Compute the kernel map using kernel_size. Uses _kernel_map_from_offsets internally,
@@ -247,7 +248,6 @@ def _kernel_map_from_size(
         num_kernels = kernel_sizes[0] * kernel_sizes[1] * kernel_sizes[2]
 
         kernel = _get_kernel_map_size_4d_kernel(hashtable.hash_method)
-        threads_per_block = 256
         grid_size = math.ceil(num_query_coords / threads_per_block)
 
         # Prepare kernel arguments

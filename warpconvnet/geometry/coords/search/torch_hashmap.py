@@ -145,11 +145,10 @@ class TorchHashTable:
         self._vector_keys = vec_keys
 
         # --- Launch Prepare Kernel ---
-        threads_per_block_prep = 256
-        grid_size_prep = math.ceil(self._capacity / threads_per_block_prep)
+        grid_size_prep = math.ceil(self._capacity / threads_per_block)
         self._prepare_kernel(
             (grid_size_prep,),
-            (threads_per_block_prep,),
+            (threads_per_block,),
             (self._table_kvs.data_ptr(), self._capacity),  # Pass data pointer
         )
         torch.cuda.synchronize(self.device)  # Synchronize on the correct device

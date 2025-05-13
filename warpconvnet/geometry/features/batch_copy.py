@@ -9,8 +9,6 @@ import warp as wp
 from jaxtyping import Float, Int
 from torch import Tensor
 
-from warpconvnet.geometry.coords.ops.batch_index import _find_bin
-
 snippet = """
     __shared__ int shared_row_splits[256];
 
@@ -76,6 +74,19 @@ def copy_batch_kernel2_native(
         in_features.shape[1],  # C
         num_copy,
     )
+
+
+@wp.func
+def _find_bin(offsets: wp.array(dtype=wp.int32), tid: int) -> int:
+    N = offsets.shape[0] - 1
+    bin_id = int(-1)
+    for i in range(N):
+        start = offsets[i]
+        end = offsets[i + 1]
+        if tid >= start and tid < end:
+            bin_id = i
+            break
+    return bin_id
 
 
 # Copy features from a batched tensor with NxC to BxMxC.

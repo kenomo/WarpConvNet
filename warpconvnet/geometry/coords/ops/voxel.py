@@ -12,7 +12,7 @@ from torch import Tensor
 from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.search.knn import batched_knn_search
 from warpconvnet.geometry.coords.ops.batch_index import (
-    batch_index_from_indicies,
+    batch_index_from_indices,
     batch_index_from_offset,
     batch_indexed_coordinates,
     offsets_from_batch_index,
@@ -90,7 +90,7 @@ def voxel_downsample_csr_mapping(
 
     voxel_coords = torch.floor(batched_points / voxel_size).int()
     if B > 1:
-        batch_index = batch_index_from_offset(offsets, device)
+        batch_index = batch_index_from_offset(offsets).to(device)
         voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
     to_unique = ToUnique(unique_method=unique_method, return_to_unique_indices=True)
@@ -136,7 +136,7 @@ def voxel_downsample_random_indices(
         voxel_coords = torch.floor(batched_points / voxel_size).int()
     else:
         voxel_coords = batched_points.int()
-    batch_index = batch_index_from_offset(offsets, device=device)
+    batch_index = batch_index_from_offset(offsets).to(device)
     voxel_coords = torch.cat([batch_index.unsqueeze(1), voxel_coords], dim=1)
 
     unique_indices, hash_table = unique_hashmap(voxel_coords)
@@ -237,7 +237,7 @@ def voxel_downsample_mapping(
         # get batch index
         # The invalid batch index is sorted as it is initialized from torch.nonzero.
         invalid_up_points = up_batched_points[invalid_idx]
-        invalid_batch_index = batch_index_from_indicies(invalid_idx, up_offsets, device=device)
+        invalid_batch_index = batch_index_from_indices(invalid_idx, up_offsets, device=device)
         invalid_offsets = offsets_from_batch_index(invalid_batch_index)
         nearest_down = batched_knn_search(
             down_batched_points.float(),

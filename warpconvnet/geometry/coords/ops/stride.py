@@ -63,5 +63,5 @@ def stride_coords(
         _, perm = torch.sort(out_batch_index)
         unique_coords = unique_coords[perm]
 
-    out_offsets = offsets_from_batch_index(unique_coords[:, 0], backend="torch")
+    out_offsets = offsets_from_batch_index(unique_coords[:, 0])
     return unique_coords, out_offsets

@@ -60,5 +60,5 @@ def expand_coords(
     # sort the batch index
     out_coords = unique_coords[torch.argsort(unique_coords[:, 0])]
     out_batch_index = out_coords[:, 0]
-    out_offsets = offsets_from_batch_index(out_batch_index, backend="torch")
+    out_offsets = offsets_from_batch_index(out_batch_index)
     return out_coords, out_offsets
