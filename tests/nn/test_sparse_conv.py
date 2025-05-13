@@ -14,6 +14,7 @@ from warpconvnet.nn.functional.sparse_conv import (
     STRIDED_CONV_MODE,
     SpatiallySparseConvBatchedExplicitGEMMFunction,
     SpatiallySparseConvExplicitGEMMFunction,
+    SpatiallySparseConvImplicitGEMMFunction,
     spatially_sparse_conv,
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
@@ -136,17 +137,37 @@ def test_sparse_conv(setup_voxels):
     bias = torch.randn(C_out).to(voxels.device)
 
     # Forward pass
-    out = spatially_sparse_conv(
+    out_implicit = spatially_sparse_conv(
         voxels,
         weight=weights,
         bias=bias,
         kernel_size=kernel_size,
         stride=(2, 2, 2),
+        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.IMPLICIT_GEMM,
     )
-    assert out.num_channels == C_out
+    out_explicit = spatially_sparse_conv(
+        voxels,
+        weight=weights,
+        bias=bias,
+        kernel_size=kernel_size,
+        stride=(2, 2, 2),
+        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+    )
+    out_batched_explicit = spatially_sparse_conv(
+        voxels,
+        weight=weights,
+        bias=bias,
+        kernel_size=kernel_size,
+        stride=(2, 2, 2),
+        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM_BATCHED,
+    )
+    assert out_implicit.num_channels == C_out
+    assert out_explicit.num_channels == C_out
+    assert torch.allclose(out_implicit.feature_tensor, out_explicit.feature_tensor)
+    assert torch.allclose(out_implicit.feature_tensor, out_batched_explicit.feature_tensor)
 
 
-def test_sparse_conv_backward(setup_small_voxels):
+def test_sparse_conv_explicit_backward(setup_small_voxels):
     """Test sparse convolution gradients."""
     voxels = setup_small_voxels
     C_in, C_out = voxels.num_channels, 13
@@ -174,6 +195,45 @@ def test_sparse_conv_backward(setup_small_voxels):
     torch.autograd.gradcheck(
         SpatiallySparseConvExplicitGEMMFunction.apply,
         (feature_tensor, weights, kernel_map, batch_indexed_out_coords.shape[0]),
+        eps=1e-3,
+        atol=1e-3,
+        rtol=1e-3,
+    )
+
+
+def test_sparse_conv_implicit_backward(setup_small_voxels):
+    """Test sparse convolution gradients."""
+    voxels = setup_small_voxels
+    C_in, C_out = voxels.num_channels, 13
+    kernel_size = (3, 3, 3)
+    stride = (2, 2, 2)
+
+    # Setup convolution parameters
+    num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    weights = torch.randn(num_kernels, C_in, C_out).to(voxels.device)
+
+    # Generate kernel map
+    batch_indexed_in_coords = batch_indexed_coordinates(voxels.coordinate_tensor, voxels.offsets)
+    batch_indexed_out_coords, offsets = stride_coords(batch_indexed_in_coords, stride=stride)
+    kernel_map = generate_kernel_map(
+        batch_indexed_in_coords,
+        batch_indexed_out_coords,
+        stride,
+        kernel_size,
+    )
+
+    # Prepare for gradient check
+    feature_tensor = voxels.feature_tensor.detach().requires_grad_(True)
+
+    # Run gradient check
+    torch.autograd.gradcheck(
+        SpatiallySparseConvImplicitGEMMFunction.apply,
+        (
+            feature_tensor,
+            weights,
+            kernel_map,
+            batch_indexed_out_coords.shape[0],
+        ),
         eps=1e-3,
         atol=1e-3,
         rtol=1e-3,

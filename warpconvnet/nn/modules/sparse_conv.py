@@ -36,8 +36,10 @@ class SpatiallySparseConv(BaseSpatialModule):
         num_spatial_dims: Optional[int] = 3,
         conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
-        out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+        out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
         compute_dtype: Optional[torch.dtype] = None,
+        implicit_matmul_fwd_block_size: Optional[int] = None,
+        implicit_matmul_bwd_block_size: Optional[int] = None,
     ):
         super().__init__()
         kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
@@ -54,6 +56,8 @@ class SpatiallySparseConv(BaseSpatialModule):
         self.conv_algo = conv_algo
         self.out_code_backend = out_code_backend
         self.compute_dtype = compute_dtype
+        self.implicit_matmul_fwd_block_size = implicit_matmul_fwd_block_size
+        self.implicit_matmul_bwd_block_size = implicit_matmul_bwd_block_size
         self.weight = nn.Parameter(torch.randn(np.prod(kernel_size), in_channels, out_channels))
 
         self.bias = None
@@ -131,6 +135,8 @@ class SpatiallySparseConv(BaseSpatialModule):
             stride_mode=self.stride_mode,
             out_code_backend=self.out_code_backend,
             compute_dtype=self.compute_dtype,
+            implicit_matmul_fwd_block_size=self.implicit_matmul_fwd_block_size,
+            implicit_matmul_bwd_block_size=self.implicit_matmul_bwd_block_size,
         )
 
 
@@ -151,6 +157,8 @@ class SparseConv2d(SpatiallySparseConv):
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
         compute_dtype: Optional[torch.dtype] = None,
+        implicit_matmul_fwd_block_size: Optional[int] = None,
+        implicit_matmul_bwd_block_size: Optional[int] = None,
     ):
         super().__init__(
             in_channels=in_channels,
@@ -168,6 +176,8 @@ class SparseConv2d(SpatiallySparseConv):
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
             compute_dtype=compute_dtype,
+            implicit_matmul_fwd_block_size=implicit_matmul_fwd_block_size,
+            implicit_matmul_bwd_block_size=implicit_matmul_bwd_block_size,
         )
 
 
@@ -188,6 +198,8 @@ class SparseConv3d(SpatiallySparseConv):
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
         compute_dtype: Optional[torch.dtype] = None,
+        implicit_matmul_fwd_block_size: Optional[int] = None,
+        implicit_matmul_bwd_block_size: Optional[int] = None,
     ):
         super().__init__(
             in_channels=in_channels,
@@ -205,4 +217,6 @@ class SparseConv3d(SpatiallySparseConv):
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
             compute_dtype=compute_dtype,
+            implicit_matmul_fwd_block_size=implicit_matmul_fwd_block_size,
+            implicit_matmul_bwd_block_size=implicit_matmul_bwd_block_size,
         )

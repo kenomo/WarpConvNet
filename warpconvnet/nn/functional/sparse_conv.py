@@ -23,6 +23,64 @@ from warpconvnet.geometry.coords.ops.expand import (
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 from warpconvnet.utils.ntuple import ntuple
 
+# Add necessary imports for CuPy and kernel loading
+import cupy as cp
+import math
+import os
+from torch.utils.dlpack import to_dlpack as torch_to_dlpack, from_dlpack as torch_from_dlpack
+from warpconvnet.utils.cuda_utils import load_kernel
+
+
+_KERNEL_CACHE = {}
+_BLOCK_SIZE = 16
+
+# Dtype mapping for kernel template
+_DTYPE_TO_CPP_STR = {
+    torch.float32: "float",
+    torch.float64: "double",
+}
+
+# Itype mapping for kernel template
+_ITYPE_TO_CPP_STR = {
+    torch.int32: "int",
+}
+
+_TORCH_DTYPE_TO_CUPY_DTYPE = {
+    torch.float16: cp.float16,
+    torch.float32: cp.float32,
+    torch.float64: cp.float64,
+    torch.int32: cp.int32,
+}
+
+
+def _get_cuda_kernel(
+    kernel_name: str, feature_dtype: torch.dtype, itype: torch.dtype, block_size: int = 32
+):
+    dtype_str = _DTYPE_TO_CPP_STR.get(feature_dtype)
+    itype_str = "int"
+
+    if dtype_str is None:
+        raise ValueError(f"Unsupported feature_dtype for CUDA kernel: {feature_dtype}")
+
+    block_size_str = str(block_size)
+    cache_key = (kernel_name, dtype_str, itype_str, block_size_str)
+
+    if cache_key in _KERNEL_CACHE:
+        return _KERNEL_CACHE[cache_key]
+
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
+    cuda_kernel_file = os.path.join(current_script_dir, "cuda", "sparse_conv.cu")
+
+    if not os.path.exists(cuda_kernel_file):
+        raise FileNotFoundError(
+            f"CUDA kernel file not found: {cuda_kernel_file}. CWD: {os.getcwd()}"
+        )
+
+    templated_kernel_name = f"{kernel_name}_{dtype_str}_{itype_str}_b{block_size_str}"
+    loaded_kernel = load_kernel(templated_kernel_name, cuda_kernel_file)
+    _KERNEL_CACHE[cache_key] = loaded_kernel
+    return loaded_kernel
+
 
 class STRIDED_CONV_MODE(Enum):
     REDUCE_AND_STRIDE = "reduce_and_stride"  # Apply convolution on the pooled input. This increases the density of the input
@@ -53,25 +111,213 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
     @staticmethod
     def forward(
         ctx,
-        batched_features: Float[Tensor, "N C_in"],
-        batch_offsets: Int[Tensor, "B + 1"],  # noqa: F821
+        in_features: Float[Tensor, "N C_in"],
         weight: Float[Tensor, "K C_in C_out"],
         kernel_map: IntSearchResult,
-        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        num_out_coords: int,
+        compute_dtype: Optional[torch.dtype] = None,
+        fwd_block_size: int = 32,
+        bwd_block_size: int = 32,
     ) -> Float[Tensor, "M C_out"]:
         """
-        Perform a sparse convolution on the input tensor using the specified algorithm.
+        Perform a sparse convolution on the input tensor using the Implicit GEMM CUDA kernel.
         """
-        pass
+        device = in_features.device
+        feature_dtype = compute_dtype if compute_dtype is not None else in_features.dtype
+        cupy_feature_dtype = _TORCH_DTYPE_TO_CUPY_DTYPE[feature_dtype]
+        # Assuming kernel map indices are or can be converted to int32 for the CUDA kernel
+        index_dtype = torch.int32
+
+        in_features = in_features.contiguous().detach()
+        weight = weight.contiguous().detach()
+
+        N_in, C_in = in_features.shape
+        K, _, C_out = weight.shape
+
+        output_feature_tensor_cp = cp.zeros((num_out_coords, C_out), dtype=cupy_feature_dtype)
+
+        if num_out_coords == 0 or K == 0 or C_in == 0 or C_out == 0 or in_features.shape[0] == 0:
+            # Handle empty cases: if no output points, or if any dimension is zero.
+            ctx.save_for_backward(in_features, weight, kernel_map)
+            ctx.num_out_coords = num_out_coords  # Save for backward pass context
+            return torch.from_dlpack(output_feature_tensor_cp)
+
+        matmul_kernel = _get_cuda_kernel("matmul", feature_dtype, index_dtype, fwd_block_size)
+        batched_features_cp = cp.from_dlpack(in_features)
+
+        for k_idx, (in_map_k, out_map_k) in enumerate(kernel_map):
+            # Check if the offset is 0, 0, 0...
+            kernel_map_offset = kernel_map.offsets[k_idx]
+            if torch.all(kernel_map_offset == 0) and in_map_k.shape[0] == N_in:
+                current_weight_k_cp = cp.from_dlpack(weight[k_idx])
+                output_feature_tensor_cp += cp.matmul(batched_features_cp, current_weight_k_cp)
+                continue
+
+            in_map_k = in_map_k.to(device=device, dtype=index_dtype).contiguous()
+            out_map_k = out_map_k.to(device=device, dtype=index_dtype).contiguous()
+
+            num_active_pairs = in_map_k.shape[0]
+            if num_active_pairs == 0:
+                continue
+
+            current_weight_k_cp: Float[cp.ndarray, "C_in C_out"] = cp.from_dlpack(weight[k_idx])
+            in_map_k_cp = cp.from_dlpack(in_map_k)
+            out_map_k_cp = cp.from_dlpack(out_map_k)
+
+            # Kernel args: A, wA, hA, B, wB, hB, C, in_map, out_map
+            # A: batched_features_cp, wA: C_in, hA: num_active_pairs
+            # B: current_weight_k_cp, wB: C_out, hB: C_in
+            # C: output_feature_tensor_cp
+
+            threads_y = fwd_block_size
+            threads_x = fwd_block_size
+
+            blocks_y = math.ceil(num_active_pairs / threads_y)
+            blocks_x = math.ceil(C_out / threads_x)
+
+            if blocks_y > 0 and blocks_x > 0:
+                matmul_kernel(
+                    (blocks_x, blocks_y, 1),
+                    (threads_x, threads_y, 1),
+                    (
+                        batched_features_cp,
+                        C_in,
+                        num_active_pairs,
+                        current_weight_k_cp,
+                        C_out,
+                        C_in,
+                        output_feature_tensor_cp,
+                        in_map_k_cp,
+                        out_map_k_cp,
+                    ),
+                )
+
+        # output_feature_tensor is already updated in-place by output_feature_tensor_cp
+        # No need to recreate from_dlpack unless output_feature_tensor_cp was a copy,
+        # but PyTorch tensors from_dlpack share memory.
+
+        ctx.save_for_backward(in_features, weight)
+        ctx.kernel_map = kernel_map
+        ctx.num_out_coords = num_out_coords  # Save for backward pass context
+        ctx.fwd_block_size = fwd_block_size
+        ctx.bwd_block_size = bwd_block_size
+        return torch.from_dlpack(output_feature_tensor_cp)
 
     @staticmethod
-    def backward(
-        ctx, grad_output: Float[Tensor, "M C_out"]
-    ) -> Tuple[Float[Tensor, "N C_in"], None, Float[Tensor, "K C_out C_in"], None, None]:
+    def backward(ctx, grad_output: Float[Tensor, "M C_out"]) -> Tuple[
+        Float[Tensor, "N C_in"],
+        Float[Tensor, "K C_in C_out"],
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]:
         """
-        Perform the backward pass of the sparse convolution.
+        Perform the backward pass of the sparse convolution using Implicit GEMM CUDA kernel.
+        Returns gradients for: batched_features, batch_offsets, weight, kernel_map, conv_algo
         """
-        pass
+        batched_features, weight = ctx.saved_tensors
+        num_out_coords = ctx.num_out_coords  # Retrieve from context
+
+        feature_dtype = batched_features.dtype
+        cupy_feature_dtype = _TORCH_DTYPE_TO_CUPY_DTYPE[feature_dtype]
+        index_dtype = torch.int32  # Must match forward
+
+        N_in, C_in = batched_features.shape
+        K, _, C_out = weight.shape
+
+        # Early exit if no work to do or if forward pass produced empty output
+        if (
+            num_out_coords == 0
+            or K == 0
+            or C_in == 0
+            or C_out == 0
+            or N_in == 0
+            or grad_output.shape[0] == 0
+        ):
+            grad_in_features = (
+                torch.zeros_like(batched_features) if N_in > 0 and C_in > 0 else None
+            )
+            grad_weight = torch.zeros_like(weight) if K > 0 and C_in > 0 and C_out > 0 else None
+            return grad_in_features, None, grad_weight, None, None
+
+        kernel_map = ctx.kernel_map
+        bwd_block_size = ctx.bwd_block_size
+
+        grad_in_features_cp = cp.zeros((N_in, C_in), dtype=cupy_feature_dtype)
+        grad_weight_tensor_cp = cp.zeros((K, C_in, C_out), dtype=cupy_feature_dtype)
+
+        matmul2_kernel = _get_cuda_kernel("matmul2", feature_dtype, index_dtype, bwd_block_size)
+
+        grad_output_cp = cp.from_dlpack(grad_output)
+        batched_features_cp = cp.from_dlpack(batched_features)
+
+        for k_idx, (in_map_k, out_map_k) in enumerate(kernel_map):
+            kernel_map_offset = kernel_map.offsets[k_idx]
+            if torch.all(kernel_map_offset == 0) and in_map_k.shape[0] == N_in:
+                current_weight_k_cp: Float[cp.ndarray, "C_in C_out"] = cp.from_dlpack(
+                    weight[k_idx]
+                )
+                grad_weight_tensor_cp[k_idx] += cp.matmul(grad_in_features_cp.T, grad_output_cp)
+                grad_in_features_cp += cp.matmul(grad_output_cp, current_weight_k_cp.T)
+                continue
+
+            num_active_pairs = in_map_k.shape[0]  # also out_map_k.shape[0]
+            if num_active_pairs == 0:
+                continue
+
+            current_weight_k_cp = cp.from_dlpack(weight[k_idx])
+            in_map_k_cp = cp.from_dlpack(in_map_k)
+            out_map_k_cp = cp.from_dlpack(out_map_k)
+
+            grad_weight_k_cp = grad_weight_tensor_cp[k_idx]
+
+            # Kernel args: A, wA, hA, B, wB, hB, D, wD, hD, C, E, in_map, out_map
+            # A (grad_out): grad_output_cp, wA: C_out, hA: num_active_pairs
+            # B (weight_k): current_weight_k_cp, wB: C_out, hB: C_in
+            # D (in_feat): batched_features_cp, wD: C_in, hD: num_active_pairs (num_active_pairs based on in_map used for D)
+            # C (grad_in): grad_in_features_cp
+            # E (grad_w_k): grad_weight_k_cp
+
+            threads_y = bwd_block_size
+            threads_x = bwd_block_size
+            blocks_x = math.ceil(C_in / threads_x)
+            blocks_y = math.ceil(num_active_pairs / threads_y)
+
+            if blocks_y > 0 and blocks_x > 0:
+                matmul2_kernel(
+                    (blocks_x, blocks_y, 1),
+                    (threads_x, threads_y, 1),
+                    (
+                        grad_output_cp,
+                        C_out,
+                        num_active_pairs,
+                        current_weight_k_cp,
+                        C_out,
+                        C_in,
+                        batched_features_cp,
+                        C_in,
+                        num_active_pairs,
+                        grad_in_features_cp,
+                        grad_weight_k_cp,  # Pass the slice for E
+                        in_map_k_cp,
+                        out_map_k_cp,
+                    ),
+                )
+
+        # Gradients are accumulated in-place in grad_in_features and grad_weight_tensor
+        # via their CuPy counterparts.
+
+        return (
+            torch.from_dlpack(grad_in_features_cp),
+            torch.from_dlpack(grad_weight_tensor_cp),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 def _maybe_cast(tensor: torch.Tensor, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
@@ -103,8 +349,12 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
             in_map = in_map.to(device)
             out_map = out_map.to(device)
 
+            num_active_pairs = in_map.shape[0]
+            if num_active_pairs == 0:
+                continue
+
             curr_out_features = torch.matmul(comp_in_feats[in_map], comp_weight[i])
-            output_feature_tensor[out_map] += curr_out_features
+            output_feature_tensor[out_map] += curr_out_features.to(device=device)
 
         ctx.kernel_map = kernel_map
         ctx.compute_dtype = compute_dtype
@@ -254,8 +504,10 @@ def spatially_sparse_conv(
     conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
     stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     stride_reduce: str = "max",
-    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
+    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
     compute_dtype: torch.dtype = torch.float32,
+    implicit_matmul_fwd_block_size: Optional[int] = None,
+    implicit_matmul_bwd_block_size: Optional[int] = None,
 ) -> Geometry:
     """
     Perform spatially sparse convolution on the input tensor using the specified algorithm.
@@ -343,6 +595,7 @@ def spatially_sparse_conv(
             compute_dtype,
         )
     elif conv_algo == SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM_BATCHED:
+        raise NotImplementedError("Batched explicit gemm is not implemented yet")
         out_feature_tensor = SpatiallySparseConvBatchedExplicitGEMMFunction.apply(
             input_sparse_tensor.feature_tensor,
             weight,
@@ -350,6 +603,21 @@ def spatially_sparse_conv(
             num_out_coords,
             kernel_matmul_batch_size,
             compute_dtype,
+        )
+    elif conv_algo == SPATIALLY_SPARSE_CONV_ALGO_MODE.IMPLICIT_GEMM:
+        if implicit_matmul_fwd_block_size is None:
+            implicit_matmul_fwd_block_size = 16
+        if implicit_matmul_bwd_block_size is None:
+            implicit_matmul_bwd_block_size = 16
+
+        out_feature_tensor = SpatiallySparseConvImplicitGEMMFunction.apply(
+            input_sparse_tensor.feature_tensor,
+            weight,
+            kernel_map,
+            num_out_coords,
+            compute_dtype,
+            implicit_matmul_fwd_block_size,
+            implicit_matmul_bwd_block_size,
         )
     else:
         raise ValueError(f"Unsupported convolution algorithm: {conv_algo}")
