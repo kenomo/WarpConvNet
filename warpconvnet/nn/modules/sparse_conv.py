@@ -5,6 +5,7 @@ import math
 from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
+
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -13,7 +14,8 @@ from torch.nn.init import calculate_gain
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.functional.sparse_conv import (
-    SPATIALLY_SPARSE_CONV_ALGO_MODE,
+    SPARSE_CONV_FWD_ALGO_MODE,
+    SPARSE_CONV_BWD_ALGO_MODE,
     STRIDED_CONV_MODE,
     spatially_sparse_conv,
 )
@@ -34,7 +36,8 @@ class SpatiallySparseConv(BaseSpatialModule):
         kernel_search_batch_size: int = 8,
         kernel_matmul_batch_size: int = 2,
         num_spatial_dims: Optional[int] = 3,
-        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        fwd_algo: SPARSE_CONV_FWD_ALGO_MODE = SPARSE_CONV_FWD_ALGO_MODE.AUTO,
+        bwd_algo: SPARSE_CONV_BWD_ALGO_MODE = SPARSE_CONV_BWD_ALGO_MODE.AUTO,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
         compute_dtype: Optional[torch.dtype] = None,
@@ -53,7 +56,8 @@ class SpatiallySparseConv(BaseSpatialModule):
         self.generative = generative
         self.kernel_search_batch_size = kernel_search_batch_size
         self.kernel_matmul_batch_size = kernel_matmul_batch_size
-        self.conv_algo = conv_algo
+        self.fwd_algo = fwd_algo
+        self.bwd_algo = bwd_algo
         self.out_code_backend = out_code_backend
         self.compute_dtype = compute_dtype
         self.implicit_matmul_fwd_block_size = implicit_matmul_fwd_block_size
@@ -131,7 +135,8 @@ class SpatiallySparseConv(BaseSpatialModule):
             output_spatially_sparse_tensor=output_spatially_sparse_tensor,
             transposed=self.transposed,
             generative=self.generative,
-            conv_algo=self.conv_algo,
+            fwd_algo=self.fwd_algo,
+            bwd_algo=self.bwd_algo,
             stride_mode=self.stride_mode,
             out_code_backend=self.out_code_backend,
             compute_dtype=self.compute_dtype,
@@ -153,7 +158,8 @@ class SparseConv2d(SpatiallySparseConv):
         generative: bool = False,
         kernel_search_batch_size=8,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
-        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        fwd_algo: SPARSE_CONV_FWD_ALGO_MODE = SPARSE_CONV_FWD_ALGO_MODE.AUTO,
+        bwd_algo: SPARSE_CONV_BWD_ALGO_MODE = SPARSE_CONV_BWD_ALGO_MODE.AUTO,
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
         compute_dtype: Optional[torch.dtype] = None,
@@ -172,7 +178,8 @@ class SparseConv2d(SpatiallySparseConv):
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=2,
             stride_mode=stride_mode,
-            conv_algo=conv_algo,
+            fwd_algo=fwd_algo,
+            bwd_algo=bwd_algo,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
             compute_dtype=compute_dtype,
@@ -194,7 +201,8 @@ class SparseConv3d(SpatiallySparseConv):
         generative: bool = False,
         kernel_search_batch_size=8,
         stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
-        conv_algo: SPATIALLY_SPARSE_CONV_ALGO_MODE = SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        fwd_algo: SPARSE_CONV_FWD_ALGO_MODE = SPARSE_CONV_FWD_ALGO_MODE.AUTO,
+        bwd_algo: SPARSE_CONV_BWD_ALGO_MODE = SPARSE_CONV_BWD_ALGO_MODE.AUTO,
         kernel_matmul_batch_size: int = 2,
         out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
         compute_dtype: Optional[torch.dtype] = None,
@@ -213,7 +221,8 @@ class SparseConv3d(SpatiallySparseConv):
             kernel_search_batch_size=kernel_search_batch_size,
             num_spatial_dims=3,
             stride_mode=stride_mode,
-            conv_algo=conv_algo,
+            fwd_algo=fwd_algo,
+            bwd_algo=bwd_algo,
             kernel_matmul_batch_size=kernel_matmul_batch_size,
             out_code_backend=out_code_backend,
             compute_dtype=compute_dtype,

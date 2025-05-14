@@ -249,6 +249,26 @@ extern "C" __global__ void matmul2_float_int_b16(
   matmul2<float, int, 16>(A, wA, hA, B, wB, hB, D, wD, hD, C, E, in_map, out_map);
 }
 
+
+// For Dtype = float, Itype = int, BLOCK_SIZE = 24
+
+extern "C" __global__ void matmul_float_int_b24(
+    const float *__restrict__ A, const int wA, const int hA,
+    const float *__restrict__ B, const int wB, const int hB,
+    float *__restrict__ C,
+    const int *__restrict__ in_map, const int *__restrict__ out_map) {
+  matmul<float, int, 24>(A, wA, hA, B, wB, hB, C, in_map, out_map);
+}
+
+extern "C" __global__ void matmul2_float_int_b24(
+    const float *__restrict__ A, const int wA, const int hA,
+    const float *__restrict__ B, const int wB, const int hB,
+    const float *__restrict__ D, const int wD, const int hD,
+    float *__restrict__ C, float *__restrict__ E,
+    const int *__restrict__ in_map, const int *__restrict__ out_map) {
+  matmul2<float, int, 24>(A, wA, hA, B, wB, hB, D, wD, hD, C, E, in_map, out_map);
+}
+
 // For Dtype = float, Itype = int, BLOCK_SIZE = 32
 
 extern "C" __global__ void matmul_float_int_b32(
@@ -346,6 +366,26 @@ extern "C" __global__ void matmul2_double_int_b16(
     double *__restrict__ C, double *__restrict__ E,
     const int *__restrict__ in_map, const int *__restrict__ out_map) {
   matmul2<double, int, 16>(A, wA, hA, B, wB, hB, D, wD, hD, C, E, in_map, out_map);
+}
+
+
+// For Dtype = double, Itype = int, BLOCK_SIZE = 24
+
+extern "C" __global__ void matmul_double_int_b24(
+    const double *__restrict__ A, const int wA, const int hA,
+    const double *__restrict__ B, const int wB, const int hB,
+    double *__restrict__ C,
+    const int *__restrict__ in_map, const int *__restrict__ out_map) {
+  matmul<double, int, 24>(A, wA, hA, B, wB, hB, C, in_map, out_map);
+}
+
+extern "C" __global__ void matmul2_double_int_b24(
+    const double *__restrict__ A, const int wA, const int hA,
+    const double *__restrict__ B, const int wB, const int hB,
+    const double *__restrict__ D, const int wD, const int hD,
+    double *__restrict__ C, double *__restrict__ E,
+    const int *__restrict__ in_map, const int *__restrict__ out_map) {
+  matmul2<double, int, 24>(A, wA, hA, B, wB, hB, D, wD, hD, C, E, in_map, out_map);
 }
 
 

@@ -10,11 +10,13 @@ from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.search.torch_discrete import generate_kernel_map
 from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.nn.functional.sparse_conv import (
-    SPATIALLY_SPARSE_CONV_ALGO_MODE,
+    SPARSE_CONV_FWD_ALGO_MODE,
+    SPARSE_CONV_BWD_ALGO_MODE,
     STRIDED_CONV_MODE,
     SpatiallySparseConvBatchedExplicitGEMMFunction,
     SpatiallySparseConvExplicitGEMMFunction,
     SpatiallySparseConvImplicitGEMMFunction,
+    UnifiedSpatiallySparseConvFunction,
     spatially_sparse_conv,
 )
 from warpconvnet.nn.functional.sparse_pool import sparse_max_pool
@@ -143,7 +145,7 @@ def test_sparse_conv(setup_voxels):
         bias=bias,
         kernel_size=kernel_size,
         stride=(2, 2, 2),
-        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.IMPLICIT_GEMM,
+        fwd_algo=SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
     )
     out_explicit = spatially_sparse_conv(
         voxels,
@@ -151,20 +153,20 @@ def test_sparse_conv(setup_voxels):
         bias=bias,
         kernel_size=kernel_size,
         stride=(2, 2, 2),
-        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM,
+        fwd_algo=SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM,
     )
-    out_batched_explicit = spatially_sparse_conv(
-        voxels,
-        weight=weights,
-        bias=bias,
-        kernel_size=kernel_size,
-        stride=(2, 2, 2),
-        conv_algo=SPATIALLY_SPARSE_CONV_ALGO_MODE.EXPLICIT_GEMM_BATCHED,
-    )
+    # out_batched_explicit = spatially_sparse_conv(
+    #     voxels,
+    #     weight=weights,
+    #     bias=bias,
+    #     kernel_size=kernel_size,
+    #     stride=(2, 2, 2),
+    #     fwd_algo=SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED,
+    # )
     assert out_implicit.num_channels == C_out
     assert out_explicit.num_channels == C_out
     assert torch.allclose(out_implicit.feature_tensor, out_explicit.feature_tensor)
-    assert torch.allclose(out_implicit.feature_tensor, out_batched_explicit.feature_tensor)
+    # assert torch.allclose(out_implicit.feature_tensor, out_batched_explicit.feature_tensor)
 
 
 def test_sparse_conv_explicit_backward(setup_small_voxels):
