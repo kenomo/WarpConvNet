@@ -45,31 +45,40 @@ class SpatiallySparseConv(BaseSpatialModule):
         implicit_matmul_bwd_block_size: Optional[int] = None,
     ):
         super().__init__()
-        kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
         self.num_spatial_dims = num_spatial_dims
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.dilation = dilation
+
+        # Ensure kernel_size, stride, dilation are tuples for consistent use
+        _kernel_size = ntuple(kernel_size, ndim=self.num_spatial_dims)
+        _stride = ntuple(stride, ndim=self.num_spatial_dims)
+        _dilation = ntuple(dilation, ndim=self.num_spatial_dims)
+
+        self.kernel_size = _kernel_size
+        self.stride = _stride
+        self.dilation = _dilation
+
         self.transposed = transposed
         self.generative = generative
         self.kernel_search_batch_size = kernel_search_batch_size
         self.kernel_matmul_batch_size = kernel_matmul_batch_size
+
         self.fwd_algo = fwd_algo
         self.bwd_algo = bwd_algo
+        self.stride_mode = stride_mode
         self.out_code_backend = out_code_backend
         self.compute_dtype = compute_dtype
         self.implicit_matmul_fwd_block_size = implicit_matmul_fwd_block_size
         self.implicit_matmul_bwd_block_size = implicit_matmul_bwd_block_size
-        self.weight = nn.Parameter(torch.randn(np.prod(kernel_size), in_channels, out_channels))
 
-        self.bias = None
+        self.bias: Optional[nn.Parameter] = None
+
+        self.weight = nn.Parameter(torch.randn(np.prod(_kernel_size), in_channels, out_channels))
         if bias:
             self.bias = nn.Parameter(torch.randn(out_channels))
-
-        self.reset_parameters()
-        self.stride_mode = stride_mode
+        else:
+            self.bias = None  # Explicitly set to None if bias is False
+        self.reset_parameters()  # Call after parameters are defined for the chosen backend
 
     def __repr__(self):
         # return class name and parameters that are not default

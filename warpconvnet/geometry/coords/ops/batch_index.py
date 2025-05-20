@@ -120,6 +120,28 @@ def batch_indexed_coordinates(
 
 
 @torch.inference_mode()
+def offsets_from_batch_index_consecutive(
+    batch_index: Int[Tensor, "N"],  # noqa: F821
+) -> Int[Tensor, "B + 1"]:  # noqa: F821
+    """
+    Given a list of batch indices [0, 0, 1, 1, 2, 2, 2, 3, 3],
+    return the offsets [0, 2, 4, 7, 9].
+    """
+    assert batch_index.ndim == 1, "batch_index must be a 1D tensor"
+    assert len(batch_index) > 0, "batch_index must not be empty"
+    # Derive offsets (assuming out_indices_batch_indexed[:, 0] is sorted by batch)
+    unique_b_idx, counts = torch.unique_consecutive(batch_index, return_counts=True)
+    # Basic check if any points returned for all batches up to max batch_idx
+    # This logic for offsets needs to be robust for empty batches.
+    out_offsets_cpu = [0]
+    max_batch_idx_present = unique_b_idx[-1].item()
+    temp_counts = torch.zeros(max_batch_idx_present + 1, dtype=counts.dtype)
+    temp_counts[unique_b_idx.cpu()] = counts.cpu()
+    out_offsets_cpu.extend(torch.cumsum(temp_counts, dim=0).cpu().tolist())
+    return torch.IntTensor(out_offsets_cpu)
+
+
+@torch.inference_mode()
 def offsets_from_batch_index(
     batch_index: Int[Tensor, "N"],  # noqa: F821
 ) -> Int[Tensor, "B + 1"]:  # noqa: F821

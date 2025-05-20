@@ -112,7 +112,7 @@ class PointToSparseWrapper(BaseSpatialModule):
         self.concat_unpooled_pc = concat_unpooled_pc
         self.unique_method = unique_method
 
-    def forward(self, pc: Points):
+    def forward(self, pc: Points) -> Points:
         st, to_unique = point_pool(
             pc,
             reduction=self.reduction,
@@ -122,6 +122,7 @@ class PointToSparseWrapper(BaseSpatialModule):
             unique_method=self.unique_method,
         )
         out_st = self.inner_module(st)
+        assert isinstance(out_st, Voxels), "Output of inner module must be a Voxels"
         unpooled_pc = point_unpool(
             out_st.to_point(self.voxel_size),
             pc,

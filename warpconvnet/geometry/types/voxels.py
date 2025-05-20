@@ -152,34 +152,49 @@ class Voxels(Geometry):
         if spatial_shape is None and min_coords is None:
             # Get the min max coordinates
             coords = batch_indexed_coords[:, 1:]
-            min_coords = coords.min(dim=0).values
-            max_coords = coords.max(dim=0).values
-            spatial_shape = max_coords - min_coords + 1
+            if coords.shape[0] == 0:  # Handle empty tensor case
+                min_coords_tensor = torch.zeros(
+                    self.num_spatial_dims, dtype=torch.long, device=device
+                )
+                spatial_shape_tensor = torch.zeros(
+                    self.num_spatial_dims, dtype=torch.long, device=device
+                )
+            else:
+                min_coords_tensor = coords.min(dim=0).values
+                max_coords_tensor = coords.max(dim=0).values
+                spatial_shape_tensor = max_coords_tensor - min_coords_tensor + 1
             # Shift the coordinates to the min_coords
-            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords.to(device)
+            batch_indexed_coords[:, 1:] = batch_indexed_coords[:, 1:] - min_coords_tensor.to(
+                device
+            )
+            spatial_shape = tuple(s.item() for s in spatial_shape_tensor)
         elif min_coords is not None:
             # Assert either max_coords or spatial_shape is provided
             assert max_coords is not None or spatial_shape is not None
             # Convert min_coords to tensor
-            min_coords = torch.tensor(min_coords, dtype=torch.int32)
+            min_coords_tensor = torch.tensor(min_coords, dtype=torch.int32, device=device)
             if max_coords is None:
                 # convert spatial_shape to tensor
-                spatial_shape = torch.tensor(spatial_shape, dtype=torch.int32)
-                max_coords = min_coords + spatial_shape - 1
+                spatial_shape_tensor = torch.tensor(
+                    spatial_shape, dtype=torch.int32, device=device
+                )
+                # max_coords_tensor = min_coords_tensor + spatial_shape_tensor - 1
             else:  # both min_coords and max_coords are provided
                 # Convert max_coords to tensor
-                max_coords = torch.tensor(max_coords, dtype=torch.int32)
-                assert len(min_coords) == len(max_coords) == self.num_spatial_dims
-                spatial_shape = max_coords - min_coords + 1
+                max_coords_tensor = torch.tensor(max_coords, dtype=torch.int32, device=device)
+                assert len(min_coords_tensor) == len(max_coords_tensor) == self.num_spatial_dims
+                spatial_shape_tensor = max_coords_tensor - min_coords_tensor + 1
             # Shift the coordinates to the min_coords and clip to the spatial_shape
             # Create a mask to identify coordinates within the spatial range
             mask = torch.ones(batch_indexed_coords.shape[0], dtype=torch.bool, device=device)
             for d in range(1, batch_indexed_coords.shape[1]):
-                mask &= (batch_indexed_coords[:, d] >= min_coords[d - 1].item()) & (
-                    batch_indexed_coords[:, d] < min_coords[d - 1].item() + spatial_shape[d - 1]
+                mask &= (batch_indexed_coords[:, d] >= min_coords_tensor[d - 1].item()) & (
+                    batch_indexed_coords[:, d]
+                    < min_coords_tensor[d - 1].item() + spatial_shape_tensor[d - 1].item()
                 )
             batch_indexed_coords = batch_indexed_coords[mask]
             features = features[mask]
+            spatial_shape = tuple(s.item() for s in spatial_shape_tensor)
         elif spatial_shape is not None and len(spatial_shape) == self.coordinate_tensor.shape[1]:
             # prepend a batch dimension
             pass
@@ -188,7 +203,7 @@ class Voxels(Geometry):
                 f"Provided spatial shape {spatial_shape} must be same length as the number of spatial dimensions {self.num_spatial_dims}."
             )
 
-        if isinstance(spatial_shape, Tensor):
+        if isinstance(spatial_shape, Tensor):  # Should be tuple by now
             spatial_shape = spatial_shape.tolist()
 
         # Create a dense tensor
@@ -198,11 +213,12 @@ class Voxels(Geometry):
             device=self.batched_features.device,
         )
 
-        # Flatten view and scatter add
-        flattened_indices = ravel_multi_index(
-            batch_indexed_coords, (self.batch_size, *spatial_shape)
-        )
-        dense_tensor.flatten(0, -2)[flattened_indices] = features
+        if batch_indexed_coords.shape[0] > 0:  # Only scatter if there are points
+            # Flatten view and scatter add
+            flattened_indices = ravel_multi_index(
+                batch_indexed_coords, (self.batch_size, *spatial_shape)
+            )
+            dense_tensor.flatten(0, -2)[flattened_indices] = features
 
         if channel_dim != -1:
             # Put the channel dimension in the specified position and move the rest of the dimensions contiguous

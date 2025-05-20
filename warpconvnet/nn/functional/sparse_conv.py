@@ -18,6 +18,7 @@ from torch.autograd import Function
 from torch.utils.dlpack import to_dlpack as torch_to_dlpack, from_dlpack as torch_from_dlpack
 
 from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.types.voxels import Voxels
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
@@ -135,16 +136,27 @@ class SpatiallySparseConvConfig:
     def __hash__(self):
         return _int_sequence_hash(
             [
-                self.log_num_in_coords,
-                self.log_num_out_coords,
+                # self.log_num_in_coords,
+                # self.log_num_out_coords,
                 self.in_channels,
                 self.out_channels,
                 self.kernel_volume,
             ]
         )
 
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, SpatiallySparseConvConfig):
+            return False
+        return (
+            # self.log_num_in_coords == other.log_num_in_coords
+            # and self.log_num_out_coords == other.log_num_out_coords and
+            self.in_channels == other.in_channels
+            and self.out_channels == other.out_channels
+            and self.kernel_volume == other.kernel_volume
+        )
 
-_BENCHMARK_NUM_RUNS = 4
+
+_BENCHMARK_NUM_RUNS = 2
 _BENCHMARK_FORWARD_PARAMS = [
     (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}),
     (
@@ -184,10 +196,10 @@ _BENCHMARK_BACKWARD_PARAMS = [
     ),
 ]
 _BENCHMARK_FORWARD_RESULTS: Dict[
-    SpatiallySparseConvConfig, Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]
+    SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]]
 ] = {}
 _BENCHMARK_BACKWARD_RESULTS: Dict[
-    SpatiallySparseConvConfig, Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]
+    SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]]
 ] = {}
 
 
@@ -830,9 +842,7 @@ def _run_forward_benchmarks(
     logger.warn(
         "Using benchmarked forward algo. Until the algorithm finds the best parameters, forward performance will be slow."
     )
-    best_algo = None
-    best_params = {}
-    overall_best_time_ms = float("inf")  # Renamed from min_avg_time_ms
+    all_benchmark_results: List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]] = []
 
     def _execute_single_fwd_pass(
         algo_mode: SPARSE_CONV_FWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
@@ -890,21 +900,26 @@ def _run_forward_benchmarks(
         logger.debug(
             f"Forward benchmark result: {algo_mode.value} {params_config} {current_algo_min_time_ms:.2f}ms"
         )
-        if current_algo_min_time_ms < overall_best_time_ms:
-            overall_best_time_ms = current_algo_min_time_ms
-            best_algo = algo_mode
-            best_params = params_config
+        if current_algo_min_time_ms != float("inf"):
+            all_benchmark_results.append((algo_mode, params_config, current_algo_min_time_ms))
 
-    if best_algo is None:
+    if not all_benchmark_results:
         logger.warning(
             "Warning: No forward benchmark was successful or no algorithms to test. Defaulting to EXPLICIT_GEMM."
         )
-        return SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf")
+        # Return a default entry indicating failure or no successful benchmarks
+        default_result = (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf"))
+        all_benchmark_results.append(default_result)
+
+    # Sort results by time (3rd element of tuple), ascending
+    all_benchmark_results.sort(key=lambda x: x[2])
+
+    best_algo, best_params, overall_best_time_ms = all_benchmark_results[0]
 
     logger.debug(
-        f"Best forward algo: {best_algo.value} for log N_in={math.ceil(math.log2(in_features.shape[0]))}, log N_out={math.ceil(math.log2(num_out_coords))}, C_in={in_features.shape[1]}, C_out={weight.shape[2]}, K_vol={weight.shape[0]} {best_params} {overall_best_time_ms:.2f}ms"
+        f"Best forward algo: {best_algo.value} for log N_in={math.ceil(math.log2(in_features.shape[0])) if in_features.shape[0] > 0 else 0}, log N_out={math.ceil(math.log2(num_out_coords)) if num_out_coords > 0 else 0}, C_in={in_features.shape[1]}, C_out={weight.shape[2]}, K_vol={weight.shape[0]} {best_params} {overall_best_time_ms:.2f}ms"
     )
-    return best_algo, best_params, overall_best_time_ms
+    return all_benchmark_results  # Return the sorted list of all results
 
 
 def _run_backward_benchmarks(
@@ -922,9 +937,7 @@ def _run_backward_benchmarks(
     Benchmark different backward algorithms and return the best one with its parameters and runtime.
     The best is determined by the minimum execution time over benchmark_iters.
     """
-    best_algo = None
-    best_params = {}
-    overall_best_time_ms = float("inf")  # Renamed from min_avg_time_ms
+    all_benchmark_results: List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]] = []
 
     def _execute_single_bwd_pass(
         algo_mode: SPARSE_CONV_BWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
@@ -982,21 +995,24 @@ def _run_backward_benchmarks(
         logger.debug(
             f"Backward benchmark result: {algo_mode.value} {params_config} {current_algo_min_time_ms:.2f}ms"
         )
-        if current_algo_min_time_ms < overall_best_time_ms:
-            overall_best_time_ms = current_algo_min_time_ms
-            best_algo = algo_mode
-            best_params = params_config
+        if current_algo_min_time_ms != float("inf"):
+            all_benchmark_results.append((algo_mode, params_config, current_algo_min_time_ms))
 
-    if best_algo is None:
+    if not all_benchmark_results:
         logger.warning(
             "Warning: No backward benchmark was successful or no algorithms to test. Defaulting to EXPLICIT_GEMM."
         )
-        return SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf")
+        default_result = (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf"))
+        all_benchmark_results.append(default_result)
 
+    # Sort results by time (3rd element of tuple), ascending
+    all_benchmark_results.sort(key=lambda x: x[2])
+
+    best_algo, best_params, overall_best_time_ms = all_benchmark_results[0]
     logger.debug(
-        f"Best backward algo: {best_algo.value} for log N_in={math.ceil(math.log2(in_features.shape[0]))}, log N_out={math.ceil(math.log2(num_out_coords))}, C_in={in_features.shape[1]}, C_out={weight.shape[2]}, K_vol={weight.shape[0]} {best_params} {overall_best_time_ms:.2f}ms"
+        f"Best backward algo: {best_algo.value} for log N_in={math.ceil(math.log2(in_features.shape[0])) if in_features.shape[0] > 0 else 0}, log N_out={math.ceil(math.log2(num_out_coords)) if num_out_coords > 0 else 0}, C_in={in_features.shape[1]}, C_out={weight.shape[2]}, K_vol={weight.shape[0]} {best_params} {overall_best_time_ms:.2f}ms"
     )
-    return best_algo, best_params, overall_best_time_ms
+    return all_benchmark_results  # Return the sorted list of all results
 
 
 class UnifiedSpatiallySparseConvFunction(Function):
@@ -1031,16 +1047,17 @@ class UnifiedSpatiallySparseConvFunction(Function):
             global _BENCHMARK_FORWARD_RESULTS  # noqa: F824
             cached_result = _BENCHMARK_FORWARD_RESULTS.get(config)
             if cached_result is not None:
-                chosen_fwd_algo, chosen_fwd_params, _ = cached_result
+                chosen_fwd_algo, chosen_fwd_params, _ = cached_result[0]  # Best is first
                 # print(f"Using cached fwd: {chosen_fwd_algo}, {chosen_fwd_params}")
             else:
                 # print(f"Running fwd benchmark for config: {config}")
-                best_algo, best_params, min_time = _run_forward_benchmarks(
+                all_fwd_benchmark_results = _run_forward_benchmarks(
                     in_features, weight, kernel_map, num_out_coords, compute_dtype
                 )
-                _BENCHMARK_FORWARD_RESULTS[config] = (best_algo, best_params, min_time)
-                chosen_fwd_algo = best_algo
-                chosen_fwd_params = best_params
+                _BENCHMARK_FORWARD_RESULTS[config] = all_fwd_benchmark_results
+                chosen_fwd_algo, chosen_fwd_params, min_time = all_fwd_benchmark_results[
+                    0
+                ]  # Best is first
                 # print(f"Chosen fwd after benchmark: {chosen_fwd_algo}, {chosen_fwd_params}, time: {min_time}")
 
         if chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
@@ -1165,11 +1182,11 @@ class UnifiedSpatiallySparseConvFunction(Function):
             global _BENCHMARK_BACKWARD_RESULTS  # noqa: F824
             cached_result = _BENCHMARK_BACKWARD_RESULTS.get(config)
             if cached_result is not None:
-                chosen_bwd_algo, chosen_bwd_params, _ = cached_result
+                chosen_bwd_algo, chosen_bwd_params, _ = cached_result[0]  # Best is first
                 # print(f"Using cached bwd: {chosen_bwd_algo}, {chosen_bwd_params}")
             else:
                 # print(f"Running bwd benchmark for config: {config}")
-                best_algo, best_params, min_time = _run_backward_benchmarks(
+                all_bwd_benchmark_results = _run_backward_benchmarks(
                     grad_output,
                     in_features,
                     weight,
@@ -1178,9 +1195,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
                     compute_dtype,
                     device,
                 )
-                _BENCHMARK_BACKWARD_RESULTS[config] = (best_algo, best_params, min_time)
-                chosen_bwd_algo = best_algo
-                chosen_bwd_params = best_params
+                _BENCHMARK_BACKWARD_RESULTS[config] = all_bwd_benchmark_results
+                chosen_bwd_algo, chosen_bwd_params, min_time = all_bwd_benchmark_results[
+                    0
+                ]  # Best is first
                 # print(f"Chosen bwd after benchmark: {chosen_bwd_algo}, {chosen_bwd_params}, time: {min_time}")
 
         if chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM:
@@ -1241,10 +1259,9 @@ def spatially_sparse_conv(
     compute_dtype: Optional[torch.dtype] = None,  # Use None to default to in_features.dtype
     implicit_matmul_fwd_block_size: Optional[int] = 16,  # Default, can be None if not implicit
     implicit_matmul_bwd_block_size: Optional[int] = 16,  # Default, can be None if not implicit
-    # explicit_matmul_batch_size: Optional[int] = 2, # TODO
-) -> Geometry:
+) -> Geometry:  # Should return Voxels or a base Geometry type compatible with Voxels
     """
-    Perform spatially sparse convolution on the input tensor using the specified algorithm.
+    Perform spatially sparse convolution on the input tensor using the native backend.
     Spatially sparse and feature sparse is not supported yet.
 
     If stride is not 1, the kernel map will be generated by stride_mode.
@@ -1254,13 +1271,25 @@ def spatially_sparse_conv(
     For transposed convolution, the output coordinates should be provided along with the
     output coordinate stride.
     """
-    num_spatial_dims = input_sparse_tensor.num_spatial_dims
-    kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
-    kernel_dilation = ntuple(kernel_dilation, ndim=num_spatial_dims)
-    stride = ntuple(stride, ndim=num_spatial_dims)
+    if not isinstance(input_sparse_tensor, Voxels):
+        raise TypeError(
+            f"Native spatially_sparse_conv expects input_sparse_tensor of type Voxels, got {type(input_sparse_tensor)}"
+        )
 
-    num_total_kernels = np.prod(kernel_size)
-    if np.prod(kernel_size) == 1 and np.prod(stride) == 1:
+    if output_spatially_sparse_tensor is not None and not isinstance(
+        output_spatially_sparse_tensor, Voxels
+    ):
+        raise TypeError(
+            f"Native spatially_sparse_conv expects output_spatially_sparse_tensor of type Voxels or None, got {type(output_spatially_sparse_tensor)}"
+        )
+
+    num_spatial_dims = input_sparse_tensor.num_spatial_dims
+    _kernel_size = ntuple(kernel_size, ndim=num_spatial_dims)
+    _kernel_dilation = ntuple(kernel_dilation, ndim=num_spatial_dims)
+    _stride = ntuple(stride, ndim=num_spatial_dims)
+
+    num_total_kernels = np.prod(_kernel_size)
+    if np.prod(_kernel_size) == 1 and np.prod(_stride) == 1:
         out_feature_tensor = input_sparse_tensor.feature_tensor @ weight[0]
         if bias is not None:
             out_feature_tensor += bias
@@ -1269,25 +1298,30 @@ def spatially_sparse_conv(
         )
 
     if kernel_search_batch_size is None:
-        kernel_search_batch_size = max(num_total_kernels // kernel_size[0], 8)
+        kernel_search_batch_size = (
+            max(num_total_kernels // _kernel_size[0], 8)
+            if _kernel_size and _kernel_size[0] > 0
+            else 8
+        )
 
-    in_tensor_stride = input_sparse_tensor.stride
+    in_tensor_stride = input_sparse_tensor.tensor_stride
     if in_tensor_stride is None:
         in_tensor_stride = ntuple(1, ndim=num_spatial_dims)
 
     if transposed and not generative:
         assert (
             output_spatially_sparse_tensor is not None
-        ), "Output spatially sparse tensor is required for transposed convolution"
+        ), "Output spatially sparse tensor is required for transposed convolution (native backend)"
 
+    out_tensor_stride: Tuple[int, ...]
     if not transposed:
-        out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
+        out_tensor_stride = tuple(o * s for o, s in zip(_stride, in_tensor_stride))
     else:  # transposed
         if (
             output_spatially_sparse_tensor is not None
-            and output_spatially_sparse_tensor.stride is not None
+            and output_spatially_sparse_tensor.tensor_stride is not None
         ):
-            out_tensor_stride = output_spatially_sparse_tensor.stride
+            out_tensor_stride = output_spatially_sparse_tensor.tensor_stride
         else:
             out_tensor_stride = ntuple(1, ndim=num_spatial_dims)
         # At least one of the output stride dimensions should be smaller than the input stride dimensions
@@ -1300,12 +1334,26 @@ def spatially_sparse_conv(
         compute_dtype if compute_dtype is not None else input_sparse_tensor.feature_tensor.dtype
     )
 
-    # Generate output coordinates and kernel map
+    if stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and any(s != 1 for s in _stride):
+        reduced_input_voxels = sparse_reduce(
+            input_sparse_tensor,
+            kernel_size=_stride,
+            stride=_stride,
+            reduction=stride_reduce,
+        )
+        current_input_features_for_gemm = reduced_input_voxels.feature_tensor
+        # The `kernel_map` indices (in_map) should refer to indices within `reduced_input_voxels`.
+        # `generate_kernel_map` (called by `generate_output_coords_and_kernel_map`) must ensure this mapping is correct
+        # when `stride_mode` is `REDUCE_AND_STRIDE`.
+        input_sparse_tensor = reduced_input_voxels
+    else:
+        current_input_features_for_gemm = input_sparse_tensor.feature_tensor
+
     batch_indexed_out_coords, out_offsets, kernel_map = generate_output_coords_and_kernel_map(
         input_sparse_tensor=input_sparse_tensor,
-        kernel_size=kernel_size,
-        kernel_dilation=kernel_dilation,
-        stride=stride,
+        kernel_size=_kernel_size,
+        kernel_dilation=_kernel_dilation,
+        stride=_stride,
         generative=generative,
         transposed=transposed,
         output_spatially_sparse_tensor=output_spatially_sparse_tensor,
@@ -1313,20 +1361,10 @@ def spatially_sparse_conv(
         stride_mode=stride_mode,
         out_code_backend=out_code_backend,
     )
-
     num_out_coords = batch_indexed_out_coords.shape[0]
 
-    if stride_mode == STRIDED_CONV_MODE.REDUCE_AND_STRIDE and any(s != 1 for s in stride):
-        input_sparse_tensor = sparse_reduce(
-            input_sparse_tensor,
-            kernel_size=stride,  # reduce by stride
-            stride=stride,
-            reduction=stride_reduce,
-        )
-
-    # Call unified conv function
     out_feature_tensor = UnifiedSpatiallySparseConvFunction.apply(
-        input_sparse_tensor.feature_tensor,
+        current_input_features_for_gemm,
         weight,
         kernel_map,
         num_out_coords,
@@ -1335,35 +1373,34 @@ def spatially_sparse_conv(
         effective_compute_dtype,
         implicit_matmul_fwd_block_size,
         implicit_matmul_bwd_block_size,
-        # explicit_matmul_batch_size, # TODO
     )
 
     if bias is not None:
         out_feature_tensor += bias
 
-    out_offsets = out_offsets.cpu().int()
+    out_offsets_cpu = out_offsets.cpu().int()
     return input_sparse_tensor.replace(
         batched_coordinates=IntCoords(
             batch_indexed_out_coords[:, 1:],
-            offsets=out_offsets,
+            offsets=out_offsets_cpu,
         ),
         batched_features=out_feature_tensor,
-        stride=out_tensor_stride,
+        tensor_stride=out_tensor_stride,
     )
 
 
 def generate_output_coords_and_kernel_map(
-    input_sparse_tensor: Geometry,
+    input_sparse_tensor: Voxels,  # Ensure this is Voxels
     kernel_size: Tuple[int, ...],
     kernel_dilation: Tuple[int, ...],
     stride: Tuple[int, ...],
     generative: bool,
     transposed: bool,
-    output_spatially_sparse_tensor: Optional[Geometry],
+    output_spatially_sparse_tensor: Optional[Voxels],
     kernel_search_batch_size: int,
     stride_mode: STRIDED_CONV_MODE,
-    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "unique",
-):
+    out_code_backend: Literal["hashmap", "unique", "ravel", "morton"] = "hashmap",
+) -> Tuple[IntCoords, Int[Tensor, "B+1"], IntSearchResult]:
     batch_indexed_in_coords = input_sparse_tensor.batch_indexed_coordinates
     in_to_out_stride_ratio = stride
 
