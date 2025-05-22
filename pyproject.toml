@@ -12,38 +12,41 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang>=1.6.2", "jaxtyping", "torch-scatter"]
+dependencies = ["numpy", "torch", "warp-lang", "jaxtyping"]
 dynamic = ["version"]
 
 [project.urls]
-GitLab = "https://gitlab.nvidia.com/3dmmllm/warpconvnet"
-Documentation = "https://gitlab.nvidia.com/3dmmllm/warpconvnet/docs"
+GitHub = "https://github.com/NVlabs/warpconvnet"
+Documentation = "https://nvlabs.github.io/warpconvnet"
 
 [project.optional-dependencies]
 dev = [
     "ipdb",
     "pre-commit",
-    "pytest>=7.4.0",
-    "pytest-benchmark>=4.0.0",
-    "pytest-cov>=4.1.0",
+    "pytest",
+    "pytest-benchmark",
+    "pytest-cov",
 ]
 
 docs = [
-    "mkdocs>=1.4.0",
-    "mkdocs-material>=9.0.0",
-    "mkdocstrings[python]>=0.20.0",
-    "pymdown-extensions>=9.0.0",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "pymdown-extensions",
 ]
 
 models = [
+    "rich",
     "h5py",
     "wandb",
     "hydra-core",
     "omegaconf",
-    "pytorch-lightning",
+    "lightning",
     "torchmetrics",
 ]
 
