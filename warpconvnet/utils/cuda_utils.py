@@ -4,10 +4,19 @@
 import logging
 import os
 from functools import lru_cache
+from pathlib import Path
 
 import cupy as cp
 
 logger = logging.getLogger(__name__)
+
+
+def _get_warpconvnet_csrc_path() -> Path:
+    """Get the warpconvnet csrc directory path."""
+    # Get the warpconvnet package root by going up from utils directory
+    utils_dir = Path(__file__).parent
+    warpconvnet_root = utils_dir.parent
+    return warpconvnet_root / "csrc"
 
 
 @lru_cache
@@ -37,7 +46,8 @@ def load_kernel(
 
     Args:
         kernel_name: The name of the kernel function in the CUDA code.
-        kernel_file: The path to the .cu file containing the kernel.
+        kernel_file: The path to the .cu file containing the kernel. If just a filename
+                     (no path separators), automatically looks in warpconvnet/csrc/.
         cache_dir: Directory to cache compiled kernels. Defaults to CuPy's default.
         extra_options: Tuple of extra compiler options (e.g., ('-std=c++17',)).
         use_standard_includes: If True, attempts to add standard CUDA include paths
@@ -46,6 +56,12 @@ def load_kernel(
     Returns:
         A compiled CuPy RawKernel object.
     """
+    # If kernel_file is just a filename (no path separators), prepend csrc path
+    if os.sep not in kernel_file and "/" not in kernel_file:
+        csrc_path = _get_warpconvnet_csrc_path()
+        kernel_file = str(csrc_path / kernel_file)
+        logger.debug(f"Using centralized CUDA file: {kernel_file}")
+    
     kernel_path = os.path.abspath(kernel_file)
     assert os.path.exists(kernel_path), f"Kernel file not found: {kernel_path}"
 
@@ -85,7 +101,6 @@ def load_kernel(
                         kernel_code_reloaded,
                         kernel_name,
                         options=options_with_include,
-                        backend=backend,
                     )
                 except cp.cuda.compiler.CompileException as e2:
                     logger.error(

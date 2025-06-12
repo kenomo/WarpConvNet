@@ -73,11 +73,9 @@ def _get_cuda_kernel(
     if cache_key in _KERNEL_CACHE:
         return _KERNEL_CACHE[cache_key]
 
-    current_script_dir = os.path.dirname(os.path.abspath(__file__))
-    cuda_kernel_file = os.path.join(current_script_dir, "cuda", "sparse_conv.cu")
-
     templated_kernel_name = f"{kernel_name}_{dtype_str}_{itype_str}_b{block_size_str}"
-    loaded_kernel = load_kernel(templated_kernel_name, cuda_kernel_file)
+    # cuda_utils.py automatically handles the csrc path for just filename
+    loaded_kernel = load_kernel(templated_kernel_name, "sparse_conv.cu")
     _KERNEL_CACHE[cache_key] = loaded_kernel
     return loaded_kernel
 

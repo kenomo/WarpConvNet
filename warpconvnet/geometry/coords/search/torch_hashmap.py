@@ -73,14 +73,13 @@ class TorchHashTable:
         self._device = torch.device(device)
 
         # Load CUDA kernels using cupy RawKernel loader
-        kernel_dir = os.path.dirname(__file__)
-        kernel_file_path = os.path.join(kernel_dir, "cuda", "hashmap_kernels.cu")
-        self._prepare_kernel = load_kernel("prepare_key_value_pairs_kernel", kernel_file_path)
+        # cuda_utils.py automatically handles the csrc path for just filename
+        self._prepare_kernel = load_kernel("prepare_key_value_pairs_kernel", "hashmap_kernels.cu")
 
         # Load the specific insert/search kernels based on the chosen hash method
         suffix = hash_method.kernel_suffix()
-        self._insert_kernel = load_kernel(f"insert_kernel_{suffix}", kernel_file_path)
-        self._search_kernel = load_kernel(f"search_kernel_{suffix}", kernel_file_path)
+        self._insert_kernel = load_kernel(f"insert_kernel_{suffix}", "hashmap_kernels.cu")
+        self._search_kernel = load_kernel(f"search_kernel_{suffix}", "hashmap_kernels.cu")
 
     @property
     def capacity(self) -> int:

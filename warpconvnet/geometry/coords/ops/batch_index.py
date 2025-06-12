@@ -15,10 +15,8 @@ from torch import Tensor
 from warpconvnet.utils.cuda_utils import load_kernel
 
 
-_kernel_dir = os.path.dirname(__file__)
-_kernel_file_path = os.path.abspath(os.path.join(_kernel_dir, "cuda/find_first_gt_bsearch.cu"))
-
-_bsearch_kernel = load_kernel(kernel_file=_kernel_file_path, kernel_name="find_first_gt_bsearch")
+# cuda_utils.py automatically handles the csrc path for just filename
+_bsearch_kernel = load_kernel(kernel_file="find_first_gt_bsearch.cu", kernel_name="find_first_gt_bsearch")
 
 
 @torch.inference_mode()

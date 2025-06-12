@@ -23,8 +23,8 @@ from warpconvnet.utils.ntuple import ntuple
 
 logger = logging.getLogger(__name__)
 
-# Path to the new CUDA kernel file
-KERNEL_FILE = Path(__file__).parent / "cuda" / "discrete_kernels.cu"
+# cuda_utils.py automatically handles the csrc path for just filename
+KERNEL_FILE = "discrete_kernels.cu"
 
 
 def _get_kernel_map_offset_kernel(hash_method: HashMethod) -> cp.RawKernel:

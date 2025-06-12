@@ -18,14 +18,12 @@ from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinate
 from warpconvnet.utils.cuda_utils import load_kernel
 
 
-_kernel_dir = os.path.dirname(__file__)
-_cuda_kernel_file = os.path.abspath(os.path.join(_kernel_dir, "cuda/morton_code.cu"))
-
+# cuda_utils.py automatically handles the csrc path for just filename
 _assign_order_16bit_kernel = load_kernel(
-    kernel_file=_cuda_kernel_file, kernel_name="assign_order_discrete_16bit_kernel"
+    kernel_file="morton_code.cu", kernel_name="assign_order_discrete_16bit_kernel"
 )
 _assign_order_20bit_kernel = load_kernel(
-    kernel_file=_cuda_kernel_file, kernel_name="assign_order_discrete_20bit_kernel"
+    kernel_file="morton_code.cu", kernel_name="assign_order_discrete_20bit_kernel"
 )
 
 
