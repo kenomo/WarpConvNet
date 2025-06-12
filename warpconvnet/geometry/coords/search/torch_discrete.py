@@ -418,7 +418,8 @@ def generate_kernel_map(
     identity_map_index = None
     # Check if kernel is odd and potentially symmetric
     is_odd_kernel = all(k % 2 == 1 for k in kernel_size)
-    if is_odd_kernel:
+    same_in_out_coords = batch_indexed_in_coords.shape[0] == batch_indexed_out_coords.shape[0]
+    if is_odd_kernel and same_in_out_coords:
         total_kernels = int(np.prod(kernel_size))
         center_idx = total_kernels // 2
         identity_map_index = center_idx
