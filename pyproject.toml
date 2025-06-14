@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "build", "wheel", "torch==2.5.1"]
+requires = ["setuptools", "build", "wheel", "torch>=2.0.0", "pybind11"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -17,7 +17,7 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "jaxtyping"]
+dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11", "nvidia-cutlass"]
 dynamic = ["version"]
 
 [project.urls]
