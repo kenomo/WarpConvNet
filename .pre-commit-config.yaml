@@ -62,7 +62,7 @@ repos:
     hooks:
       - id: cppcheck
         name: cppcheck (static analysis)
-        args: [--enable=warning,style,performance,portability,information,unusedFunction]
+        args: [--enable=warning,style,performance,portability,information,unusedFunction, --language=c++]
         files: \.(c|cc|cpp|cxx|hpp|hxx|h|cu|cuh)$
         exclude: |
           (?x)^(

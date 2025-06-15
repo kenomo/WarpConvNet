@@ -28,12 +28,12 @@ struct torch_to_cutlass<torch::kFloat64> {
   using type = double;
 };
 
-#ifdef USE_BFLOAT16
+#ifndef DISABLE_BFLOAT16
 template <>
 struct torch_to_cutlass<torch::kBFloat16> {
   using type = cutlass::bfloat16_t;
 };
-#endif  // USE_BFLOAT16
+#endif  // DISABLE_BFLOAT16
 
 // Forward declaration of the templated function (defined in .cu file)
 template <typename ElementInputA,
@@ -294,7 +294,7 @@ torch::Tensor run_cutlass_gemm(torch::Tensor tensor_a,
             alpha,
             beta);
   }
-#ifdef USE_BFLOAT16
+#ifndef DISABLE_BFLOAT16
   else if (scalar_a == torch::kBFloat16 && scalar_b == torch::kBFloat16 &&
            scalar_c == torch::kBFloat16 && scalar_d == torch::kBFloat16) {
     // Pure BF16 path (ibf16obf16) with FP32 accumulator
@@ -351,7 +351,7 @@ torch::Tensor run_cutlass_gemm(torch::Tensor tensor_a,
       TORCH_CHECK(false, ss.str());
     }
   }
-#endif  // USE_BFLOAT16
+#endif  // DISABLE_BFLOAT16
 
   else {
     std::stringstream ss;
@@ -364,7 +364,7 @@ torch::Tensor run_cutlass_gemm(torch::Tensor tensor_a,
           "(if16of16af32)\n"
        << "3. Input: float32, Output: float32, Accumulator: float32 "
           "(f32of32af32)\n";
-#ifdef USE_BFLOAT16
+#ifndef DISABLE_BFLOAT16
     ss << "4. Input: bfloat16, Output: bfloat16, Accumulator: float32 " << "(ibf16obf16af32)\n"
        << "5. Input: bfloat16, Output: float32, Accumulator: float32 " << "(ibf16of32af32)\n";
 #endif

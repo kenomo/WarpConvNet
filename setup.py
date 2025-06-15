@@ -81,6 +81,12 @@ nvcc_args = [
     "--compiler-options=-fpermissive,-w",
 ]
 
+# Check DISABLE_BFLOAT16
+if os.environ.get("DISABLE_BFLOAT16", "0") == "1":
+    print("Disabling BFLOAT16 support")
+    cxx_args.append("-DDISABLE_BFLOAT16")
+    nvcc_args.append("-DDISABLE_BFLOAT16")
+
 # Define the extension
 ext_modules = [
     CUDAExtension(
