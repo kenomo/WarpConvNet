@@ -63,6 +63,9 @@ warpconvnet-build-docs = "scripts.build_docs:build_docs"
 [tool.setuptools.packages.find]
 include = ["warpconvnet*", "scripts*"]
 
+[tool.setuptools.package-data]
+warpconvnet = ["csrc/*.cu", "csrc/*.cpp", "csrc/*.h", "csrc/*.hpp", "csrc/include/*.h", "csrc/include/**/*.h", "csrc/include/**/*.hpp"]
+
 [tool.setuptools.dynamic]
 version = { file = ["VERSION.md"] }
 readme = { file = ["README.md"], content-type = "text/markdown" }

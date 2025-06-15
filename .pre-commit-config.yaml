@@ -46,6 +46,31 @@ repos:
           ]
         additional_dependencies: [flake8-rst-docstrings==0.3.0]
 
+  # ---------------------- C++ / CUDA toolchain ------------------------------
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.4                  # LLVM 18 toolchain
+    hooks:
+      - id: clang-format
+        name: clang-format (C++/CUDA)
+        language_version: python3
+        files: \.(c|cc|cpp|cxx|hpp|hxx|h|cu|cuh)$
+        # style is read from .clang-format if present; otherwise fallback:
+        args: ["--style=file"]
+
+  - repo: https://github.com/pocc/pre-commit-hooks
+    rev: v1.3.5
+    hooks:
+      - id: cppcheck
+        name: cppcheck (static analysis)
+        args: [--enable=warning,style,performance,portability,information,unusedFunction]
+        files: \.(c|cc|cpp|cxx|hpp|hxx|h|cu|cuh)$
+        exclude: |
+          (?x)^(
+            .*3rdparty/.*|
+            .*build/.*|
+            .*\.egg-info/.*
+          )$
+
   # yaml formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8

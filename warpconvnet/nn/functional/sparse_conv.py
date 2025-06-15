@@ -33,6 +33,12 @@ from warpconvnet.utils.cuda_utils import load_kernel
 from warpconvnet.utils.logger import get_logger
 
 logger = get_logger(__name__)
+try:
+    import warpconvnet._C as _C
+except ImportError as e:
+    logger.warning(f"Error importing warpconvnet._C: {e}. Using fallback implementation.")
+    _C = None
+
 
 _KERNEL_CACHE = {}
 _MAX_GRID_Y = 65535
@@ -510,6 +516,119 @@ def _implicit_gemm_backward_logic(
     return grad_in_final, grad_weight_final
 
 
+def _cutlass_implicit_gemm_forward_logic(
+    in_features: Float[Tensor, "N C_in"],
+    weight: Float[Tensor, "K C_in C_out"],
+    kernel_map: IntSearchResult,
+    num_out_coords: int,
+    compute_dtype: Optional[torch.dtype] = None,
+    accumulator_type: torch.dtype = torch.float32,
+    split_k_slices: int = 1,
+) -> Float[Tensor, "M C_out"]:
+    if _C is None:
+        raise ImportError(
+            "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
+        )
+
+    device = in_features.device
+    comp_in_feats = _maybe_cast(in_features, compute_dtype)
+    comp_weight = _maybe_cast(weight, compute_dtype)
+    iden_idx = kernel_map.identity_map_index
+    if iden_idx is not None:
+        output_feature_tensor = torch.matmul(comp_in_feats, comp_weight[iden_idx])
+    else:
+        output_feature_tensor = torch.zeros(
+            num_out_coords, weight.shape[-1], device=device, dtype=comp_in_feats.dtype
+        )
+
+    for i in range(len(kernel_map)):
+        if i == iden_idx:
+            continue
+
+        in_map, out_map = kernel_map[i]
+        if in_map.shape[0] == 0:
+            continue
+        in_map = in_map.to(device)
+        out_map = out_map.to(device)
+        _C.run_cutlass_gemm(
+            comp_in_feats,
+            comp_weight[i],
+            output_feature_tensor,
+            output_feature_tensor,
+            in_map,
+            out_map,
+            accumulator_type=accumulator_type,
+            split_k_slices=split_k_slices,
+        )
+    return output_feature_tensor.to(dtype=in_features.dtype)
+
+
+def _cutlass_implicit_gemm_backward_logic(
+    grad_output: Float[Tensor, "M C_out"],
+    in_features: Float[Tensor, "N C_in"],
+    weight: Float[Tensor, "K C_in C_out"],
+    kernel_map: IntSearchResult,
+    compute_dtype: Optional[torch.dtype] = None,
+    accumulator_type: torch.dtype = torch.float32,
+    split_k_slices: int = 1,
+    device: torch.device = None,
+) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+    if _C is None:
+        raise ImportError(
+            "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
+        )
+
+    if device is None:
+        device = in_features.device
+
+    dtype_to_use = compute_dtype if compute_dtype is not None else in_features.dtype
+    comp_in_feats = in_features.to(device=device, dtype=dtype_to_use)
+    comp_weight = weight.to(device=device, dtype=dtype_to_use)
+    comp_grad_output = grad_output.to(device=device, dtype=dtype_to_use)
+    grad_weight = torch.zeros_like(comp_weight, device=device)
+
+    iden_idx = kernel_map.identity_map_index
+    if iden_idx is not None:
+        grad_in_features = torch.matmul(comp_grad_output, comp_weight[iden_idx].T)
+        grad_weight[iden_idx] = torch.matmul(comp_in_feats.T, comp_grad_output)
+    else:
+        grad_in_features = torch.zeros_like(comp_in_feats, device=device)
+
+    for i in range(len(kernel_map)):
+        if i == iden_idx:
+            continue
+
+        in_map, out_map = kernel_map[i]
+        if in_map.shape[0] == 0:
+            continue
+
+        curr_weight = comp_weight[i]
+
+        # grad_in_features[in_map] += torch.matmul(curr_grad_output, curr_weight.T)
+        _C.run_cutlass_gemm(
+            comp_grad_output,
+            curr_weight.T,
+            grad_in_features,
+            grad_in_features,
+            in_map,
+            out_map,
+            accumulator_type=accumulator_type,
+            split_k_slices=split_k_slices,
+        )
+        _C.run_cutlass_gemm(
+            comp_in_feats,
+            comp_grad_output,
+            grad_weight[i],
+            grad_weight[i],
+            in_map,
+            out_map,
+        )
+    return (
+        grad_in_features.to(dtype=in_features.dtype),
+        grad_weight.to(dtype=weight.dtype),
+    )
+
+
 class SpatiallySparseConvExplicitGEMMFunction(Function):
     @staticmethod
     def forward(
@@ -645,6 +764,83 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
             num_out_coords,
             compute_dtype,
             bwd_block_size,
+            device,
+        )
+
+        if not ctx.needs_input_grad[0]:
+            grad_in_features = None
+        if not ctx.needs_input_grad[1]:
+            grad_weight = None
+
+        return grad_in_features, grad_weight, None, None, None, None, None
+
+
+class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
+    @staticmethod
+    def forward(
+        ctx,
+        in_features: Float[Tensor, "N C_in"],
+        weight: Float[Tensor, "K C_in C_out"],
+        kernel_map: IntSearchResult,
+        num_out_coords: int,
+        compute_dtype: Optional[torch.dtype] = None,
+        accumulator_type: torch.dtype = torch.float32,
+        split_k_slices: int = 1,
+    ) -> Float[Tensor, "M C_out"]:
+        output_feature_tensor = _cutlass_implicit_gemm_forward_logic(
+            in_features,
+            weight,
+            kernel_map,
+            num_out_coords,
+            compute_dtype,
+            accumulator_type,
+            split_k_slices,
+        )
+        ctx.save_for_backward(in_features, weight)
+        ctx.kernel_map = kernel_map
+        ctx.compute_dtype = compute_dtype
+        ctx.accumulator_type = accumulator_type
+        ctx.split_k_slices = split_k_slices
+        ctx.device = in_features.device
+        return output_feature_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output: Float[Tensor, "M C_out"]) -> Tuple[
+        Optional[Float[Tensor, "N C_in"]],
+        Optional[Float[Tensor, "K C_in C_out"]],
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]:
+        in_features, weight = ctx.saved_tensors
+        kernel_map = ctx.kernel_map
+        compute_dtype = ctx.compute_dtype
+        accumulator_type = ctx.accumulator_type
+        split_k_slices = ctx.split_k_slices
+        device = ctx.device
+
+        if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
+            return None, None, None, None, None, None, None
+
+        # Basic check for empty inputs, similar to how it was in Unified Function
+        N_in, C_in = in_features.shape
+        K, _, C_out = weight.shape
+        # Assuming num_out_coords was implicitly handled by grad_output.shape[0] in original explicit backward
+        if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
+            grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
+            grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
+            return grad_in_final, grad_weight_final, None, None, None
+
+        grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
+            grad_output,
+            in_features,
+            weight,
+            kernel_map,
+            compute_dtype,
+            accumulator_type,
+            split_k_slices,
             device,
         )
 

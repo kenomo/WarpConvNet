@@ -141,6 +141,13 @@ torch::Tensor run_cutlass_gemm(torch::Tensor tensor_a,
   TORCH_CHECK(tensor_b.dim() == 2, "tensor_b must be 2D");
   TORCH_CHECK(tensor_c.dim() == 2, "tensor_c must be 2D");
   TORCH_CHECK(tensor_d.dim() == 2, "tensor_d must be 2D");
+  // If the indices are 1 dimensional, convert them to 2D
+  if (indices_a.dim() == 1) {
+    indices_a = indices_a.unsqueeze(1);
+  }
+  if (indices_d.dim() == 1) {
+    indices_d = indices_d.unsqueeze(1);
+  }
   TORCH_CHECK(indices_a.dim() == 2, "indices_a must be 2D");
   TORCH_CHECK(indices_d.dim() == 2, "indices_d must be 2D");
 
@@ -149,7 +156,6 @@ torch::Tensor run_cutlass_gemm(torch::Tensor tensor_a,
   TORCH_CHECK(indices_d.scalar_type() == torch::kInt32, "indices_d must be int32");
 
   // Check the accumulator type
-
   TORCH_CHECK(accumulator_type == torch::kFloat16 || accumulator_type == torch::kFloat32,
               "accumulator_type must be float16 or float32");
 

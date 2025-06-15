@@ -20,6 +20,8 @@ from warpconvnet.nn.functional.sparse_conv import (
     _implicit_gemm_backward_logic,
     _explicit_gemm_forward_logic,
     _explicit_gemm_backward_logic,
+    _cutlass_implicit_gemm_forward_logic,
+    _cutlass_implicit_gemm_backward_logic,
     SpatiallySparseConvBatchedExplicitGEMMFunction,
     SpatiallySparseConvExplicitGEMMFunction,
     SpatiallySparseConvImplicitGEMMFunction,
@@ -221,6 +223,45 @@ def test_sparse_conv(setup_voxels):
     assert out_explicit.num_channels == C_out
     assert torch.allclose(out_implicit.feature_tensor, out_explicit.feature_tensor)
     # assert torch.allclose(out_implicit.feature_tensor, out_batched_explicit.feature_tensor)
+
+
+def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
+    """Test sparse convolution forward backward with cutlass."""
+    voxels = setup_voxels
+    C_in, C_out = voxels.num_channels, 13
+    kernel_size = (3, 3, 3)
+    stride = (1, 1, 1)
+
+    # Setup convolution parameters
+    num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    weights = torch.randn(num_kernels, C_in, C_out).to(voxels.device)
+    # Generate kernel map
+    batch_indexed_in_coords = batch_indexed_coordinates(voxels.coordinate_tensor, voxels.offsets)
+
+    kernel_map = generate_kernel_map(
+        batch_indexed_in_coords,
+        batch_indexed_in_coords,
+        stride,
+        kernel_size,
+        skip_symmetric_kernel_map=False,
+    )
+
+    # Explicit GEMM
+    out_explicit = _explicit_gemm_forward_logic(
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+        batch_indexed_in_coords.shape[0],
+    )
+    out_cutlass = _cutlass_implicit_gemm_forward_logic(
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+        batch_indexed_in_coords.shape[0],
+        accumulator_type=torch.float32,
+        split_k_slices=1,
+    )
+    assert torch.allclose(out_explicit, out_cutlass)
 
 
 def test_sparse_conv_forward_with_skip_symmetric(setup_small_voxels):
