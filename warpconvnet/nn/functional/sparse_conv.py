@@ -250,9 +250,12 @@ def _explicit_gemm_backward_logic(
     in_features: Float[Tensor, "N C_in"],
     weight: Float[Tensor, "K C_in C_out"],
     kernel_map: IntSearchResult,
-    compute_dtype: Optional[torch.dtype],
-    device: torch.device,
+    compute_dtype: Optional[torch.dtype] = None,
+    device: torch.device = None,
 ) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+    if device is None:
+        device = grad_output.device
+
     dtype_to_use = compute_dtype if compute_dtype is not None else in_features.dtype
     comp_in_feats = in_features.to(device=device, dtype=dtype_to_use)
     comp_weight = weight.to(device=device, dtype=dtype_to_use)

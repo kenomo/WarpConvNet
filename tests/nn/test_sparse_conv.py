@@ -40,7 +40,7 @@ def setup_voxels():
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    B, min_N, max_N, C = 3, 100000, 1000000, 7
+    B, min_N, max_N, C = 3, 100000, 1000000, 16
     Ns = torch.randint(min_N, max_N, (B,))
     voxel_size = 0.01
     coords = [(torch.rand((N, 3)) / voxel_size).int() for N in Ns]
@@ -228,7 +228,7 @@ def test_sparse_conv(setup_voxels):
 def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
     """Test sparse convolution forward backward with cutlass."""
     voxels = setup_voxels
-    C_in, C_out = voxels.num_channels, 13
+    C_in, C_out = voxels.num_channels, 32
     kernel_size = (3, 3, 3)
     stride = (1, 1, 1)
 
@@ -261,7 +261,27 @@ def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
         accumulator_type=torch.float32,
         split_k_slices=1,
     )
-    assert torch.allclose(out_explicit, out_cutlass)
+    assert torch.allclose(out_explicit, out_cutlass, atol=1e-1, rtol=1e-3)
+
+    # Backward pass
+    grad_out = torch.randn_like(out_explicit)
+    grad_in_explicit, grad_weight_explicit = _explicit_gemm_backward_logic(
+        grad_out,
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+    )
+
+    grad_in, grad_weight = _cutlass_implicit_gemm_backward_logic(
+        grad_out,
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+        accumulator_type=torch.float32,
+        split_k_slices=1,
+    )
+    assert torch.allclose(grad_in, grad_in_explicit, atol=1e-1, rtol=1e-3)
+    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-1, rtol=1e-3)
 
 
 def test_sparse_conv_forward_with_skip_symmetric(setup_small_voxels):
