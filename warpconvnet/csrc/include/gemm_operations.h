@@ -47,63 +47,66 @@ constexpr bool is_supported_combination() {
 }  // namespace gemm
 }  // namespace warpconvnet
 
-// Convenience macros for common usage patterns
-#define WARPCONVNET_GEMM_AD_GATHER_SCATTER(input_type, output_type, accum_type) \
-  warpconvnet::gemm::                                                           \
-      run_cutlass_gemm_ad_gather_scatter<input_type, input_type, output_type, accum_type>
-
-#define WARPCONVNET_GEMM_AB_GATHER(input_type, output_type, accum_type) \
-  warpconvnet::gemm::run_cutlass_gemm_ab_gather<input_type, input_type, output_type, accum_type>
-
-#define WARPCONVNET_GEMM_A_GATHER(input_type, output_type, accum_type) \
-  warpconvnet::gemm::run_cutlass_gemm_a_gather<input_type, input_type, output_type, accum_type>
-
 // Template instantiation macros for reducing code duplication
-#define INSTANTIATE_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator, Config)              \
-  namespace warpconvnet {                                                                     \
-  namespace gemm {                                                                            \
-  template int run_cutlass_gemm_with_operations_templated<InputA,                             \
-                                                          InputB,                             \
-                                                          Output,                             \
-                                                          Accumulator,                        \
-                                                          Config,                             \
-                                                          DefaultSmArch,                      \
-                                                          DefaultLayoutInputA,                \
-                                                          DefaultLayoutInputB,                \
-                                                          DefaultLayoutOutput>(const void *,  \
-                                                                               const void *,  \
-                                                                               const void *,  \
-                                                                               void *,        \
-                                                                               const int *,   \
-                                                                               const int *,   \
-                                                                               const int *,   \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               int,           \
-                                                                               float,         \
-                                                                               float,         \
-                                                                               cudaStream_t); \
-  }                                                                                           \
+#define INSTANTIATE_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator, Config)             \
+  namespace warpconvnet {                                                                    \
+  namespace gemm {                                                                           \
+  template int run_cutlass_gemm_with_operations_templated<InputA,                            \
+                                                          InputB,                            \
+                                                          Output,                            \
+                                                          Accumulator,                       \
+                                                          Config,                            \
+                                                          DefaultSmArch,                     \
+                                                          DefaultLayoutInputA,               \
+                                                          DefaultLayoutInputB,               \
+                                                          DefaultLayoutOutput>(const void *, \
+                                                                               const void *, \
+                                                                               const void *, \
+                                                                               void *,       \
+                                                                               const int *,  \
+                                                                               const int *,  \
+                                                                               const int *,  \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               float,        \
+                                                                               float);       \
+  }                                                                                          \
   }
 
-#define INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator)     \
-  template int run_cutlass_gemm_gather_scatter_templated<InputA, InputB, Output, Accumulator>( \
-      const void *,                                                                            \
-      const void *,                                                                            \
-      const void *,                                                                            \
-      void *,                                                                                  \
-      const int *,                                                                             \
-      const int *,                                                                             \
-      int,                                                                                     \
-      int,                                                                                     \
-      int,                                                                                     \
-      int,                                                                                     \
-      int,                                                                                     \
-      int,                                                                                     \
-      float,                                                                                   \
+#define INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator) \
+  template int run_cutlass_gemm_ad_gather_scatter<InputA, InputB, Output, Accumulator>(    \
+      const void *,                                                                        \
+      const void *,                                                                        \
+      const void *,                                                                        \
+      void *,                                                                              \
+      const int *,                                                                         \
+      const int *,                                                                         \
+      int,                                                                                 \
+      int,                                                                                 \
+      int,                                                                                 \
+      int,                                                                                 \
+      int,                                                                                 \
+      int,                                                                                 \
+      float,                                                                               \
       float);
+
+#define INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator)           \
+  template int run_cutlass_gemm_ab_gather<InputA, InputB, Output, Accumulator>(const void *, \
+                                                                               const void *, \
+                                                                               const void *, \
+                                                                               void *,       \
+                                                                               const int *,  \
+                                                                               const int *,  \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               int,          \
+                                                                               float,        \
+                                                                               float);

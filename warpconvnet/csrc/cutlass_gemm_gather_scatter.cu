@@ -34,8 +34,7 @@ int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
                                                int scatter_d_size,
                                                int scatter_CD_M_size,
                                                float alpha,
-                                               float beta,
-                                               cudaStream_t stream) {
+                                               float beta) {
   using Traits = GemmOperationTraits<ElementInputA,
                                      ElementAccumulator,
                                      Config,
@@ -172,25 +171,25 @@ int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
 // Use the namespace for convenience in the rest of the file
 using namespace warpconvnet::gemm;
 
-// Legacy wrapper function for backward compatibility - forwards to new implementation
+// A Gather + D scatter
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
           typename ElementAccumulator>
-int run_cutlass_gemm_gather_scatter_templated(const void *tensor_a,
-                                              const void *tensor_b,
-                                              const void *tensor_c,
-                                              void *tensor_d,
-                                              const int *indices_a,
-                                              const int *indices_d,
-                                              int split_k_slices,
-                                              int M,
-                                              int N,
-                                              int K,
-                                              int indices_size,
-                                              int out_size,
-                                              float alpha,
-                                              float beta) {
+int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
+                                       const void *tensor_b,
+                                       const void *tensor_c,
+                                       void *tensor_d,
+                                       const int *indices_a,
+                                       const int *indices_d,
+                                       int split_k_slices,
+                                       int M,
+                                       int N,
+                                       int K,
+                                       int indices_size,
+                                       int out_size,
+                                       float alpha,
+                                       float beta) {
   // Forward to new templated implementation with ConfigAD (A gather + D scatter)
   return run_cutlass_gemm_with_operations_templated<ElementInputA,
                                                     ElementInputB,
@@ -202,8 +201,8 @@ int run_cutlass_gemm_gather_scatter_templated(const void *tensor_a,
       tensor_c,
       tensor_d,
       indices_a,
-      nullptr,
-      indices_d,  // nullptr for indices_b (no B gather in AD config)
+      nullptr,    // indices_b (no B gather in AD config)
+      indices_d,  // indices_d for D scatter
       split_k_slices,
       M,
       N,
@@ -213,11 +212,10 @@ int run_cutlass_gemm_gather_scatter_templated(const void *tensor_a,
       indices_size,
       out_size,  // scatter_CD_M_size
       alpha,
-      beta,
-      0);  // stream = 0
+      beta);
 }
 
-// Half precision instantiations
+// A Gather + D scatter instantiations
 INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, float)
 INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t,
                                               cutlass::half_t,
@@ -242,4 +240,65 @@ INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::bfloat16_t,
                                               cutlass::bfloat16_t,
                                               float,
                                               float)
+#endif  // DISABLE_BFLOAT16
+
+// AB Gather
+template <typename ElementInputA,
+          typename ElementInputB,
+          typename ElementOutput,
+          typename ElementAccumulator>
+int run_cutlass_gemm_ab_gather(const void *tensor_a,
+                               const void *tensor_b,
+                               const void *tensor_c,
+                               void *tensor_d,
+                               const int *indices_a,
+                               const int *indices_b,
+                               int split_k_slices,
+                               int M,
+                               int N,
+                               int K,
+                               int indices_size,
+                               float alpha,
+                               float beta) {
+  // Forward to new templated implementation with ConfigAB (A gather + B gather)
+  return run_cutlass_gemm_with_operations_templated<ElementInputA,
+                                                    ElementInputB,
+                                                    ElementOutput,
+                                                    ElementAccumulator,
+                                                    ConfigAB>(
+      tensor_a,
+      tensor_b,
+      tensor_c,
+      tensor_d,
+      indices_a,
+      indices_b,
+      nullptr,  // indices_d (no D scatter in AB config)
+      split_k_slices,
+      M,
+      N,
+      K,
+      indices_size,  // gather_a_size
+      0,             // gather_b_size
+      0,             // scatter_d_size
+      0,             // scatter_CD_M_size
+      alpha,
+      beta);
+}
+
+// Instantiate AB Gather
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, float)
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, cutlass::half_t, float)
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, cutlass::half_t)
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t,
+                                      cutlass::half_t,
+                                      cutlass::half_t,
+                                      cutlass::half_t)
+
+#ifndef DISABLE_BFLOAT16
+// Bfloat16 precision instantiations (FP32 accumulator)
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t, cutlass::bfloat16_t, float, float)
+INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t,
+                                      cutlass::bfloat16_t,
+                                      cutlass::bfloat16_t,
+                                      float)
 #endif  // DISABLE_BFLOAT16

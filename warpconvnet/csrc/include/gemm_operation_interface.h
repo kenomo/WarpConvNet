@@ -36,8 +36,7 @@ int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
                                                int scatter_d_size,
                                                int scatter_CD_M_size,
                                                float alpha = 1.0f,
-                                               float beta = 0.0f,
-                                               cudaStream_t stream = 0);
+                                               float beta = 0.0f);
 
 // Convenience wrapper functions for specific operation configurations
 
@@ -64,8 +63,7 @@ inline int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                               int scatter_d_size,
                                               int scatter_CD_M_size,
                                               float alpha = 1.0f,
-                                              float beta = 0.0f,
-                                              cudaStream_t stream = 0) {
+                                              float beta = 0.0f) {
   return run_cutlass_gemm_with_operations_templated<ElementInputA,
                                                     ElementInputB,
                                                     ElementOutput,
@@ -90,8 +88,7 @@ inline int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                                              scatter_d_size,
                                                              scatter_CD_M_size,
                                                              alpha,
-                                                             beta,
-                                                             stream);
+                                                             beta);
 }
 
 // AB Gather (new functionality)
@@ -116,8 +113,7 @@ inline int run_cutlass_gemm_ab_gather(const void *tensor_a,
                                       int gather_a_size,
                                       int gather_b_size,
                                       float alpha = 1.0f,
-                                      float beta = 0.0f,
-                                      cudaStream_t stream = 0) {
+                                      float beta = 0.0f) {
   return run_cutlass_gemm_with_operations_templated<ElementInputA,
                                                     ElementInputB,
                                                     ElementOutput,
@@ -142,8 +138,7 @@ inline int run_cutlass_gemm_ab_gather(const void *tensor_a,
                                                              0,  // scatter_d_size
                                                              0,  // scatter_CD_M_size
                                                              alpha,
-                                                             beta,
-                                                             stream);
+                                                             beta);
 }
 
 // A Gather only
@@ -166,8 +161,7 @@ inline int run_cutlass_gemm_a_gather(const void *tensor_a,
                                      int K,
                                      int gather_a_size,
                                      float alpha = 1.0f,
-                                     float beta = 0.0f,
-                                     cudaStream_t stream = 0) {
+                                     float beta = 0.0f) {
   return run_cutlass_gemm_with_operations_templated<ElementInputA,
                                                     ElementInputB,
                                                     ElementOutput,
@@ -192,8 +186,7 @@ inline int run_cutlass_gemm_a_gather(const void *tensor_a,
                                                              0,  // scatter_d_size
                                                              0,  // scatter_CD_M_size
                                                              alpha,
-                                                             beta,
-                                                             stream);
+                                                             beta);
 }
 
 // Forward declaration for specialized SM80 kernel for FP32 input with gather/scatter
