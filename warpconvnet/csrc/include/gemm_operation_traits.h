@@ -12,12 +12,7 @@ namespace warpconvnet {
 namespace gemm {
 
 // Base template traits for different precision combinations
-template <typename ElementInput,
-          typename ElementAccumulator,
-          typename ArchTag = DefaultSmArch,
-          typename LayoutA = DefaultLayoutInputA,
-          typename LayoutB = DefaultLayoutInputB,
-          typename LayoutC = DefaultLayoutOutput>
+template <typename ElementInput, typename ElementAccumulator, typename ArchTag = DefaultSmArch>
 struct GemmPrecisionTraits {
   // Default to SIMT for unsupported combinations
   using MMAOp = cutlass::arch::OpClassSimt;
@@ -29,34 +24,29 @@ struct GemmPrecisionTraits {
   static constexpr bool SupportsTensorOp = false;
   static constexpr bool UseMixedInput = false;
 
-  // Template parameters as type aliases
+  // Architecture tag
   using ArchitectureTag = ArchTag;
-  using LayoutInputA = LayoutA;
-  using LayoutInputB = LayoutB;
-  using LayoutOutput = LayoutC;
 };
 
 // Enhanced traits that combine precision and operation configuration
 template <typename ElementInput,
           typename ElementAccumulator,
           typename Config,
-          typename ArchTag = DefaultSmArch,
-          typename LayoutA = DefaultLayoutInputA,
-          typename LayoutB = DefaultLayoutInputB,
-          typename LayoutC = DefaultLayoutOutput>
-struct GemmOperationTraits : public GemmPrecisionTraits<ElementInput,
-                                                        ElementAccumulator,
-                                                        ArchTag,
-                                                        LayoutA,
-                                                        LayoutB,
-                                                        LayoutC> {
-  using Base =
-      GemmPrecisionTraits<ElementInput, ElementAccumulator, ArchTag, LayoutA, LayoutB, LayoutC>;
+          typename ArchTag = DefaultSmArch>
+struct GemmOperationTraits : public GemmPrecisionTraits<ElementInput, ElementAccumulator, ArchTag> {
+  using Base = GemmPrecisionTraits<ElementInput, ElementAccumulator, ArchTag>;
+
+  // Use layouts from Config (which handles transpose logic)
+  using LayoutInputA = typename Config::LayoutInputA;
+  using LayoutInputB = typename Config::LayoutInputB;
+  using LayoutOutput = typename Config::LayoutOutput;
 
   // Operation configuration
   static constexpr bool SupportsGatherA = Config::gather_a && Base::SupportsTensorOp;
   static constexpr bool SupportsGatherB = Config::gather_b && Base::SupportsTensorOp;
   static constexpr bool SupportsScatterD = Config::scatter_d && Base::SupportsTensorOp;
+  static constexpr bool SupportsTransposeA = Config::transpose_a;
+  static constexpr bool SupportsTransposeB = Config::transpose_b;
 
   // Validation helpers
   static constexpr bool IsValidConfiguration() {
@@ -67,8 +57,12 @@ struct GemmOperationTraits : public GemmPrecisionTraits<ElementInput,
   static constexpr const char* GetConfigName() {
     if constexpr (Config::gather_a && Config::scatter_d && !Config::gather_b) {
       return "AD_GatherScatter";
-    } else if constexpr (Config::gather_a && Config::gather_b && !Config::scatter_d) {
+    } else if constexpr (Config::gather_a && Config::gather_b && !Config::scatter_d &&
+                         !Config::transpose_a) {
       return "AB_Gather";
+    } else if constexpr (Config::gather_a && Config::gather_b && !Config::scatter_d &&
+                         Config::transpose_a) {
+      return "TrAB_Gather";
     } else if constexpr (Config::gather_a && !Config::gather_b && !Config::scatter_d) {
       return "A_Gather";
     } else if constexpr (!Config::gather_a && Config::gather_b && !Config::scatter_d) {
