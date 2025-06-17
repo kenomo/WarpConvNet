@@ -530,7 +530,7 @@ def _cutlass_implicit_gemm_forward_logic(
     num_out_coords: int,
     accumulator_type: torch.dtype = torch.float32,
     split_k_slices: int = 1,
-) -> Float[Tensor, "M C_out"]:
+) -> Union[Float[Tensor, "M C_out"], int]:
     if _C is None:
         raise ImportError(
             "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
@@ -554,7 +554,7 @@ def _cutlass_implicit_gemm_forward_logic(
             continue
         in_map = in_map.to(device)
         out_map = out_map.to(device)
-        _C.cutlass_gemm_ad_gather_scatter(
+        status = _C.gemm.cutlass_gemm_ad_gather_scatter(
             in_features,
             weight[i],
             output_feature_tensor,
@@ -564,6 +564,8 @@ def _cutlass_implicit_gemm_forward_logic(
             accumulator_type=accumulator_type,
             split_k_slices=split_k_slices,
         )
+        if status != 0:
+            return status
     return output_feature_tensor.to(dtype=in_features.dtype)
 
 
@@ -575,7 +577,7 @@ def _cutlass_implicit_gemm_backward_logic(
     accumulator_type: torch.dtype = torch.float32,
     split_k_slices: int = 1,
     device: torch.device = None,
-) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+) -> Union[Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]], Tuple[int, int]]:
     if _C is None:
         raise ImportError(
             "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
@@ -604,7 +606,7 @@ def _cutlass_implicit_gemm_backward_logic(
         curr_weight = weight[i]
 
         # grad_in_features[in_map] += torch.matmul(grad_output[out_map], curr_weight.T)
-        _C.cutlass_gemm_ad_gather_scatter(
+        status = _C.gemm.cutlass_gemm_ad_gather_scatter(
             grad_output,
             curr_weight.T.contiguous(),
             grad_in_features,
@@ -614,8 +616,11 @@ def _cutlass_implicit_gemm_backward_logic(
             accumulator_type=accumulator_type,
             split_k_slices=split_k_slices,
         )
+        if status != 0:
+            return status, i
+
         # grad_weight[i] += torch.matmul(curr_in_feats.T, curr_grad_output)
-        _C.cutlass_gemm_trAB_gather(
+        status = _C.gemm.cutlass_gemm_trAB_gather(
             in_features,
             grad_output,
             grad_weight[i],
@@ -625,6 +630,8 @@ def _cutlass_implicit_gemm_backward_logic(
             alpha=1.0,
             beta=0,
         )
+        if status != 0:
+            return status, i
     return (
         grad_in_features.to(dtype=in_features.dtype),
         grad_weight.to(dtype=weight.dtype),
@@ -805,7 +812,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         num_out_coords: int,
         accumulator_type: torch.dtype = torch.float32,
         split_k_slices: int = 1,
-    ) -> Float[Tensor, "M C_out"]:
+    ) -> Union[Float[Tensor, "M C_out"], int]:
         output_feature_tensor = _cutlass_implicit_gemm_forward_logic(
             in_features,
             weight,
@@ -814,6 +821,11 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
             accumulator_type,
             split_k_slices,
         )
+        if isinstance(output_feature_tensor, int):
+            raise RuntimeError(
+                f"Error in _cutlass_implicit_gemm_forward_logic: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(output_feature_tensor))}"
+            )
+
         ctx.save_for_backward(in_features, weight)
         ctx.kernel_map = kernel_map
         ctx.accumulator_type = accumulator_type
@@ -859,7 +871,10 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
             split_k_slices,
             device,
         )
-
+        if isinstance(grad_in_features, int):
+            raise RuntimeError(
+                f"Error in _cutlass_implicit_gemm_backward_logic: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(grad_in_features))}"
+            )
         if not ctx.needs_input_grad[0]:
             grad_in_features = None
         if not ctx.needs_input_grad[1]:
@@ -1079,6 +1094,28 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         return _backward_return(grad_in_features, grad_weight, 6)
 
 
+class CUDATimer:
+    """__enter__ and __exit__ to time a block of code.
+    Returns the elapsed time in milliseconds.
+    """
+
+    def __init__(self):
+        self.start_event = None
+        self.end_event = None
+        self.elapsed_time = None
+
+    def __enter__(self):
+        self.start_event = torch.cuda.Event(enable_timing=True)
+        self.end_event = torch.cuda.Event(enable_timing=True)
+        self.start_event.record()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.end_event.record()
+        torch.cuda.synchronize()
+        self.elapsed_time = self.start_event.elapsed_time(self.end_event)
+        return self.elapsed_time
+
+
 def _run_forward_benchmarks(
     in_features: Float[Tensor, "N C_in"],
     weight: Float[Tensor, "K C_in C_out"],
@@ -1092,6 +1129,9 @@ def _run_forward_benchmarks(
     Benchmark different forward algorithms and return the best one with its parameters and runtime.
     The best is determined by the minimum execution time over benchmark_iters.
     """
+    warmup_iters = max(warmup_iters, 1)
+    benchmark_iters = max(benchmark_iters, 1)
+
     logger.warn(
         "Using benchmarked forward algo. Until the algorithm finds the best parameters, forward performance will be slow."
     )
@@ -1099,15 +1139,7 @@ def _run_forward_benchmarks(
 
     def _execute_single_fwd_pass(
         algo_mode: SPARSE_CONV_FWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
-    ) -> Optional[float]:
-        elapsed_time_ms = None
-        start_event, end_event = None, None
-
-        if is_timed_run:
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
-
+    ) -> Optional[int]:
         if algo_mode == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
             _ = _explicit_gemm_forward_logic(
                 in_features,
@@ -1126,7 +1158,7 @@ def _run_forward_benchmarks(
                 **params_config,
             )
         elif algo_mode == SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
-            _ = _cutlass_implicit_gemm_forward_logic(
+            status = _cutlass_implicit_gemm_forward_logic(
                 in_features,
                 weight,
                 kernel_map,
@@ -1134,27 +1166,26 @@ def _run_forward_benchmarks(
                 accumulator_type=params_config.get("accumulator_type", torch.float32),
                 split_k_slices=params_config.get("split_k_slices", 1),
             )
+            if isinstance(status, int) and status != 0:
+                return status
         else:
             # Should not happen with current _BENCHMARK_FORWARD_PARAMS
             raise ValueError(f"Unsupported algo_mode in _execute_single_fwd_pass: {algo_mode}")
 
-        torch.cuda.synchronize()
-        if is_timed_run and start_event and end_event:
-            end_event.record()
-            torch.cuda.synchronize()  # Ensure event is captured
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-
-        return elapsed_time_ms
-
     for algo_mode, params_config in _BENCHMARK_FORWARD_PARAMS:
         # Warmup runs
-        try:
-            for _ in range(warmup_iters):
-                _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=False)
-        except Exception as e:
-            logger.warning(f"Error in _run_forward_benchmarks: {e}")
-            # Save the inf time for this algo_mode
-            all_benchmark_results.append((algo_mode, params_config, float("inf")))
+        status = None
+        for _ in range(warmup_iters):
+            status = _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=False)
+            if isinstance(status, int) and status != 0:
+                logger.warning(
+                    f"Error in _run_forward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
+                )
+                # Save the inf time for this algo_mode
+                all_benchmark_results.append((algo_mode, params_config, float("inf")))
+                continue
+
+        if status is not None and status != 0:
             continue
 
         # Benchmark runs
@@ -1166,10 +1197,11 @@ def _run_forward_benchmarks(
             if warmup_iters == 0:
                 continue  # No runs at all for this config, skip
         else:
+            timer = CUDATimer()
             for _ in range(benchmark_iters):
-                time_ms = _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=True)
-                if time_ms is not None:
-                    current_algo_min_time_ms = min(current_algo_min_time_ms, time_ms)
+                with timer:
+                    _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=True)
+                current_algo_min_time_ms = min(current_algo_min_time_ms, timer.elapsed_time)
 
             # If no timed runs were successful (e.g. CUDA not available and no CPU fallback for timing),
             # current_algo_min_time_ms will remain float('inf').
@@ -1214,18 +1246,15 @@ def _run_backward_benchmarks(
     Benchmark different backward algorithms and return the best one with its parameters and runtime.
     The best is determined by the minimum execution time over benchmark_iters.
     """
+    warmup_iters = max(warmup_iters, 1)
+    benchmark_iters = max(benchmark_iters, 1)
+
     all_benchmark_results: List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]] = []
 
     def _execute_single_bwd_pass(
         algo_mode: SPARSE_CONV_BWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
-    ) -> Optional[float]:
-        elapsed_time_ms = None
-        start_event, end_event = None, None
-
-        if is_timed_run:
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+    ) -> Optional[int]:
+        status = None
 
         if algo_mode == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM:
             _, _ = _explicit_gemm_backward_logic(
@@ -1247,25 +1276,34 @@ def _run_backward_benchmarks(
                 device=device,
                 **params_config,
             )
+        elif algo_mode == SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
+            status = _cutlass_implicit_gemm_backward_logic(
+                grad_output,
+                in_features,
+                weight,
+                kernel_map,
+                accumulator_type=params_config.get("accumulator_type", torch.float32),
+                split_k_slices=params_config.get("split_k_slices", 1),
+                device=device,
+            )
+            if isinstance(status, int) and status != 0:
+                return status
         else:
             raise ValueError(f"Unsupported algo_mode in _execute_single_bwd_pass: {algo_mode}")
 
-        torch.cuda.synchronize()
-        if is_timed_run and start_event and end_event:
-            end_event.record()
-            torch.cuda.synchronize()
-            elapsed_time_ms = start_event.elapsed_time(end_event)
-        return elapsed_time_ms
-
     for algo_mode, params_config in _BENCHMARK_BACKWARD_PARAMS:
-        # Warmup runs
-        try:
-            for _ in range(warmup_iters):
-                _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=False)
-        except Exception as e:
-            logger.warning(f"Error in _run_backward_benchmarks: {e}")
-            # Save the inf time for this algo_mode
-            all_benchmark_results.append((algo_mode, params_config, float("inf")))
+        status = None
+        for _ in range(warmup_iters):
+            status = _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=False)
+            if isinstance(status, int) and status != 0:
+                logger.warning(
+                    f"Error in _run_backward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
+                )
+                # Save the inf time for this algo_mode
+                all_benchmark_results.append((algo_mode, params_config, float("inf")))
+                continue
+
+        if status is not None and status != 0:
             continue
 
         # Benchmark runs
@@ -1275,10 +1313,11 @@ def _run_backward_benchmarks(
             if warmup_iters == 0:
                 continue
         else:
+            timer = CUDATimer()
             for _ in range(benchmark_iters):
-                time_ms = _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=True)
-                if time_ms is not None:
-                    current_algo_min_time_ms = min(current_algo_min_time_ms, time_ms)
+                with timer:
+                    _execute_single_bwd_pass(algo_mode, params_config)
+                current_algo_min_time_ms = min(current_algo_min_time_ms, timer.elapsed_time)
 
         logger.debug(
             f"Backward benchmark result: {algo_mode.value} {params_config} {current_algo_min_time_ms:.2f}ms"
@@ -1385,6 +1424,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 split_k_slices=chosen_fwd_params.get("split_k_slices", 1),
                 accumulator_type=chosen_fwd_params.get("accumulator_type", torch.float32),
             )
+            if isinstance(output_feature_tensor, int) and output_feature_tensor != 0:
+                raise RuntimeError(
+                    f"Error in _cutlass_implicit_gemm_forward_logic: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(output_feature_tensor))}"
+                )
         # elif chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED: # TODO
         # if explicit_matmul_batch_size is None:
         #     raise ValueError("explicit_matmul_batch_size is required for batched explicit GEMM forward.")
@@ -1537,6 +1580,11 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 accumulator_type=chosen_bwd_params.get("accumulator_type", torch.float32),
                 device=device,
             )
+            if isinstance(grad_in_features, int) and grad_in_features != 0:
+                raise RuntimeError(
+                    f"Error in _cutlass_implicit_gemm_backward_logic: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(grad_in_features))}"
+                )
+
         # elif chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED: # TODO
         # if explicit_matmul_batch_size is None:
         #     raise ValueError("explicit_matmul_batch_size is required for batched explicit GEMM backward.")

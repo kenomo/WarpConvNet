@@ -34,6 +34,7 @@
                                                                          int,          \
                                                                          int,          \
                                                                          int,          \
+                                                                         int,          \
                                                                          float,        \
                                                                          float);       \
   }                                                                                    \
@@ -55,21 +56,6 @@
       int,                                                                                 \
       float,                                                                               \
       float);
-
-#define INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator)           \
-  template int run_cutlass_gemm_ab_gather<InputA, InputB, Output, Accumulator>(const void *, \
-                                                                               const void *, \
-                                                                               const void *, \
-                                                                               void *,       \
-                                                                               const int *,  \
-                                                                               const int *,  \
-                                                                               int,          \
-                                                                               int,          \
-                                                                               int,          \
-                                                                               int,          \
-                                                                               int,          \
-                                                                               float,        \
-                                                                               float);
 
 #define INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator)           \
   template int run_cutlass_gemm_trAB_gather<InputA, InputB, Output, Accumulator>(const void *, \

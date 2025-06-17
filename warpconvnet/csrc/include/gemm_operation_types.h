@@ -56,7 +56,6 @@ struct GemmOperationConfig {
 
 // Predefined configurations
 using ConfigAD = GemmOperationConfig<true, false, true>;  // A gather + D scatter (current)
-using ConfigAB = GemmOperationConfig<true, true, false>;  // A gather + B gather (current)
 using ConfigTrAB =
     GemmOperationConfig<true, true, false, true, false>;      // A gather + B gather + A transpose
 using ConfigA = GemmOperationConfig<true, false, false>;      // A gather only

@@ -17,22 +17,24 @@ template <typename ElementInputA,
           typename ElementAccumulator,
           typename Config,
           typename ArchTag = DefaultSmArch>
-int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
-                                               const void *tensor_b,
-                                               const void *tensor_c,
-                                               void *tensor_d,
-                                               const int *indices_a,
-                                               const int *indices_b,
-                                               const int *indices_d,
-                                               int split_k_slices,
-                                               int M_A,  // Original A matrix rows
-                                               int K,    // A matrix columns
-                                               int M_B,  // Original B matrix rows
-                                               int N,    // B matrix columns
-                                               int gather_a_size,
-                                               int scatter_d_size,
-                                               float alpha = 1.0f,
-                                               float beta = 0.0f);
+int run_cutlass_gemm_with_operations_templated(
+    const void *tensor_a,
+    const void *tensor_b,
+    const void *tensor_c,
+    void *tensor_d,
+    const int *indices_a,
+    const int *indices_b,
+    const int *indices_d,
+    int split_k_slices,
+    int M_A,             // Original A matrix rows
+    int K,               // A matrix columns
+    int K_B,             // Original B matrix rows, different from K when indices_b is not nullptr
+    int N,               // B matrix columns
+    int M_C,             // C matrix rows, different from M_A when indices_d is not nullptr
+    int gather_a_size,   // indices_a size, equal to indices_b when indices_b is not nullptr
+    int scatter_d_size,  // indices_d size
+    float alpha = 1.0f,
+    float beta = 0.0f);
 
 // Convenience wrapper functions for specific operation configurations
 

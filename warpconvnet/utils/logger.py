@@ -47,14 +47,23 @@ class RankedLogger(logging.LoggerAdapter):
         if self.isEnabledFor(level):
             msg, kwargs = self.process(msg, kwargs)
             current_rank = self.rank
+            # Determine how many additional stack frames to skip so that the
+            # reported filename and line number correspond to the original
+            # caller (the user code) rather than this wrapper.
+            # Default ``stacklevel`` is 1, which would point to the call in
+            # ``logging.Logger``. Since the call stack is:
+            #   user code -> RankedLogger.<level>() -> RankedLogger.log() -> logging.Logger.log()
+            # we need to skip two extra frames to reach the user code.
+            stacklevel = kwargs.pop("stacklevel", 1) + 2
+
             if self.rank_zero_only:
                 if current_rank == 0:
-                    self.logger.log(level, msg, *args, **kwargs)
+                    self.logger.log(level, msg, *args, stacklevel=stacklevel, **kwargs)
             else:
                 if rank is None:
-                    self.logger.log(level, msg, *args, **kwargs)
+                    self.logger.log(level, msg, *args, stacklevel=stacklevel, **kwargs)
                 elif current_rank == rank:
-                    self.logger.log(level, msg, *args, **kwargs)
+                    self.logger.log(level, msg, *args, stacklevel=stacklevel, **kwargs)
 
 
 def get_logger(name: str = None, rank_zero_only: bool = True) -> RankedLogger:

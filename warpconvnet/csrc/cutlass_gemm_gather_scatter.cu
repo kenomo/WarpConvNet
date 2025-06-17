@@ -3,40 +3,86 @@
 
 #include <cutlass/util/device_memory.h>
 
+#include "include/gemm_error_codes.h"
 #include "include/gemm_operations.h"
 
 // Main templated function implementation - define in the warpconvnet::gemm namespace
 namespace warpconvnet {
 namespace gemm {
 
+/*
+ * @brief Run a GEMM operation with gather/scatter support.
+ *
+ * @param tensor_a: Pointer to the A matrix.
+ * @param tensor_b: Pointer to the B matrix.
+ * @param tensor_c: Pointer to the C matrix.
+ * @param tensor_d: Pointer to the D matrix.
+ *
+ * @param indices_a: Indices for the A matrix.
+ * @param indices_b: Indices for the B matrix.
+ * @param indices_d: Indices for the D matrix.
+ *
+ * @param split_k_slices: Number of slices to split the K dimension into.
+ * @param M_A: Original A matrix rows.
+ * @param K: A matrix columns.
+ * @param K_B: Original B matrix rows.
+ * @param N: B matrix columns.
+ * @param M_C: C matrix rows, equal to D matrix rows. (Regardless of whether C is transposed, M_C is
+ * the number of rows of the original C matrix before transposition.)
+ * @param gather_a_size: indices_a size, equal to indices_b when indices_b is not nullptr.
+ *
+ * @param alpha: Alpha value for the GEMM operation.
+ * @param beta: Beta value for the GEMM operation.
+ *
+ * @return Status code indicating the success or failure of the operation.
+ *
+ * trAB gather:
+ * D = \alpha * A[indices_a, :].T @ B[indices_b, :] + \beta * C
+ *
+ * AD gather scatter:
+ * D[indices_d, :] = \alpha * A @ B[indices_b, :] + \beta * C[indices_d, :]
+ *
+ * Assume that the all inputs are row-major unless otherwise specified.
+ * All transposition applied during GEMM to L1 load. So M_A is the number of rows of the original A
+ * matrix before transposition. Same for M_C.
+ *
+ * A: M_A x K
+ * B: K_B x N
+ * C: M_C x N
+ * D: M_C x N
+ *
+ *
+ */
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
           typename ElementAccumulator,
           typename Config,
           typename ArchTag>
-int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
-                                               const void *tensor_b,
-                                               const void *tensor_c,
-                                               void *tensor_d,
-                                               const int *indices_a,
-                                               const int *indices_b,
-                                               const int *indices_d,
-                                               int split_k_slices,
-                                               int M_A,  // Original A matrix rows
-                                               int K,    // A matrix columns
-                                               int M_B,  // Original B matrix rows
-                                               int N,    // B matrix columns
-                                               int gather_a_size,
-                                               int scatter_d_size,
-                                               float alpha,
-                                               float beta) {
+int run_cutlass_gemm_with_operations_templated(
+    const void *tensor_a,
+    const void *tensor_b,
+    const void *tensor_c,
+    void *tensor_d,
+    const int *indices_a,
+    const int *indices_b,
+    const int *indices_d,
+    int split_k_slices,
+    /* Row, col of A,B,C */ int M_A,  // Original A matrix rows
+    int K,    // A matrix columns or B matrix rows when indices_b is not nullptr
+    int K_B,  // Original B matrix rows when indices_b is not nullptr
+    int N,    // B matrix columns or C matrix columns
+    int M_C,  // C matrix rows when indices_d is not nullptr
+    /* gather scatter size */ int gather_a_size,  // indices_a size, equal to indices_b when
+                                                  // indices_b is not nullptr
+    int scatter_d_size,                           // indices_d size
+    float alpha,
+    float beta) {
   using Traits = GemmOperationTraits<ElementInputA, ElementAccumulator, Config, ArchTag>;
   using ElementComputeEpilogue = ElementAccumulator;
 
   if constexpr (Traits::UseMixedInput) {
-    printf("Error: Mixed input not supported for this precision configuration\n");
-    return -6;
+    return static_cast<int>(GemmStatus::kErrorMixedInputUnsupported);
   }
 
   // Determine output vector length based on element type
@@ -93,51 +139,54 @@ int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
     ElementComputeEpilogue alpha_cutlass = ElementComputeEpilogue(alpha);
     ElementComputeEpilogue beta_cutlass = ElementComputeEpilogue(beta);
 
-    // A: M x K (or K x M if transposed)
-    // B: K x N
-    // C: M or Scatter_M x N  (When using scatter, size of rows (Scatter_M) > M)
-    // D: M or Scatter_M x N  (When using scatter, size of rows (Scatter_M) > M)
-
     // Derive problem dimensions from original matrix dimensions
-    int problem_m, problem_n, problem_k;
+    int problem_m, problem_n, problem_k, N_B;
 
-    if constexpr (Config::transpose_a) {
+    // Currently only support trAB gather and AD gather scatter.
+    if constexpr (Config::transpose_a && Config::gather_a && Config::gather_b) {
       // For A transpose: A[indices_a, :].T @ B[indices_b, :]
       // A[indices_a, :] is gather_a_size × K, transposed to K × gather_a_size
       // B[indices_b, :] is gather_a_size × N
       // Result: K × N
-      problem_m = K;              // rows in result (from transposed A)
-      problem_n = N;              // columns in result (from B)
+      assert(indices_a != nullptr);
+      assert(indices_b != nullptr);
+      assert(indices_d == nullptr);
+      problem_m = K;  // rows in result (from transposed A)
+      // TODO(cchoy): Should it be N instead of gather_a_size for problem_n
+      problem_n = gather_a_size;  // columns in result (from B)
       problem_k = gather_a_size;  // inner dimension
-    } else if constexpr (Config::gather_a && Config::gather_b) {
-      // Standard AB gather: A[indices_a, :] @ B[indices_b, :]
-      // Result: gather_a_size × N
-      problem_m = gather_a_size;
-      problem_n = N;
-      problem_k = K;
+      N_B = gather_a_size;
     } else if constexpr (Config::gather_a && Config::scatter_d) {
-      // AD gather scatter: A[indices_a, :] @ B
-      // Result scattered to D[indices_d, :]
+      assert(gather_a_size == scatter_d_size);
+      assert(indices_a != nullptr);
+      assert(indices_b == nullptr);
+      assert(indices_d != nullptr);
+      // AD gather scatter: D[indices_D, :] = A[indices_A, :] @ B + C[indices_D, :]
       problem_m = gather_a_size;
       problem_n = N;
       problem_k = K;
+      N_B = N;
     } else {
-      // Standard GEMM dimensions
+      // Standard GEMM without neither gather nor scatter
+      assert(indices_a == nullptr);
+      assert(indices_b == nullptr);
+      assert(indices_d == nullptr);
+      assert(K == K_B);
+      assert(M_A == M_C);
       problem_m = M_A;
       problem_n = N;
       problem_k = K;
+      N_B = N;
     }
 
     cutlass::gemm::GemmCoord problem_size(problem_m, problem_n, problem_k);
 
-    // Determine output size based on configuration
-    int output_rows = Config::scatter_d ? scatter_d_size : problem_m;
-
-    // Calculate batch strides using original matrix dimensions
+    // Calculate batch strides using original matrix dimensions.
+    // Do not use the gather/scatter size.
     int64_t batch_stride_A = static_cast<int64_t>(M_A) * K * sizeof(ElementInputA);
-    int64_t batch_stride_B = static_cast<int64_t>(M_B) * N * sizeof(ElementInputB);
-    int64_t batch_stride_C = static_cast<int64_t>(output_rows) * N * sizeof(ElementOutput);
-    int64_t batch_stride_D = static_cast<int64_t>(output_rows) * N * sizeof(ElementOutput);
+    int64_t batch_stride_B = static_cast<int64_t>(K_B) * N * sizeof(ElementInputB);
+    int64_t batch_stride_C = static_cast<int64_t>(M_C) * N * sizeof(ElementOutput);
+    int64_t batch_stride_D = static_cast<int64_t>(M_C) * N * sizeof(ElementOutput);
 
     typename Gemm::Arguments arguments{cutlass::gemm::GemmUniversalMode::kGemm,
                                        problem_size,
@@ -166,29 +215,24 @@ int run_cutlass_gemm_with_operations_templated(const void *tensor_a,
 
     cutlass::Status status = gemm_op.can_implement(arguments);
     if (status != cutlass::Status::kSuccess) {
-      printf("Error: Problem size is not supported for %s\n", Traits::GetConfigName());
-      return -1;
+      return static_cast<int>(GemmStatus::kErrorProblemNotSupported);
     }
 
     status = gemm_op.initialize(arguments, workspace.get());
     if (status != cutlass::Status::kSuccess) {
-      printf("Error: CUTLASS kernel initialization failed for %s\n", Traits::GetConfigName());
-      return -2;
+      return static_cast<int>(GemmStatus::kErrorKernelInitialization);
     }
 
     status = gemm_op();
     if (status != cutlass::Status::kSuccess) {
-      printf("Error: CUTLASS kernel execution failed for %s\n", Traits::GetConfigName());
-      return -3;
+      return static_cast<int>(GemmStatus::kErrorKernelExecution);
     }
   } else {
     // Configuration not supported
-    printf("Error: %s operations not supported for this precision configuration\n",
-           Traits::GetConfigName());
-    return -4;
+    return static_cast<int>(GemmStatus::kErrorUnsupportedConfig);
   }
 
-  return 0;
+  return static_cast<int>(GemmStatus::kSuccess);
 }
 
 }  // namespace gemm
@@ -209,11 +253,11 @@ int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                        const int *indices_a,
                                        const int *indices_d,
                                        int split_k_slices,
-                                       int M,
-                                       int N,
-                                       int K,
-                                       int indices_size,
-                                       int out_size,
+                                       int M_A,           // row of A
+                                       int K,             // col of A
+                                       int N,             // col of B
+                                       int M_C,           // row of C
+                                       int indices_size,  // indices_a and indices_d size
                                        float alpha,
                                        float beta) {
   // Forward to new templated implementation with ConfigAD (A gather + D scatter)
@@ -230,12 +274,13 @@ int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
       nullptr,    // indices_b (no B gather in AD config)
       indices_d,  // indices_d for D scatter
       split_k_slices,
-      M,  // M_A (original A matrix rows)
-      K,  // K (A columns)
-      M,  // M_B (original B matrix rows = M for AD case)
-      N,  // N (B columns)
-      indices_size,
-      out_size,  // scatter_d_size
+      M_A,           // M_A (original A matrix rows)
+      K,             // K (A columns)
+      K,             // K_B (B matrix rows)
+      N,             // N (B columns)
+      M_C,           // M_C (C matrix rows, different from M_A when indices_d is not nullptr)
+      indices_size,  // indices_a size, equal to indices_b when indices_b is not nullptr
+      indices_size,  // indices_d size
       alpha,
       beta);
 }
@@ -267,66 +312,6 @@ INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::bfloat16_t,
                                               float)
 #endif  // DISABLE_BFLOAT16
 
-// AB Gather
-template <typename ElementInputA,
-          typename ElementInputB,
-          typename ElementOutput,
-          typename ElementAccumulator>
-int run_cutlass_gemm_ab_gather(const void *tensor_a,
-                               const void *tensor_b,
-                               const void *tensor_c,
-                               void *tensor_d,
-                               const int *indices_a,
-                               const int *indices_b,
-                               int split_k_slices,
-                               int M,
-                               int N,
-                               int K,
-                               int indices_size,
-                               float alpha,
-                               float beta) {
-  // Forward to new templated implementation with ConfigAB (A gather + B gather)
-  return run_cutlass_gemm_with_operations_templated<ElementInputA,
-                                                    ElementInputB,
-                                                    ElementOutput,
-                                                    ElementAccumulator,
-                                                    ConfigAB>(
-      tensor_a,
-      tensor_b,
-      tensor_c,
-      tensor_d,
-      indices_a,
-      indices_b,
-      nullptr,  // indices_d (no D scatter in AB config)
-      split_k_slices,
-      M,             // M_A (original A matrix rows)
-      K,             // K (A columns)
-      K,             // M_B (original B matrix rows = K for AB gather)
-      N,             // N (B columns)
-      indices_size,  // gather_a_size
-      0,             // scatter_d_size (no scatter)
-      alpha,
-      beta);
-}
-
-// Instantiate AB Gather
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, float)
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, cutlass::half_t, float)
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, cutlass::half_t)
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::half_t,
-                                      cutlass::half_t,
-                                      cutlass::half_t,
-                                      cutlass::half_t)
-
-#ifndef DISABLE_BFLOAT16
-// Bfloat16 precision instantiations (FP32 accumulator)
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t, cutlass::bfloat16_t, float, float)
-INSTANTIATE_AB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t,
-                                      cutlass::bfloat16_t,
-                                      cutlass::bfloat16_t,
-                                      float)
-#endif  // DISABLE_BFLOAT16
-
 // AB Gather with A Transpose
 template <typename ElementInputA,
           typename ElementInputB,
@@ -339,11 +324,11 @@ int run_cutlass_gemm_trAB_gather(const void *tensor_a,
                                  const int *indices_a,
                                  const int *indices_b,
                                  int split_k_slices,
-                                 int M_A,
-                                 int K,
-                                 int M_B,
-                                 int N,
-                                 int gather_a_size,
+                                 int M_A,             // row of A (not trA)
+                                 int K,               // col of A (not trA)
+                                 int K_B,             // row of B (different from K since gathering)
+                                 int N,               // col of B
+                                 int gather_ab_size,  // indices_a and indices_b size
                                  float alpha,
                                  float beta) {
   // Forward to new templated implementation with ConfigTrAB (A gather + B gather + A transpose)
@@ -363,9 +348,10 @@ int run_cutlass_gemm_trAB_gather(const void *tensor_a,
       split_k_slices,
       M_A,  // M_A (original A matrix rows)
       K,    // K (A columns)
-      M_B,  // M_B (original B matrix rows)
+      K_B,  // M_B (original B matrix rows. Different from K when indices_b is not nullptr)
       N,    // N (B columns)
-      gather_a_size,
+      M_A,  // M_C (C matrix rows)
+      gather_ab_size,
       0,  // scatter_d_size (no scatter)
       alpha,
       beta);

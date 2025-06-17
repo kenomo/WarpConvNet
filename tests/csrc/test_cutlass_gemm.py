@@ -93,7 +93,7 @@ def test_cutlass_gemm_gather_scatter(test_types):
     )
 
     # Test with explicit accumulator type (default is float32)
-    result_auto = _C.cutlass_gemm_ad_gather_scatter(
+    result_auto = _C.gemm.cutlass_gemm_ad_gather_scatter(
         tensor_a=tensor_a,
         tensor_b=tensor_b,
         tensor_c=tensor_c,
@@ -175,7 +175,7 @@ def test_cutlass_gemm_trAB_gather(test_types):
     )
 
     # Test trAB gather: A[indices_a, :].T @ B[indices_b, :]
-    result_auto = _C.cutlass_gemm_trAB_gather(
+    result_auto = _C.gemm.cutlass_gemm_trAB_gather(
         tensor_a=tensor_a,
         tensor_b=tensor_b,
         tensor_c=tensor_c,
