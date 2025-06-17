@@ -153,7 +153,7 @@ int run_cutlass_gemm_with_operations_templated(
       assert(indices_d == nullptr);
       problem_m = K;  // rows in result (from transposed A)
       // TODO(cchoy): Should it be N instead of gather_a_size for problem_n
-      problem_n = gather_a_size;  // columns in result (from B)
+      problem_n = N;  // columns in result (from B)
       problem_k = gather_a_size;  // inner dimension
       N_B = gather_a_size;
     } else if constexpr (Config::gather_a && Config::scatter_d) {
@@ -350,7 +350,7 @@ int run_cutlass_gemm_trAB_gather(const void *tensor_a,
       K,    // K (A columns)
       K_B,  // M_B (original B matrix rows. Different from K when indices_b is not nullptr)
       N,    // N (B columns)
-      M_A,  // M_C (C matrix rows)
+      K,    // M_C (C matrix rows. Since A is transposed, A columns are the same as C rows)
       gather_ab_size,
       0,  // scatter_d_size (no scatter)
       alpha,

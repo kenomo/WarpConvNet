@@ -513,7 +513,7 @@ int cutlass_gemm_trAB_gather(torch::Tensor tensor_a,
 
   // Check dimension compatibility for A[indices_a, :].T @ B[indices_b, :]
   // A: M_A × K (tall skinny), B: K_B × N (tall skinny)
-  // A[indices_a, :]: gather_abb_size × K
+  // A[indices_a, :]: gather_ab_size × K
   // A[indices_a, :].T: K × gather_ab_size
   // B[indices_b, :]: gather_ab_size × N
   // Result: K × N

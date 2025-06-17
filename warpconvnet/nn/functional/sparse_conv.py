@@ -1138,7 +1138,7 @@ def _run_forward_benchmarks(
     all_benchmark_results: List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]] = []
 
     def _execute_single_fwd_pass(
-        algo_mode: SPARSE_CONV_FWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
+        algo_mode: SPARSE_CONV_FWD_ALGO_MODE, params_config: Dict[str, Any]
     ) -> Optional[int]:
         if algo_mode == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
             _ = _explicit_gemm_forward_logic(
@@ -1176,7 +1176,7 @@ def _run_forward_benchmarks(
         # Warmup runs
         status = None
         for _ in range(warmup_iters):
-            status = _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=False)
+            status = _execute_single_fwd_pass(algo_mode, params_config)
             if isinstance(status, int) and status != 0:
                 logger.warning(
                     f"Error in _run_forward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
@@ -1200,7 +1200,7 @@ def _run_forward_benchmarks(
             timer = CUDATimer()
             for _ in range(benchmark_iters):
                 with timer:
-                    _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=True)
+                    _execute_single_fwd_pass(algo_mode, params_config)
                 current_algo_min_time_ms = min(current_algo_min_time_ms, timer.elapsed_time)
 
             # If no timed runs were successful (e.g. CUDA not available and no CPU fallback for timing),
@@ -1252,7 +1252,7 @@ def _run_backward_benchmarks(
     all_benchmark_results: List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]] = []
 
     def _execute_single_bwd_pass(
-        algo_mode: SPARSE_CONV_BWD_ALGO_MODE, params_config: Dict[str, Any], is_timed_run: bool
+        algo_mode: SPARSE_CONV_BWD_ALGO_MODE, params_config: Dict[str, Any]
     ) -> Optional[int]:
         status = None
 
@@ -1277,7 +1277,7 @@ def _run_backward_benchmarks(
                 **params_config,
             )
         elif algo_mode == SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
-            status = _cutlass_implicit_gemm_backward_logic(
+            status, _ = _cutlass_implicit_gemm_backward_logic(
                 grad_output,
                 in_features,
                 weight,
@@ -1294,7 +1294,7 @@ def _run_backward_benchmarks(
     for algo_mode, params_config in _BENCHMARK_BACKWARD_PARAMS:
         status = None
         for _ in range(warmup_iters):
-            status = _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=False)
+            status = _execute_single_bwd_pass(algo_mode, params_config)
             if isinstance(status, int) and status != 0:
                 logger.warning(
                     f"Error in _run_backward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"

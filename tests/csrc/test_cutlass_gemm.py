@@ -33,6 +33,16 @@ def compare_results(result_auto, d_ref, indices_d):
     )
 
 
+def randn_clamped(shape, dtype, device, scale=0.1):
+    return torch.clamp(torch.randn(shape, dtype=dtype, device=device) * scale, -scale, scale)
+
+
+def rand_indices(size, indices_size, device):
+    return torch.sort(torch.randperm(size, device=device)[:indices_size].unsqueeze(1), dim=0)[
+        0
+    ].int()
+
+
 @pytest.mark.parametrize(
     "test_types",
     [
@@ -64,15 +74,11 @@ def test_cutlass_gemm_gather_scatter(test_types):
     M, N, K, indices_size, out_size = 4096, 128, 128, 2048, 4096
 
     # Generate unique gather & scatter indices to avoid data races
-    indices_a = torch.sort(torch.randperm(M, device="cuda")[:indices_size].unsqueeze(1), dim=0)[
-        0
-    ].int()
-    indices_d = torch.sort(
-        torch.randperm(out_size, device="cuda")[:indices_size].unsqueeze(1), dim=0
-    )[0].int()
+    indices_a = rand_indices(M, indices_size, "cuda")
+    indices_d = rand_indices(out_size, indices_size, "cuda")
 
     # Create input tensors with specific values for debugging (all float16)
-    tensor_a = torch.randn(M, K, dtype=in_dtype, device="cuda")  # M x K
+    tensor_a = randn_clamped((M, K), in_dtype, "cuda")  # M x K
 
     # Set tensor_a[indices_a, :] = torch.arange(indices_size) for debugging
     # for i in range(indices_size):
@@ -81,7 +87,7 @@ def test_cutlass_gemm_gather_scatter(test_types):
 
     # Set tensor_b to identity matrix (K x N, with K == N)
     tensor_b = torch.eye(K, N, dtype=in_dtype, device="cuda")  # K x N identity
-    tensor_b += torch.clamp(torch.randn(K, N, dtype=in_dtype, device="cuda") * 0.1, -0.1, 0.1)
+    tensor_b += randn_clamped((K, N), in_dtype, "cuda")
 
     # Set tensor_c to zeros for simplicity (all float16)
     tensor_d = torch.zeros(out_size, N, dtype=out_dtype, device="cuda")  # out_size x N
@@ -93,11 +99,11 @@ def test_cutlass_gemm_gather_scatter(test_types):
     )
 
     # Test with explicit accumulator type (default is float32)
-    result_auto = _C.gemm.cutlass_gemm_ad_gather_scatter(
+    status = _C.gemm.cutlass_gemm_ad_gather_scatter(
         tensor_a=tensor_a,
         tensor_b=tensor_b,
         tensor_c=tensor_c,
-        tensor_d=tensor_d.clone(),
+        tensor_d=tensor_d,
         indices_a=indices_a,
         indices_d=indices_d,
         accumulator_type=acc_dtype,
@@ -106,6 +112,9 @@ def test_cutlass_gemm_gather_scatter(test_types):
         beta=1.0,
     )
     torch.cuda.synchronize()
+    assert (
+        status == 0
+    ), f"Error in cutlass_gemm_ad_gather_scatter: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
 
     # Compute reference result using PyTorch (convert to float32 for computation)
     a_gathered = tensor_a[indices_a.squeeze()]
@@ -115,11 +124,10 @@ def test_cutlass_gemm_gather_scatter(test_types):
     d_ref[indices_d.squeeze()] = c_ref.to(out_dtype)
 
     # Compare results (convert to float32 for comparison)
-    compare_results(result_auto, d_ref, indices_d)
+    compare_results(tensor_d, d_ref, indices_d)
 
     # Use more lenient thresholds for half precision
     print(f"{test_types} test passed!")
-    return True
 
 
 @pytest.mark.parametrize(
@@ -155,16 +163,12 @@ def test_cutlass_gemm_trAB_gather(test_types):
     indices_size = 1024
 
     # Generate unique gather indices for both A and B
-    indices_a = torch.sort(torch.randperm(M_A, device="cuda")[:indices_size].unsqueeze(1), dim=0)[
-        0
-    ].int()
-    indices_b = torch.sort(torch.randperm(M_B, device="cuda")[:indices_size].unsqueeze(1), dim=0)[
-        0
-    ].int()
+    indices_a = rand_indices(M_A, indices_size, "cuda")
+    indices_b = rand_indices(M_B, indices_size, "cuda")
 
     # Create input tensors - both tall skinny
-    tensor_a = torch.randn(M_A, K, dtype=in_dtype, device="cuda")  # M_A x K
-    tensor_b = torch.randn(M_B, N, dtype=in_dtype, device="cuda")  # M_B x N
+    tensor_a = randn_clamped((M_A, K), in_dtype, "cuda")  # M_A x K
+    tensor_b = randn_clamped((M_B, N), in_dtype, "cuda")  # M_B x N
 
     # For trAB gather, C and D should have shape K x N (result of A^T @ B)
     tensor_c = torch.zeros(K, N, dtype=out_dtype, device="cuda")  # K x N
@@ -175,19 +179,22 @@ def test_cutlass_gemm_trAB_gather(test_types):
     )
 
     # Test trAB gather: A[indices_a, :].T @ B[indices_b, :]
-    result_auto = _C.gemm.cutlass_gemm_trAB_gather(
+    status = _C.gemm.cutlass_gemm_trAB_gather(
         tensor_a=tensor_a,
         tensor_b=tensor_b,
         tensor_c=tensor_c,
-        tensor_d=tensor_d.clone(),
+        tensor_d=tensor_d,
         indices_a=indices_a,
         indices_b=indices_b,
         accumulator_type=acc_dtype,
         split_k_slices=1,
         alpha=1.0,
-        beta=1.0,
+        beta=0.0,
     )
     torch.cuda.synchronize()
+    assert (
+        status == 0
+    ), f"Error in cutlass_gemm_trAB_gather: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
 
     # Compute reference result using PyTorch
     a_gathered = tensor_a[indices_a.squeeze()]  # indices_size x K
@@ -197,7 +204,6 @@ def test_cutlass_gemm_trAB_gather(test_types):
     d_ref = c_ref + tensor_c.to(acc_dtype)  # Add bias (C matrix)
 
     # Compare results
-    compare_results(result_auto, d_ref.to(out_dtype), None)
+    compare_results(tensor_d, d_ref.to(out_dtype), None)
 
     print(f"trAB gather {test_types} test passed!")
-    return True
