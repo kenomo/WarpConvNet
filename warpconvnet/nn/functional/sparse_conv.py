@@ -95,6 +95,7 @@ class STRIDED_CONV_MODE(Enum):
 class SPARSE_CONV_FWD_ALGO_MODE(Enum):
     EXPLICIT_GEMM = "explicit_gemm"
     IMPLICIT_GEMM = "implicit_gemm"
+    CUTLASS_IMPLICIT_GEMM = "cutlass_implicit_gemm"
     # EXPLICIT_GEMM_BATCHED = "explicit_gemm_batched" # TODO: Add if supporting
     AUTO = "auto"  # Benchmark and select the best algorithm
 
@@ -102,6 +103,7 @@ class SPARSE_CONV_FWD_ALGO_MODE(Enum):
 class SPARSE_CONV_BWD_ALGO_MODE(Enum):
     EXPLICIT_GEMM = "explicit_gemm"
     IMPLICIT_GEMM = "implicit_gemm"
+    CUTLASS_IMPLICIT_GEMM = "cutlass_implicit_gemm"
     # EXPLICIT_GEMM_BATCHED = "explicit_gemm_batched" # TODO: Add if supporting
     AUTO = "auto"  # Benchmark and select the best algorithm
 
@@ -164,6 +166,7 @@ class SpatiallySparseConvConfig:
 _BENCHMARK_NUM_RUNS = 2
 _BENCHMARK_FORWARD_PARAMS = [
     (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}),
+    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {}),
     (
         SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
         {"fwd_block_size": 8},
@@ -183,6 +186,7 @@ _BENCHMARK_FORWARD_PARAMS = [
 ]
 _BENCHMARK_BACKWARD_PARAMS = [
     (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}),
+    (SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {}),
     (
         SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
         {"bwd_block_size": 8},
@@ -524,7 +528,6 @@ def _cutlass_implicit_gemm_forward_logic(
     weight: Float[Tensor, "K C_in C_out"],
     kernel_map: IntSearchResult,
     num_out_coords: int,
-    compute_dtype: Optional[torch.dtype] = None,
     accumulator_type: torch.dtype = torch.float32,
     split_k_slices: int = 1,
 ) -> Float[Tensor, "M C_out"]:
@@ -534,14 +537,12 @@ def _cutlass_implicit_gemm_forward_logic(
         )
 
     device = in_features.device
-    comp_in_feats = _maybe_cast(in_features, compute_dtype)
-    comp_weight = _maybe_cast(weight, compute_dtype)
     iden_idx = kernel_map.identity_map_index
     if iden_idx is not None:
-        output_feature_tensor = torch.matmul(comp_in_feats, comp_weight[iden_idx])
+        output_feature_tensor = torch.matmul(in_features, weight[iden_idx])
     else:
         output_feature_tensor = torch.zeros(
-            num_out_coords, weight.shape[-1], device=device, dtype=comp_in_feats.dtype
+            num_out_coords, weight.shape[-1], device=device, dtype=in_features.dtype
         )
 
     for i in range(len(kernel_map)):
@@ -554,8 +555,8 @@ def _cutlass_implicit_gemm_forward_logic(
         in_map = in_map.to(device)
         out_map = out_map.to(device)
         _C.cutlass_gemm_ad_gather_scatter(
-            comp_in_feats,
-            comp_weight[i],
+            in_features,
+            weight[i],
             output_feature_tensor,
             output_feature_tensor,
             in_map,
@@ -571,7 +572,6 @@ def _cutlass_implicit_gemm_backward_logic(
     in_features: Float[Tensor, "N C_in"],
     weight: Float[Tensor, "K C_in C_out"],
     kernel_map: IntSearchResult,
-    compute_dtype: Optional[torch.dtype] = None,
     accumulator_type: torch.dtype = torch.float32,
     split_k_slices: int = 1,
     device: torch.device = None,
@@ -631,6 +631,24 @@ def _cutlass_implicit_gemm_backward_logic(
     )
 
 
+def _backward_return(
+    grad_in_features: Optional[Float[Tensor, "N C_in"]],
+    grad_weight: Optional[Float[Tensor, "K C_in C_out"]],
+    number_of_outputs: int,
+):
+    """Return the correct number of outputs for the backward pass."""
+    assert number_of_outputs >= 2
+    if number_of_outputs == 2:
+        return grad_in_features, grad_weight
+    else:
+        return_list = [None] * number_of_outputs
+        if grad_in_features is not None:
+            return_list[0] = grad_in_features
+        if grad_weight is not None:
+            return_list[1] = grad_weight
+        return tuple(return_list)
+
+
 class SpatiallySparseConvExplicitGEMMFunction(Function):
     @staticmethod
     def forward(
@@ -668,7 +686,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return None, None, None, None, None
+            return _backward_return(None, None, 5)
 
         # Basic check for empty inputs, similar to how it was in Unified Function
         N_in, C_in = in_features.shape
@@ -677,7 +695,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return grad_in_final, grad_weight_final, None, None, None
+            return _backward_return(grad_in_final, grad_weight_final, 5)
 
         grad_in_features, grad_weight = _explicit_gemm_backward_logic(
             grad_output,
@@ -693,7 +711,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return grad_in_features, grad_weight, None, None, None
+        return _backward_return(grad_in_features, grad_weight, 5)
 
 
 class SpatiallySparseConvImplicitGEMMFunction(Function):
@@ -742,7 +760,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return None, None, None, None, None, None, None
+            return _backward_return(None, None, 7)
 
         N_in, C_in = in_features.shape
         K, _, C_out = weight.shape
@@ -756,7 +774,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         ):
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return grad_in_final, grad_weight_final, None, None, None, None, None
+            return _backward_return(grad_in_final, grad_weight_final, 7)
 
         grad_in_features, grad_weight = _implicit_gemm_backward_logic(
             grad_output,
@@ -774,7 +792,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return grad_in_features, grad_weight, None, None, None, None, None
+        return _backward_return(grad_in_features, grad_weight, 7)
 
 
 class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
@@ -785,7 +803,6 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         weight: Float[Tensor, "K C_in C_out"],
         kernel_map: IntSearchResult,
         num_out_coords: int,
-        compute_dtype: Optional[torch.dtype] = None,
         accumulator_type: torch.dtype = torch.float32,
         split_k_slices: int = 1,
     ) -> Float[Tensor, "M C_out"]:
@@ -794,13 +811,11 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
             weight,
             kernel_map,
             num_out_coords,
-            compute_dtype,
             accumulator_type,
             split_k_slices,
         )
         ctx.save_for_backward(in_features, weight)
         ctx.kernel_map = kernel_map
-        ctx.compute_dtype = compute_dtype
         ctx.accumulator_type = accumulator_type
         ctx.split_k_slices = split_k_slices
         ctx.device = in_features.device
@@ -814,7 +829,6 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         None,
         None,
         None,
-        None,
     ]:
         in_features, weight = ctx.saved_tensors
         kernel_map = ctx.kernel_map
@@ -824,7 +838,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return None, None, None, None, None, None, None
+            return _backward_return(None, None, 6)
 
         # Basic check for empty inputs, similar to how it was in Unified Function
         N_in, C_in = in_features.shape
@@ -833,7 +847,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return grad_in_final, grad_weight_final, None, None, None
+            return _backward_return(grad_in_final, grad_weight_final, 6)
 
         grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
             grad_output,
@@ -851,7 +865,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return grad_in_features, grad_weight, None, None, None, None, None
+        return _backward_return(grad_in_features, grad_weight, 6)
 
 
 class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
@@ -957,7 +971,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         grad_weight = None
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return None, None, None, None, None, None
+            return _backward_return(None, None, 6)
 
         # Add a dummy row to grad_output for consistent indexing with out_maps
         _padded_grad_output = torch.cat(
@@ -1062,7 +1076,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         if ctx.needs_input_grad[1]:
             grad_weight = grad_weight_acc.to(dtype=weight.dtype)
 
-        return grad_in_features, grad_weight, None, None, None, None
+        return _backward_return(grad_in_features, grad_weight, 6)
 
 
 def _run_forward_benchmarks(
@@ -1111,6 +1125,15 @@ def _run_forward_benchmarks(
                 compute_dtype,
                 **params_config,
             )
+        elif algo_mode == SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
+            _ = _cutlass_implicit_gemm_forward_logic(
+                in_features,
+                weight,
+                kernel_map,
+                num_out_coords,
+                accumulator_type=params_config.get("accumulator_type", torch.float32),
+                split_k_slices=params_config.get("split_k_slices", 1),
+            )
         else:
             # Should not happen with current _BENCHMARK_FORWARD_PARAMS
             raise ValueError(f"Unsupported algo_mode in _execute_single_fwd_pass: {algo_mode}")
@@ -1125,8 +1148,14 @@ def _run_forward_benchmarks(
 
     for algo_mode, params_config in _BENCHMARK_FORWARD_PARAMS:
         # Warmup runs
-        for _ in range(warmup_iters):
-            _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=False)
+        try:
+            for _ in range(warmup_iters):
+                _execute_single_fwd_pass(algo_mode, params_config, is_timed_run=False)
+        except Exception as e:
+            logger.warning(f"Error in _run_forward_benchmarks: {e}")
+            # Save the inf time for this algo_mode
+            all_benchmark_results.append((algo_mode, params_config, float("inf")))
+            continue
 
         # Benchmark runs
         current_algo_min_time_ms = float("inf")  # Min time for this specific algorithm config
@@ -1230,8 +1259,14 @@ def _run_backward_benchmarks(
 
     for algo_mode, params_config in _BENCHMARK_BACKWARD_PARAMS:
         # Warmup runs
-        for _ in range(warmup_iters):
-            _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=False)
+        try:
+            for _ in range(warmup_iters):
+                _execute_single_bwd_pass(algo_mode, params_config, is_timed_run=False)
+        except Exception as e:
+            logger.warning(f"Error in _run_backward_benchmarks: {e}")
+            # Save the inf time for this algo_mode
+            all_benchmark_results.append((algo_mode, params_config, float("inf")))
+            continue
 
         # Benchmark runs
         current_algo_min_time_ms = float("inf")  # Min time for this specific algorithm config
@@ -1341,6 +1376,15 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 compute_dtype,
                 current_fwd_block_size,
             )
+        elif chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
+            output_feature_tensor = _cutlass_implicit_gemm_forward_logic(
+                in_features,
+                weight,
+                kernel_map,
+                num_out_coords,
+                split_k_slices=chosen_fwd_params.get("split_k_slices", 1),
+                accumulator_type=chosen_fwd_params.get("accumulator_type", torch.float32),
+            )
         # elif chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED: # TODO
         # if explicit_matmul_batch_size is None:
         #     raise ValueError("explicit_matmul_batch_size is required for batched explicit GEMM forward.")
@@ -1397,7 +1441,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
         grad_in_features, grad_weight = None, None
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return None, None, None, None, None, None, None, None, None
+            return _backward_return(None, None, 9)
 
         N_in, C_in = in_features.shape
         K, _, C_out = weight.shape
@@ -1411,7 +1455,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
         ):
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return grad_in_final, grad_weight_final, None, None, None, None, None, None, None
+            return _backward_return(grad_in_final, grad_weight_final, 9)
 
         chosen_bwd_algo = initial_bwd_algo
         chosen_bwd_params = {}
@@ -1483,6 +1527,16 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 current_bwd_block_size,
                 device,
             )
+        elif chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
+            grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
+                grad_output,
+                in_features,
+                weight,
+                kernel_map,
+                split_k_slices=chosen_bwd_params.get("split_k_slices", 1),
+                accumulator_type=chosen_bwd_params.get("accumulator_type", torch.float32),
+                device=device,
+            )
         # elif chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED: # TODO
         # if explicit_matmul_batch_size is None:
         #     raise ValueError("explicit_matmul_batch_size is required for batched explicit GEMM backward.")
@@ -1495,7 +1549,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return grad_in_features, grad_weight, None, None, None, None, None, None, None
+        return _backward_return(grad_in_features, grad_weight, 9)
 
 
 def spatially_sparse_conv(
