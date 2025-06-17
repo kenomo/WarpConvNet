@@ -553,7 +553,7 @@ def _cutlass_implicit_gemm_forward_logic(
             continue
         in_map = in_map.to(device)
         out_map = out_map.to(device)
-        _C.run_cutlass_gemm(
+        _C.cutlass_gemm_ad_gather_scatter(
             comp_in_feats,
             comp_weight[i],
             output_feature_tensor,
@@ -584,18 +584,14 @@ def _cutlass_implicit_gemm_backward_logic(
     if device is None:
         device = in_features.device
 
-    dtype_to_use = compute_dtype if compute_dtype is not None else in_features.dtype
-    comp_in_feats = in_features.to(device=device, dtype=dtype_to_use)
-    comp_weight = weight.to(device=device, dtype=dtype_to_use)
-    comp_grad_output = grad_output.to(device=device, dtype=dtype_to_use)
-    grad_weight = torch.zeros_like(comp_weight, device=device)
+    grad_weight = torch.zeros_like(weight, device=device)
 
     iden_idx = kernel_map.identity_map_index
     if iden_idx is not None:
-        grad_in_features = torch.matmul(comp_grad_output, comp_weight[iden_idx].T)
-        grad_weight[iden_idx] = torch.matmul(comp_in_feats.T, comp_grad_output)
+        grad_in_features = torch.matmul(grad_output, weight[iden_idx].T)
+        grad_weight[iden_idx] = torch.matmul(in_features.T, grad_output)
     else:
-        grad_in_features = torch.zeros_like(comp_in_feats, device=device)
+        grad_in_features = torch.zeros_like(in_features, device=device)
 
     for i in range(len(kernel_map)):
         if i == iden_idx:
@@ -605,26 +601,29 @@ def _cutlass_implicit_gemm_backward_logic(
         if in_map.shape[0] == 0:
             continue
 
-        curr_weight = comp_weight[i]
+        curr_weight = weight[i]
 
-        # grad_in_features[in_map] += torch.matmul(curr_grad_output, curr_weight.T)
-        _C.run_cutlass_gemm(
-            comp_grad_output,
-            curr_weight.T,
+        # grad_in_features[in_map] += torch.matmul(grad_output[out_map], curr_weight.T)
+        _C.cutlass_gemm_ad_gather_scatter(
+            grad_output,
+            curr_weight.T.contiguous(),
             grad_in_features,
             grad_in_features,
-            in_map,
             out_map,
+            in_map,
             accumulator_type=accumulator_type,
             split_k_slices=split_k_slices,
         )
-        _C.run_cutlass_gemm(
-            comp_in_feats,
-            comp_grad_output,
+        # grad_weight[i] += torch.matmul(curr_in_feats.T, curr_grad_output)
+        _C.cutlass_gemm_trAB_gather(
+            in_features,
+            grad_output,
             grad_weight[i],
             grad_weight[i],
             in_map,
             out_map,
+            alpha=1.0,
+            beta=0,
         )
     return (
         grad_in_features.to(dtype=in_features.dtype),

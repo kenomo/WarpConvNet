@@ -234,6 +234,65 @@ def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
 
     # Setup convolution parameters
     num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
+    weights = torch.clamp(torch.randn(num_kernels, C_in, C_out).to(voxels.device), min=-1, max=1)
+    # Generate kernel map
+    batch_indexed_in_coords = batch_indexed_coordinates(voxels.coordinate_tensor, voxels.offsets)
+
+    kernel_map = generate_kernel_map(
+        batch_indexed_in_coords,
+        batch_indexed_in_coords,
+        stride,
+        kernel_size,
+        skip_symmetric_kernel_map=False,
+    )
+
+    # Explicit GEMM
+    out_explicit = _explicit_gemm_forward_logic(
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+        batch_indexed_in_coords.shape[0],
+    )
+    out_implicit = _cutlass_implicit_gemm_forward_logic(
+        voxels.feature_tensor,
+        weights,
+        kernel_map,
+        batch_indexed_in_coords.shape[0],
+        accumulator_type=torch.float32,
+        split_k_slices=1,
+    )
+    assert torch.allclose(out_explicit, out_implicit, atol=1e-1, rtol=1e-3)
+
+    # Backward pass
+    grad_out = torch.clamp(torch.randn_like(out_explicit), min=-1, max=1)
+    grad_in_explicit, grad_weight_explicit = _explicit_gemm_backward_logic(
+        grad_out.clone(),
+        voxels.feature_tensor.clone(),
+        weights.clone(),
+        kernel_map,
+    )
+
+    grad_in, grad_weight = _cutlass_implicit_gemm_backward_logic(
+        grad_out.clone(),
+        voxels.feature_tensor.clone(),
+        weights.clone(),
+        kernel_map,
+        accumulator_type=torch.float32,
+        split_k_slices=1,
+    )
+    assert torch.allclose(grad_in, grad_in_explicit, atol=1e-1, rtol=1e-3)
+    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-1, rtol=1e-3)
+
+
+def test_sparse_conv_forward_backward_implicit_explicit_gemm(setup_voxels):
+    """Test sparse convolution forward backward with implicit and explicit gemm."""
+    voxels = setup_voxels
+    C_in, C_out = voxels.num_channels, 32
+    kernel_size = (3, 3, 3)
+    stride = (1, 1, 1)
+
+    # Setup convolution parameters
+    num_kernels = kernel_size[0] * kernel_size[1] * kernel_size[2]
     weights = torch.randn(num_kernels, C_in, C_out).to(voxels.device)
     # Generate kernel map
     batch_indexed_in_coords = batch_indexed_coordinates(voxels.coordinate_tensor, voxels.offsets)
@@ -253,35 +312,37 @@ def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
         kernel_map,
         batch_indexed_in_coords.shape[0],
     )
-    out_cutlass = _cutlass_implicit_gemm_forward_logic(
+    out_implicit = _implicit_gemm_forward_logic(
         voxels.feature_tensor,
         weights,
         kernel_map,
         batch_indexed_in_coords.shape[0],
-        accumulator_type=torch.float32,
-        split_k_slices=1,
+        compute_dtype=None,
+        fwd_block_size=16,
     )
-    assert torch.allclose(out_explicit, out_cutlass, atol=1e-1, rtol=1e-3)
+    assert torch.allclose(out_explicit, out_implicit, atol=1e-3, rtol=1e-5)
 
     # Backward pass
     grad_out = torch.randn_like(out_explicit)
     grad_in_explicit, grad_weight_explicit = _explicit_gemm_backward_logic(
-        grad_out,
-        voxels.feature_tensor,
-        weights,
+        grad_out.clone(),
+        voxels.feature_tensor.clone(),
+        weights.clone(),
         kernel_map,
     )
 
-    grad_in, grad_weight = _cutlass_implicit_gemm_backward_logic(
-        grad_out,
-        voxels.feature_tensor,
-        weights,
+    grad_in, grad_weight = _implicit_gemm_backward_logic(
+        grad_out.clone(),
+        voxels.feature_tensor.clone(),
+        weights.clone(),
         kernel_map,
-        accumulator_type=torch.float32,
-        split_k_slices=1,
+        num_out_coords=out_explicit.shape[0],
+        compute_dtype=None,
+        bwd_block_size=16,
+        device=None,
     )
-    assert torch.allclose(grad_in, grad_in_explicit, atol=1e-1, rtol=1e-3)
-    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-1, rtol=1e-3)
+    assert torch.allclose(grad_in, grad_in_explicit, atol=1e-3, rtol=1e-5)
+    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-3, rtol=1e-5)
 
 
 def test_sparse_conv_forward_with_skip_symmetric(setup_small_voxels):
