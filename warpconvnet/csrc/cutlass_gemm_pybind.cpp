@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <cuda_runtime.h>
+#include <cutlass/arch/arch.h>
 #include <cutlass/numeric_types.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -9,6 +10,7 @@
 
 #include "driver_types.h"
 #include "include/gemm_error_codes.h"
+#include "include/gemm_mma_tiles.h"
 
 namespace py = pybind11;
 
@@ -40,7 +42,9 @@ struct torch_to_cutlass<torch::kBFloat16> {
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
-          typename ElementAccumulator>
+          typename ElementAccumulator,
+          typename TileTag,
+          typename Arch>
 int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                        const void *tensor_b,
                                        const void *tensor_c,
@@ -60,7 +64,9 @@ int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
-          typename ElementAccumulator>
+          typename ElementAccumulator,
+          typename TileTag,
+          typename Arch>
 int run_cutlass_gemm_trAB_gather(const void *tensor_a,
                                  const void *tensor_b,
                                  const void *tensor_c,
@@ -106,42 +112,14 @@ int dispatch_cutlass_gemm_ad_gather_scatter(const torch::Tensor &tensor_a,
                                             const torch::Tensor &indices_a,
                                             const torch::Tensor &indices_d,
                                             int split_k_slices,
+                                            int mma_tile,
                                             int M_A,             // row of A
                                             int K,               // col of A
                                             int N,               // col of B
                                             int M_C,             // row of C
                                             int gather_ad_size,  // indices_a and indices_d size
                                             float alpha,
-                                            float beta) {
-  // Deduce CUTLASS types from tensor scalar types
-  using ElementA = typename torch_to_cutlass<ScalarA>::type;
-  using ElementB = typename torch_to_cutlass<ScalarB>::type;
-  using ElementOutput = typename torch_to_cutlass<ScalarOutput>::type;
-  using ElementAccumulator = typename torch_to_cutlass<ScalarAccumulator>::type;
-
-  // Assert that tensor_c and tensor_d are the same type
-  TORCH_CHECK(tensor_a.scalar_type() == ScalarA);
-  TORCH_CHECK(tensor_b.scalar_type() == ScalarB);
-  TORCH_CHECK(tensor_c.scalar_type() == ScalarOutput);
-  TORCH_CHECK(tensor_d.scalar_type() == ScalarOutput);
-  TORCH_CHECK(tensor_c.scalar_type() == tensor_d.scalar_type());
-
-  return run_cutlass_gemm_ad_gather_scatter<ElementA, ElementB, ElementOutput, ElementAccumulator>(
-      tensor_a.data_ptr(),
-      tensor_b.data_ptr(),
-      tensor_c.data_ptr(),
-      tensor_d.data_ptr(),
-      indices_a.data_ptr<int>(),
-      indices_d.data_ptr<int>(),
-      split_k_slices,
-      M_A,             // row of A
-      K,               // col of A
-      N,               // col of B
-      M_C,             // row of C
-      gather_ad_size,  // gather_ad_size
-      alpha,
-      beta);
-}
+                                            float beta);
 
 template <torch::ScalarType ScalarA,
           torch::ScalarType ScalarB,
@@ -154,42 +132,14 @@ int dispatch_cutlass_gemm_trAB_gather(const torch::Tensor &tensor_a,
                                       const torch::Tensor &indices_a,
                                       const torch::Tensor &indices_b,
                                       int split_k_slices,
+                                      int mma_tile,
                                       int M_A,  // row of A (not trA)
                                       int K,    // col of A (not trA)
                                       int K_B,  // row of B (different from K since gathering)
                                       int N,    // col of B
                                       int gather_ab_size,
                                       float alpha,
-                                      float beta) {
-  // Deduce CUTLASS types from tensor scalar types
-  using ElementA = typename torch_to_cutlass<ScalarA>::type;
-  using ElementB = typename torch_to_cutlass<ScalarB>::type;
-  using ElementOutput = typename torch_to_cutlass<ScalarOutput>::type;
-  using ElementAccumulator = typename torch_to_cutlass<ScalarAccumulator>::type;
-
-  // Assert that tensor_c and tensor_d are the same type
-  TORCH_CHECK(tensor_a.scalar_type() == ScalarA);
-  TORCH_CHECK(tensor_b.scalar_type() == ScalarB);
-  TORCH_CHECK(tensor_c.scalar_type() == ScalarOutput);
-  TORCH_CHECK(tensor_d.scalar_type() == ScalarOutput);
-  TORCH_CHECK(tensor_c.scalar_type() == tensor_d.scalar_type());
-
-  return run_cutlass_gemm_trAB_gather<ElementA, ElementB, ElementOutput, ElementAccumulator>(
-      tensor_a.data_ptr(),
-      tensor_b.data_ptr(),
-      tensor_c.data_ptr(),
-      tensor_d.data_ptr(),
-      indices_a.data_ptr<int>(),
-      indices_b.data_ptr<int>(),
-      split_k_slices,
-      M_A,  // row of A (not trA)
-      K,    // col of A (not trA)
-      K_B,  // row of B (different from K since gathering)
-      N,    // col of B
-      gather_ab_size,
-      alpha,
-      beta);
-}
+                                      float beta);
 
 // Helper to transform GEMM status into a Python error if not successful
 inline void assert_gemm_status(int status) {
@@ -316,6 +266,7 @@ int cutlass_gemm_AD_gather_scatter(torch::Tensor tensor_a,
                                    torch::Tensor indices_d,
                                    torch::ScalarType accumulator_type = torch::kFloat32,
                                    int split_k_slices = 1,
+                                   int mma_tile = 0,
                                    float alpha = 1.0F,
                                    float beta = 1.0F) {
   // Validate dimensions and get commonly used sizes
@@ -346,6 +297,7 @@ int cutlass_gemm_AD_gather_scatter(torch::Tensor tensor_a,
           indices_a,                                                                        \
           indices_d,                                                                        \
           split_k_slices,                                                                   \
+          mma_tile,                                                                         \
           params.M_A,                                                                       \
           params.K,                                                                         \
           params.N,                                                                         \
@@ -362,6 +314,7 @@ int cutlass_gemm_AD_gather_scatter(torch::Tensor tensor_a,
           indices_a,                                                                        \
           indices_d,                                                                        \
           split_k_slices,                                                                   \
+          mma_tile,                                                                         \
           params.M_A,                                                                       \
           params.K,                                                                         \
           params.N,                                                                         \
@@ -400,6 +353,7 @@ int cutlass_gemm_AD_gather_scatter(torch::Tensor tensor_a,
                                                                       indices_a,
                                                                       indices_d,
                                                                       split_k_slices,
+                                                                      mma_tile,
                                                                       params.M_A,
                                                                       params.K,
                                                                       params.N,
@@ -427,6 +381,7 @@ int cutlass_gemm_trAB_gather(torch::Tensor tensor_a,
                              torch::Tensor indices_b,
                              torch::ScalarType accumulator_type = torch::kFloat32,
                              int split_k_slices = 1,
+                             int mma_tile = 0,
                              float alpha = 1.0F,
                              float beta = 1.0F) {
   // Validate dimensions and get commonly used sizes
@@ -457,6 +412,7 @@ int cutlass_gemm_trAB_gather(torch::Tensor tensor_a,
                                                                          indices_a,             \
                                                                          indices_b,             \
                                                                          split_k_slices,        \
+                                                                         mma_tile,              \
                                                                          params.M_A,            \
                                                                          params.K,              \
                                                                          params.K_B,            \
@@ -473,6 +429,7 @@ int cutlass_gemm_trAB_gather(torch::Tensor tensor_a,
                                                                          indices_a,             \
                                                                          indices_b,             \
                                                                          split_k_slices,        \
+                                                                         mma_tile,              \
                                                                          params.M_A,            \
                                                                          params.K,              \
                                                                          params.K_B,            \
@@ -511,6 +468,7 @@ int cutlass_gemm_trAB_gather(torch::Tensor tensor_a,
                                                                 indices_a,
                                                                 indices_b,
                                                                 split_k_slices,
+                                                                mma_tile,
                                                                 params.M_A,
                                                                 params.K,
                                                                 params.K_B,
@@ -550,6 +508,7 @@ PYBIND11_MODULE(_C, m) {
            py::arg("indices_d"),
            py::arg("accumulator_type") = torch::kFloat32,
            py::arg("split_k_slices") = 1,
+           py::arg("mma_tile") = 0,
            py::arg("alpha") = 1.0f,
            py::arg("beta") = 1.0f);
 
@@ -565,6 +524,7 @@ PYBIND11_MODULE(_C, m) {
            py::arg("indices_b"),
            py::arg("accumulator_type") = torch::kFloat32,
            py::arg("split_k_slices") = 1,
+           py::arg("mma_tile") = 0,
            py::arg("alpha") = 1.0f,
            py::arg("beta") = 1.0f);
 
@@ -589,4 +549,134 @@ PYBIND11_MODULE(_C, m) {
       },
       py::arg("status"),
       "Return the human-readable string associated with a GemmStatus value");
+}
+
+// ------------------ Implementation of dispatch helpers with mma_tile switch ------------------
+
+template <torch::ScalarType ScalarA,
+          torch::ScalarType ScalarB,
+          torch::ScalarType ScalarOutput,
+          torch::ScalarType ScalarAccumulator>
+int dispatch_cutlass_gemm_ad_gather_scatter(const torch::Tensor &tensor_a,
+                                            const torch::Tensor &tensor_b,
+                                            const torch::Tensor &tensor_c,
+                                            torch::Tensor &tensor_d,
+                                            const torch::Tensor &indices_a,
+                                            const torch::Tensor &indices_d,
+                                            int split_k_slices,
+                                            int mma_tile,
+                                            int M_A,
+                                            int K,
+                                            int N,
+                                            int M_C,
+                                            int gather_ad_size,
+                                            float alpha,
+                                            float beta) {
+  using ElementA = typename torch_to_cutlass<ScalarA>::type;
+  using ElementB = typename torch_to_cutlass<ScalarB>::type;
+  using ElementOutput = typename torch_to_cutlass<ScalarOutput>::type;
+  using ElementAccumulator = typename torch_to_cutlass<ScalarAccumulator>::type;
+
+  TORCH_CHECK(tensor_a.scalar_type() == ScalarA);
+  TORCH_CHECK(tensor_b.scalar_type() == ScalarB);
+  TORCH_CHECK(tensor_c.scalar_type() == ScalarOutput);
+  TORCH_CHECK(tensor_d.scalar_type() == ScalarOutput);
+
+  // Macro for AD gather scatter tile cases
+#define GENERATE_AD_TILE_CASE(TILE_NAME)                                                      \
+  case warpconvnet::gemm::MMATile::TILE_NAME:                                                 \
+    return run_cutlass_gemm_ad_gather_scatter<ElementA,                                       \
+                                              ElementB,                                       \
+                                              ElementOutput,                                  \
+                                              ElementAccumulator,                             \
+                                              warpconvnet::gemm::TILE_NAME,                   \
+                                              cutlass::arch::Sm80>(tensor_a.data_ptr(),       \
+                                                                   tensor_b.data_ptr(),       \
+                                                                   tensor_c.data_ptr(),       \
+                                                                   tensor_d.data_ptr(),       \
+                                                                   indices_a.data_ptr<int>(), \
+                                                                   indices_d.data_ptr<int>(), \
+                                                                   split_k_slices,            \
+                                                                   M_A,                       \
+                                                                   K,                         \
+                                                                   N,                         \
+                                                                   M_C,                       \
+                                                                   gather_ad_size,            \
+                                                                   alpha,                     \
+                                                                   beta);
+
+  warpconvnet::gemm::MMATile tile = static_cast<warpconvnet::gemm::MMATile>(mma_tile);
+  switch (tile) {
+    GENERATE_AD_TILE_CASE(Tile128x128x32);
+    GENERATE_AD_TILE_CASE(Tile128x64x32);
+    GENERATE_AD_TILE_CASE(Tile64x128x32);
+    GENERATE_AD_TILE_CASE(Tile64x64x32);
+    default:
+      TORCH_CHECK(false, "Unsupported mma_tile value");
+  }
+#undef GENERATE_AD_TILE_CASE
+}
+
+template <torch::ScalarType ScalarA,
+          torch::ScalarType ScalarB,
+          torch::ScalarType ScalarOutput,
+          torch::ScalarType ScalarAccumulator>
+int dispatch_cutlass_gemm_trAB_gather(const torch::Tensor &tensor_a,
+                                      const torch::Tensor &tensor_b,
+                                      const torch::Tensor &tensor_c,
+                                      torch::Tensor &tensor_d,
+                                      const torch::Tensor &indices_a,
+                                      const torch::Tensor &indices_b,
+                                      int split_k_slices,
+                                      int mma_tile,
+                                      int M_A,
+                                      int K,
+                                      int K_B,
+                                      int N,
+                                      int gather_ab_size,
+                                      float alpha,
+                                      float beta) {
+  using ElementA = typename torch_to_cutlass<ScalarA>::type;
+  using ElementB = typename torch_to_cutlass<ScalarB>::type;
+  using ElementOutput = typename torch_to_cutlass<ScalarOutput>::type;
+  using ElementAccumulator = typename torch_to_cutlass<ScalarAccumulator>::type;
+
+  TORCH_CHECK(tensor_a.scalar_type() == ScalarA);
+  TORCH_CHECK(tensor_b.scalar_type() == ScalarB);
+  TORCH_CHECK(tensor_c.scalar_type() == ScalarOutput);
+  TORCH_CHECK(tensor_d.scalar_type() == ScalarOutput);
+
+  // Macro for TrAB gather tile cases
+#define GENERATE_TRAB_TILE_CASE(TILE_NAME)                                              \
+  case warpconvnet::gemm::MMATile::TILE_NAME:                                           \
+    return run_cutlass_gemm_trAB_gather<ElementA,                                       \
+                                        ElementB,                                       \
+                                        ElementOutput,                                  \
+                                        ElementAccumulator,                             \
+                                        warpconvnet::gemm::TILE_NAME,                   \
+                                        cutlass::arch::Sm80>(tensor_a.data_ptr(),       \
+                                                             tensor_b.data_ptr(),       \
+                                                             tensor_c.data_ptr(),       \
+                                                             tensor_d.data_ptr(),       \
+                                                             indices_a.data_ptr<int>(), \
+                                                             indices_b.data_ptr<int>(), \
+                                                             split_k_slices,            \
+                                                             M_A,                       \
+                                                             K,                         \
+                                                             K_B,                       \
+                                                             N,                         \
+                                                             gather_ab_size,            \
+                                                             alpha,                     \
+                                                             beta);
+
+  warpconvnet::gemm::MMATile tile = static_cast<warpconvnet::gemm::MMATile>(mma_tile);
+  switch (tile) {
+    GENERATE_TRAB_TILE_CASE(Tile128x128x32);
+    GENERATE_TRAB_TILE_CASE(Tile128x64x32);
+    GENERATE_TRAB_TILE_CASE(Tile64x128x32);
+    GENERATE_TRAB_TILE_CASE(Tile64x64x32);
+    default:
+      TORCH_CHECK(false, "Unsupported mma_tile value");
+  }
+#undef GENERATE_TRAB_TILE_CASE
 }

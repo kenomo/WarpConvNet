@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cutlass/arch/arch.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_universal.h>
 #include <cutlass/layout/matrix.h>

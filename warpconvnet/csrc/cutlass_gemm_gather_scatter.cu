@@ -6,6 +6,157 @@
 #include "include/gemm_error_codes.h"
 #include "include/gemm_operations.h"
 
+#ifdef DEBUG
+#include <cxxabi.h>
+
+#include <iomanip>
+#include <iostream>
+#include <typeinfo>
+
+// Helper function to demangle type names
+std::string demangle_type_name(const char *name) {
+  int status = 0;
+  char *demangled = abi::__cxa_demangle(name, 0, 0, &status);
+  if (status == 0) {
+    std::string result(demangled);
+    free(demangled);
+    return result;
+  }
+  return std::string(name);
+}
+
+// Helper function to print GemmShape dimensions
+template <typename GemmShape>
+std::string print_gemm_shape() {
+  return std::to_string(GemmShape::kM) + "x" + std::to_string(GemmShape::kN) + "x" +
+         std::to_string(GemmShape::kK);
+}
+
+// Debug function to print GEMM arguments and traits
+template <typename Gemm, typename Traits, typename Config>
+void debug_print_gemm_arguments(const typename Gemm::Arguments &arguments,
+                                int problem_m,
+                                int problem_n,
+                                int problem_k,
+                                int M_A,
+                                int K,
+                                int K_B,
+                                int N,
+                                int M_C,
+                                int gather_a_size,
+                                int scatter_d_size) {
+  std::cout << "\n=== DEBUG: GEMM Arguments ===" << std::endl;
+  std::cout << "Element types:" << std::endl;
+  std::cout << "  ElementInputA: " << demangle_type_name(typeid(typename Gemm::ElementA).name())
+            << std::endl;
+  std::cout << "  ElementInputB: " << demangle_type_name(typeid(typename Gemm::ElementB).name())
+            << std::endl;
+  std::cout << "  ElementOutput: " << demangle_type_name(typeid(typename Gemm::ElementC).name())
+            << std::endl;
+  std::cout << "  ElementAccumulator: "
+            << demangle_type_name(typeid(typename Gemm::ElementAccumulator).name()) << std::endl;
+
+  std::cout << "\nTrait Shapes:" << std::endl;
+  std::cout << "  ShapeMMAThreadBlock: " << print_gemm_shape<typename Traits::ShapeMMAThreadBlock>()
+            << std::endl;
+  std::cout << "  ShapeMMAWarp: " << print_gemm_shape<typename Traits::ShapeMMAWarp>() << std::endl;
+  std::cout << "  ShapeMMAOp: " << print_gemm_shape<typename Traits::ShapeMMAOp>() << std::endl;
+
+  std::cout << "\nTrait Properties:" << std::endl;
+  std::cout << "  ConfigName: " << Traits::GetConfigName() << std::endl;
+  std::cout << "  AlignmentA: " << int(Traits::AlignmentA) << std::endl;
+  std::cout << "  AlignmentB: " << int(Traits::AlignmentB) << std::endl;
+  std::cout << "  SupportsTensorOp: " << (Traits::SupportsTensorOp ? "true" : "false") << std::endl;
+  std::cout << "  SupportsGatherA: " << (Traits::SupportsGatherA ? "true" : "false") << std::endl;
+  std::cout << "  SupportsGatherB: " << (Traits::SupportsGatherB ? "true" : "false") << std::endl;
+  std::cout << "  SupportsScatterD: " << (Traits::SupportsScatterD ? "true" : "false") << std::endl;
+  std::cout << "  SupportsTransposeA: " << (Traits::SupportsTransposeA ? "true" : "false")
+            << std::endl;
+  std::cout << "  SupportsTransposeB: " << (Traits::SupportsTransposeB ? "true" : "false")
+            << std::endl;
+  std::cout << "  UseMixedInput: " << (Traits::UseMixedInput ? "true" : "false") << std::endl;
+  std::cout << "  IsValidConfiguration: " << (Traits::IsValidConfiguration() ? "true" : "false")
+            << std::endl;
+
+  std::cout << "\nLayout types:" << std::endl;
+  std::cout << "  LayoutInputA: "
+            << demangle_type_name(typeid(typename Traits::LayoutInputA).name()) << std::endl;
+  std::cout << "  LayoutInputB: "
+            << demangle_type_name(typeid(typename Traits::LayoutInputB).name()) << std::endl;
+  std::cout << "  LayoutOutput: "
+            << demangle_type_name(typeid(typename Traits::LayoutOutput).name()) << std::endl;
+
+  std::cout << "\nMMA Operation:" << std::endl;
+  std::cout << "  MMAOp: " << demangle_type_name(typeid(typename Traits::MMAOp).name())
+            << std::endl;
+  std::cout << "  ArchitectureTag: "
+            << demangle_type_name(typeid(typename Traits::ArchitectureTag).name()) << std::endl;
+
+  std::cout << "\nConfiguration Analysis:" << std::endl;
+  std::cout << "  Has operations: " << (Config::has_operations() ? "true" : "false") << std::endl;
+  std::cout << "  Requires TensorOp: "
+            << (Config::has_operations() && Traits::SupportsTensorOp ? "yes (supported)"
+                : Config::has_operations()                           ? "yes (NOT supported)"
+                                                                     : "no")
+            << std::endl;
+  std::cout << "  Config gather_a: " << (bool(Config::gather_a) ? "true" : "false") << std::endl;
+  std::cout << "  Config gather_b: " << (bool(Config::gather_b) ? "true" : "false") << std::endl;
+  std::cout << "  Config scatter_d: " << (bool(Config::scatter_d) ? "true" : "false") << std::endl;
+  std::cout << "  Config transpose_a: " << (bool(Config::transpose_a) ? "true" : "false")
+            << std::endl;
+  std::cout << "  Config transpose_b: " << (bool(Config::transpose_b) ? "true" : "false")
+            << std::endl;
+
+  std::cout << "\nProblem size:" << std::endl;
+  std::cout << "  problem_m: " << problem_m << ", problem_n: " << problem_n
+            << ", problem_k: " << problem_k << std::endl;
+
+  std::cout << "\nOriginal matrix dimensions:" << std::endl;
+  std::cout << "  M_A (A rows): " << M_A << ", K (A cols): " << K << std::endl;
+  std::cout << "  K_B (B rows): " << K_B << ", N (B cols): " << N << std::endl;
+  std::cout << "  M_C (C rows): " << M_C << ", N (C cols): " << N << std::endl;
+
+  std::cout << "\nGather/Scatter info:" << std::endl;
+  std::cout << "  gather_a_size: " << gather_a_size << ", scatter_d_size: " << scatter_d_size
+            << std::endl;
+
+  std::cout << "\nMode and split:" << std::endl;
+  std::cout << "  mode: " << static_cast<int>(arguments.mode) << std::endl;
+  std::cout << "  split_k_slices: " << arguments.batch_count << std::endl;
+
+  std::cout << "\nPointers (non-null check):" << std::endl;
+  std::cout << "  ptr_A: " << (arguments.ptr_A ? "non-null" : "null") << std::endl;
+  std::cout << "  ptr_B: " << (arguments.ptr_B ? "non-null" : "null") << std::endl;
+  std::cout << "  ptr_C: " << (arguments.ptr_C ? "non-null" : "null") << std::endl;
+  std::cout << "  ptr_D: " << (arguments.ptr_D ? "non-null" : "null") << std::endl;
+
+  // Only print gather/scatter pointers if they're available for this configuration
+  if constexpr (Config::gather_a || Config::gather_b || Config::scatter_d) {
+    std::cout
+        << "  NOTE: Gather/scatter pointer access skipped in debug to avoid compilation errors"
+        << std::endl;
+  }
+
+  std::cout << "\nBatch strides:" << std::endl;
+  std::cout << "  batch_stride_A: " << arguments.batch_stride_A << std::endl;
+  std::cout << "  batch_stride_B: " << arguments.batch_stride_B << std::endl;
+  std::cout << "  batch_stride_C: " << arguments.batch_stride_C << std::endl;
+  std::cout << "  batch_stride_D: " << arguments.batch_stride_D << std::endl;
+
+  std::cout << "\nLayout strides:" << std::endl;
+  std::cout << "  lda: " << arguments.lda << std::endl;
+  std::cout << "  ldb: " << arguments.ldb << std::endl;
+  std::cout << "  ldc: " << arguments.ldc << std::endl;
+  std::cout << "  ldd: " << arguments.ldd << std::endl;
+
+  std::cout << "\nEpilogue:" << std::endl;
+  std::cout << "  alpha: " << static_cast<float>(arguments.epilogue.alpha) << std::endl;
+  std::cout << "  beta: " << static_cast<float>(arguments.epilogue.beta) << std::endl;
+
+  std::cout << "================================================" << std::endl;
+}
+#endif
+
 // Main templated function implementation - define in the warpconvnet::gemm namespace
 namespace warpconvnet {
 namespace gemm {
@@ -58,6 +209,7 @@ template <typename ElementInputA,
           typename ElementOutput,
           typename ElementAccumulator,
           typename Config,
+          typename TileTag,
           typename ArchTag>
 int run_cutlass_gemm_with_operations_templated(
     const void *tensor_a,
@@ -78,8 +230,68 @@ int run_cutlass_gemm_with_operations_templated(
     int scatter_d_size,                           // indices_d size
     float alpha,
     float beta) {
-  using Traits = GemmOperationTraits<ElementInputA, ElementAccumulator, Config, ArchTag>;
+  using Traits = GemmOperationTraits<ElementInputA, ElementAccumulator, Config, TileTag, ArchTag>;
   using ElementComputeEpilogue = ElementAccumulator;
+
+  // clang-format off
+#ifdef DEBUG
+  std::cout << "\n=== DEBUG: Entering run_cutlass_gemm_with_operations_templated ===" << std::endl;
+  std::cout << "ElementInputA: " << demangle_type_name(typeid(ElementInputA).name()) << std::endl;
+  std::cout << "ElementInputB: " << demangle_type_name(typeid(ElementInputB).name()) << std::endl;
+  std::cout << "ElementOutput: " << demangle_type_name(typeid(ElementOutput).name()) << std::endl;
+  std::cout << "ElementAccumulator: " << demangle_type_name(typeid(ElementAccumulator).name()) << std::endl;
+  std::cout << "Config: " << demangle_type_name(typeid(Config).name()) << std::endl;
+  std::cout << "TileTag: " << demangle_type_name(typeid(TileTag).name()) << std::endl;
+  std::cout << "ArchTag: " << demangle_type_name(typeid(ArchTag).name()) << std::endl;
+  std::cout << "=== DEBUG: Traits created ===" << std::endl;
+  std::cout << "Traits::UseMixedInput: " << (Traits::UseMixedInput ? "true" : "false") << std::endl;
+  std::cout << "Traits::SupportsTensorOp: " << (Traits::SupportsTensorOp ? "true" : "false") << std::endl;
+  std::cout << "Traits::IsValidConfiguration(): " << (Traits::IsValidConfiguration() ? "true" : "false") << std::endl;
+
+  const char* tile_name = "Unknown";
+  if constexpr (std::is_same_v<TileTag, Tile128x128x32>) {
+      tile_name = "Tile128x128x32";
+  } else if constexpr (std::is_same_v<TileTag, Tile128x64x32>) {
+      tile_name = "Tile128x64x32";
+  } else if constexpr (std::is_same_v<TileTag, Tile64x64x32>) {
+      tile_name = "Tile64x64x32";
+  }
+
+  std::cout << "\n=== DEBUG: GEMM Configuration Analysis ===" << std::endl;
+  std::cout << "Tile: " << tile_name << std::endl;
+  std::cout << "Arch: " << demangle_type_name(typeid(ArchTag).name()) << std::endl;
+
+  std::cout << "\nTrait Shapes:" << std::endl;
+  std::cout << "  ShapeMMAThreadBlock: " << print_gemm_shape<typename Traits::ShapeMMAThreadBlock>() << std::endl;
+  std::cout << "  ShapeMMAWarp: " << print_gemm_shape<typename Traits::ShapeMMAWarp>() << std::endl;
+  std::cout << "  ShapeMMAOp: " << print_gemm_shape<typename Traits::ShapeMMAOp>() << std::endl;
+
+  std::cout << "\nTrait Properties:" << std::endl;
+  std::cout << "  SupportsTensorOp: " << (Traits::SupportsTensorOp ? "true" : "false") << std::endl;
+  std::cout << "  SupportsGatherA: " << (Traits::SupportsGatherA ? "true" : "false") << std::endl;
+  std::cout << "  SupportsGatherB: " << (Traits::SupportsGatherB ? "true" : "false") << std::endl;
+  std::cout << "  SupportsScatterD: " << (Traits::SupportsScatterD ? "true" : "false") << std::endl;
+  std::cout << "  SupportsTransposeA: " << (Traits::SupportsTransposeA ? "true" : "false") << std::endl;
+  std::cout << "  SupportsTransposeB: " << (Traits::SupportsTransposeB ? "true" : "false") << std::endl;
+  std::cout << "  UseMixedInput: " << (Traits::UseMixedInput ? "true" : "false") << std::endl;
+  std::cout << "  IsValidConfiguration: " << (Traits::IsValidConfiguration() ? "true" : "false") << std::endl;
+
+  std::cout << "\nMMA Operation:" << std::endl;
+  std::cout << "  MMAOp: " << demangle_type_name(typeid(typename Traits::MMAOp).name()) << std::endl;
+  std::cout << "  ArchitectureTag: " << demangle_type_name(typeid(typename Traits::ArchitectureTag).name()) << std::endl;
+
+  std::cout << "\nConfiguration Analysis:" << std::endl;
+  std::cout << "  Has operations: " << (Config::has_operations() ? "true" : "false") << std::endl;
+  std::cout << "  Requires TensorOp: " << (Config::has_operations() && Traits::SupportsTensorOp ? "yes (supported)" :
+                                          Config::has_operations() ? "yes (NOT supported)" : "no") << std::endl;
+  std::cout << "  Config gather_a: " << (bool(Config::gather_a) ? "true" : "false") << std::endl;
+  std::cout << "  Config gather_b: " << (bool(Config::gather_b) ? "true" : "false") << std::endl;
+  std::cout << "  Config scatter_d: " << (bool(Config::scatter_d) ? "true" : "false") << std::endl;
+  std::cout << "  Config transpose_a: " << (bool(Config::transpose_a) ? "true" : "false") << std::endl;
+  std::cout << "  Config transpose_b: " << (bool(Config::transpose_b) ? "true" : "false") << std::endl;
+  std::cout << "================================================" << std::endl;
+#endif
+  // clang-format on
 
   if constexpr (Traits::UseMixedInput) {
     return static_cast<int>(GemmStatus::kErrorMixedInputUnsupported);
@@ -105,7 +317,7 @@ int run_cutlass_gemm_with_operations_templated(
                                                     typename Traits::LayoutOutput,
                                                     ElementAccumulator,
                                                     typename Traits::MMAOp,
-                                                    typename Traits::ArchitectureTag,
+                                                    ArchTag,
                                                     typename Traits::ShapeMMAThreadBlock,
                                                     typename Traits::ShapeMMAWarp,
                                                     typename Traits::ShapeMMAOp,
@@ -153,7 +365,7 @@ int run_cutlass_gemm_with_operations_templated(
       assert(indices_d == nullptr);
       problem_m = K;  // rows in result (from transposed A)
       // TODO(cchoy): Should it be N instead of gather_a_size for problem_n
-      problem_n = N;  // columns in result (from B)
+      problem_n = N;              // columns in result (from B)
       problem_k = gather_a_size;  // inner dimension
       N_B = gather_a_size;
     } else if constexpr (Config::gather_a && Config::scatter_d) {
@@ -213,6 +425,22 @@ int run_cutlass_gemm_with_operations_templated(
 
     Gemm gemm_op;
 
+#ifdef DEBUG
+    // Print detailed GEMM arguments for valid configurations only (config info already printed
+    // above)
+    debug_print_gemm_arguments<Gemm, Traits, Config>(arguments,
+                                                     problem_m,
+                                                     problem_n,
+                                                     problem_k,
+                                                     M_A,
+                                                     K,
+                                                     K_B,
+                                                     N,
+                                                     M_C,
+                                                     gather_a_size,
+                                                     scatter_d_size);
+#endif
+
     cutlass::Status status = gemm_op.can_implement(arguments);
     if (status != cutlass::Status::kSuccess) {
       return static_cast<int>(GemmStatus::kErrorProblemNotSupported);
@@ -241,11 +469,13 @@ int run_cutlass_gemm_with_operations_templated(
 // Use the namespace for convenience in the rest of the file
 using namespace warpconvnet::gemm;
 
-// A Gather + D scatter
+// Helper function for AD gather scatter
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
-          typename ElementAccumulator>
+          typename ElementAccumulator,
+          typename TileTag,
+          typename Arch = DefaultSmArch>
 int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                        const void *tensor_b,
                                        const void *tensor_c,
@@ -265,7 +495,9 @@ int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
                                                     ElementInputB,
                                                     ElementOutput,
                                                     ElementAccumulator,
-                                                    ConfigAD>(
+                                                    ConfigAD,
+                                                    TileTag,
+                                                    Arch>(
       tensor_a,
       tensor_b,
       tensor_c,
@@ -285,38 +517,13 @@ int run_cutlass_gemm_ad_gather_scatter(const void *tensor_a,
       beta);
 }
 
-// A Gather + D scatter instantiations
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, float)
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t,
-                                              cutlass::half_t,
-                                              cutlass::half_t,
-                                              float)
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t,
-                                              cutlass::half_t,
-                                              float,
-                                              cutlass::half_t)
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::half_t,
-                                              cutlass::half_t,
-                                              cutlass::half_t,
-                                              cutlass::half_t)
-
-#ifndef DISABLE_BFLOAT16
-// Bfloat16 precision instantiations (FP32 accumulator)
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::bfloat16_t,
-                                              cutlass::bfloat16_t,
-                                              cutlass::bfloat16_t,
-                                              float)
-INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(cutlass::bfloat16_t,
-                                              cutlass::bfloat16_t,
-                                              float,
-                                              float)
-#endif  // DISABLE_BFLOAT16
-
 // AB Gather with A Transpose
 template <typename ElementInputA,
           typename ElementInputB,
           typename ElementOutput,
-          typename ElementAccumulator>
+          typename ElementAccumulator,
+          typename TileTag,
+          typename Arch = DefaultSmArch>
 int run_cutlass_gemm_trAB_gather(const void *tensor_a,
                                  const void *tensor_b,
                                  const void *tensor_c,
@@ -337,7 +544,8 @@ int run_cutlass_gemm_trAB_gather(const void *tensor_a,
                                                     ElementOutput,
                                                     ElementAccumulator,
                                                     ConfigTrAB,
-                                                    DefaultSmArch>(
+                                                    TileTag,
+                                                    Arch>(
       tensor_a,
       tensor_b,
       tensor_c,
@@ -357,20 +565,16 @@ int run_cutlass_gemm_trAB_gather(const void *tensor_a,
       beta);
 }
 
-// Instantiate trAB Gather
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, float);
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, cutlass::half_t, float);
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::half_t, cutlass::half_t, float, cutlass::half_t);
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::half_t,
-                                        cutlass::half_t,
-                                        cutlass::half_t,
-                                        cutlass::half_t);
+// Instantiate all configurations for the default architecture (SM80 Tile128x128x32)
+INSTANTIATE_AD_GS_FOR_ARCH(Tile128x128x32, DefaultSmArch)
+INSTANTIATE_TRAB_FOR_ARCH(Tile128x128x32, DefaultSmArch)
 
-#ifndef DISABLE_BFLOAT16
-// Bfloat16 precision instantiations (FP32 accumulator)
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t, cutlass::bfloat16_t, float, float);
-INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(cutlass::bfloat16_t,
-                                        cutlass::bfloat16_t,
-                                        cutlass::bfloat16_t,
-                                        float);
-#endif  // DISABLE_BFLOAT16
+// Instantiate all alternative tile configurations for SM80
+INSTANTIATE_AD_GS_FOR_ARCH(Tile128x64x32, DefaultSmArch)
+INSTANTIATE_TRAB_FOR_ARCH(Tile128x64x32, DefaultSmArch)
+
+INSTANTIATE_AD_GS_FOR_ARCH(Tile64x128x32, DefaultSmArch)
+INSTANTIATE_TRAB_FOR_ARCH(Tile64x128x32, DefaultSmArch)
+
+INSTANTIATE_AD_GS_FOR_ARCH(Tile64x64x32, DefaultSmArch)
+INSTANTIATE_TRAB_FOR_ARCH(Tile64x64x32, DefaultSmArch)

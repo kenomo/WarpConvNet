@@ -6,13 +6,17 @@
 #include <cutlass/cutlass.h>
 #include <cutlass/numeric_types.h>
 
+#include "gemm_mma_tiles.h"
 #include "gemm_operation_types.h"
 
 namespace warpconvnet {
 namespace gemm {
 
 // Base template traits for different precision combinations
-template <typename ElementInput, typename ElementAccumulator, typename ArchTag = DefaultSmArch>
+template <typename ElementInput,
+          typename ElementAccumulator,
+          typename TileTag = Tile128x128x32,
+          typename ArchTag = DefaultSmArch>
 struct GemmPrecisionTraits {
   // Default to SIMT for unsupported combinations
   using MMAOp = cutlass::arch::OpClassSimt;
@@ -32,9 +36,11 @@ struct GemmPrecisionTraits {
 template <typename ElementInput,
           typename ElementAccumulator,
           typename Config,
+          typename TileTag = Tile128x128x32,
           typename ArchTag = DefaultSmArch>
-struct GemmOperationTraits : public GemmPrecisionTraits<ElementInput, ElementAccumulator, ArchTag> {
-  using Base = GemmPrecisionTraits<ElementInput, ElementAccumulator, ArchTag>;
+struct GemmOperationTraits
+    : public GemmPrecisionTraits<ElementInput, ElementAccumulator, TileTag, ArchTag> {
+  using Base = GemmPrecisionTraits<ElementInput, ElementAccumulator, TileTag, ArchTag>;
 
   // Use layouts from Config (which handles transpose logic)
   using LayoutInputA = typename Config::LayoutInputA;

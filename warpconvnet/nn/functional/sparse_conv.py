@@ -12,6 +12,7 @@ import logging
 import cupy as cp
 import math
 import os
+import itertools
 
 from torch import Tensor
 from torch.autograd import Function
@@ -166,7 +167,10 @@ class SpatiallySparseConvConfig:
 _BENCHMARK_NUM_RUNS = 2
 _BENCHMARK_FORWARD_PARAMS = [
     (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}),
-    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {}),
+    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 0}),
+    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 1}),
+    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 2}),
+    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 3}),
     (
         SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
         {"fwd_block_size": 8},
@@ -186,7 +190,9 @@ _BENCHMARK_FORWARD_PARAMS = [
 ]
 _BENCHMARK_BACKWARD_PARAMS = [
     (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}),
-    (SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {}),
+    # Generate all combinations of MMA tile configurations (4x4 = 16 combinations)
+    *[(SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile_ad": ad, "mma_tile_trab": trab})
+      for ad, trab in itertools.product(range(4), repeat=2)],
     (
         SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
         {"bwd_block_size": 8},
@@ -530,6 +536,7 @@ def _cutlass_implicit_gemm_forward_logic(
     num_out_coords: int,
     accumulator_type: torch.dtype = torch.float32,
     split_k_slices: int = 1,
+    mma_tile: int = 0,
 ) -> Union[Float[Tensor, "M C_out"], int]:
     if _C is None:
         raise ImportError(
@@ -563,6 +570,7 @@ def _cutlass_implicit_gemm_forward_logic(
             out_map,
             accumulator_type=accumulator_type,
             split_k_slices=split_k_slices,
+            mma_tile=mma_tile,
         )
         if status != 0:
             return status
@@ -575,7 +583,10 @@ def _cutlass_implicit_gemm_backward_logic(
     weight: Float[Tensor, "K C_in C_out"],
     kernel_map: IntSearchResult,
     accumulator_type: torch.dtype = torch.float32,
-    split_k_slices: int = 1,
+    split_k_slices_ad: int = 1,
+    split_k_slices_trab: int = 1,
+    mma_tile_ad: int = 0,
+    mma_tile_trab: int = 0,
     device: torch.device = None,
 ) -> Union[Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]], Tuple[int, int]]:
     if _C is None:
@@ -614,7 +625,8 @@ def _cutlass_implicit_gemm_backward_logic(
             out_map,
             in_map,
             accumulator_type=accumulator_type,
-            split_k_slices=split_k_slices,
+            split_k_slices=split_k_slices_ad,
+            mma_tile=mma_tile_ad,
         )
         if status != 0:
             return status, i
@@ -629,6 +641,8 @@ def _cutlass_implicit_gemm_backward_logic(
             out_map,
             alpha=1.0,
             beta=0,
+            split_k_slices=split_k_slices_trab,
+            mma_tile=mma_tile_trab,
         )
         if status != 0:
             return status, i
@@ -1165,6 +1179,7 @@ def _run_forward_benchmarks(
                 num_out_coords,
                 accumulator_type=params_config.get("accumulator_type", torch.float32),
                 split_k_slices=params_config.get("split_k_slices", 1),
+                mma_tile=params_config.get("mma_tile", 0),
             )
             if isinstance(status, int) and status != 0:
                 return status
@@ -1283,7 +1298,10 @@ def _run_backward_benchmarks(
                 weight,
                 kernel_map,
                 accumulator_type=params_config.get("accumulator_type", torch.float32),
-                split_k_slices=params_config.get("split_k_slices", 1),
+                split_k_slices_ad=params_config.get("split_k_slices_ad", 1),
+                split_k_slices_trab=params_config.get("split_k_slices_trab", 1),
+                mma_tile_ad=params_config.get("mma_tile_ad", 0),
+                mma_tile_trab=params_config.get("mma_tile_trab", 0),
                 device=device,
             )
             if isinstance(status, int) and status != 0:

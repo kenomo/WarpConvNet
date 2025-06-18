@@ -87,6 +87,12 @@ if os.environ.get("DISABLE_BFLOAT16", "0") == "1":
     cxx_args.append("-DDISABLE_BFLOAT16")
     nvcc_args.append("-DDISABLE_BFLOAT16")
 
+# Check DEBUG flag
+if os.environ.get("DEBUG", "0") == "1":
+    print("Enabling DEBUG mode")
+    cxx_args.append("-DDEBUG")
+    nvcc_args.append("-DDEBUG")
+
 # Define the extension
 ext_modules = [
     CUDAExtension(

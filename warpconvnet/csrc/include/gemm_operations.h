@@ -11,64 +11,91 @@
 #include "gemm_operation_types.h"
 #include "gemm_precision_traits.h"
 
-// Template instantiation macros for reducing code duplication
-#define INSTANTIATE_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator, Config)       \
-  namespace warpconvnet {                                                              \
-  namespace gemm {                                                                     \
-  template int run_cutlass_gemm_with_operations_templated<InputA,                      \
-                                                          InputB,                      \
-                                                          Output,                      \
-                                                          Accumulator,                 \
-                                                          Config,                      \
-                                                          DefaultSmArch>(const void *, \
-                                                                         const void *, \
-                                                                         const void *, \
-                                                                         void *,       \
-                                                                         const int *,  \
-                                                                         const int *,  \
-                                                                         const int *,  \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         int,          \
-                                                                         float,        \
-                                                                         float);       \
-  }                                                                                    \
-  }
-
-#define INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator) \
-  template int run_cutlass_gemm_ad_gather_scatter<InputA, InputB, Output, Accumulator>(    \
-      const void *,                                                                        \
-      const void *,                                                                        \
-      const void *,                                                                        \
-      void *,                                                                              \
-      const int *,                                                                         \
-      const int *,                                                                         \
-      int,                                                                                 \
-      int,                                                                                 \
-      int,                                                                                 \
-      int,                                                                                 \
-      int,                                                                                 \
-      int,                                                                                 \
-      float,                                                                               \
+#define INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                 \
+    InputA, InputB, Output, Accumulator, Tile, Arch)                                   \
+  template int                                                                         \
+  run_cutlass_gemm_ad_gather_scatter<InputA, InputB, Output, Accumulator, Tile, Arch>( \
+      const void *,                                                                    \
+      const void *,                                                                    \
+      const void *,                                                                    \
+      void *,                                                                          \
+      const int *,                                                                     \
+      const int *,                                                                     \
+      int,                                                                             \
+      int,                                                                             \
+      int,                                                                             \
+      int,                                                                             \
+      int,                                                                             \
+      int,                                                                             \
+      float,                                                                           \
       float);
 
-#define INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator)           \
-  template int run_cutlass_gemm_trAB_gather<InputA, InputB, Output, Accumulator>(const void *, \
-                                                                                 const void *, \
-                                                                                 const void *, \
-                                                                                 void *,       \
-                                                                                 const int *,  \
-                                                                                 const int *,  \
-                                                                                 int,          \
-                                                                                 int,          \
-                                                                                 int,          \
-                                                                                 int,          \
-                                                                                 int,          \
-                                                                                 int,          \
-                                                                                 float,        \
-                                                                                 float);
+#define INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(InputA, InputB, Output, Accumulator, Tile, Arch) \
+  template int run_cutlass_gemm_trAB_gather<InputA, InputB, Output, Accumulator, Tile, Arch>(    \
+      const void *,                                                                              \
+      const void *,                                                                              \
+      const void *,                                                                              \
+      void *,                                                                                    \
+      const int *,                                                                               \
+      const int *,                                                                               \
+      int,                                                                                       \
+      int,                                                                                       \
+      int,                                                                                       \
+      int,                                                                                       \
+      int,                                                                                       \
+      int,                                                                                       \
+      float,                                                                                     \
+      float);
+
+// -----------------------------------------------------------------------------
+// Helper macros to instantiate standard precision combinations for AD gather
+// scatter for a given architecture / tile tag.  Keeps call-sites concise.
+// -----------------------------------------------------------------------------
+#define _WCN_INSTANTIATE_AD_GS_HALF_VARIANTS(TileTag, ArchTag)                    \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                  \
+      cutlass::half_t, cutlass::half_t, float, float, TileTag, ArchTag)           \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                  \
+      cutlass::half_t, cutlass::half_t, cutlass::half_t, float, TileTag, ArchTag) \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                  \
+      cutlass::half_t, cutlass::half_t, float, cutlass::half_t, TileTag, ArchTag) \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                  \
+      cutlass::half_t, cutlass::half_t, cutlass::half_t, cutlass::half_t, TileTag, ArchTag)
+
+#ifndef DISABLE_BFLOAT16
+#define _WCN_INSTANTIATE_AD_GS_BF16_VARIANTS(TileTag, ArchTag)                                \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                              \
+      cutlass::bfloat16_t, cutlass::bfloat16_t, cutlass::bfloat16_t, float, TileTag, ArchTag) \
+  INSTANTIATE_AD_GATHER_SCATTER_GEMM_OPERATIONS(                                              \
+      cutlass::bfloat16_t, cutlass::bfloat16_t, float, float, TileTag, ArchTag)
+#else
+#define _WCN_INSTANTIATE_AD_GS_BF16_VARIANTS(TileTag, ArchTag)
+#endif
+
+#define INSTANTIATE_AD_GS_FOR_ARCH(TileTag, ArchTag)     \
+  _WCN_INSTANTIATE_AD_GS_HALF_VARIANTS(TileTag, ArchTag) \
+  _WCN_INSTANTIATE_AD_GS_BF16_VARIANTS(TileTag, ArchTag)
+
+// ---- helpers for TrAB gather (A transpose + A,B gather) ---------------------
+#define _WCN_INSTANTIATE_TRAB_HALF_VARIANTS(TileTag, ArchTag)                      \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                         \
+      cutlass::half_t, cutlass::half_t, float, float, TileTag, ArchTag);           \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                         \
+      cutlass::half_t, cutlass::half_t, cutlass::half_t, float, TileTag, ArchTag); \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                         \
+      cutlass::half_t, cutlass::half_t, float, cutlass::half_t, TileTag, ArchTag); \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                         \
+      cutlass::half_t, cutlass::half_t, cutlass::half_t, cutlass::half_t, TileTag, ArchTag);
+
+#ifndef DISABLE_BFLOAT16
+#define _WCN_INSTANTIATE_TRAB_BF16_VARIANTS(TileTag, ArchTag)                                  \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                                     \
+      cutlass::bfloat16_t, cutlass::bfloat16_t, cutlass::bfloat16_t, float, TileTag, ArchTag); \
+  INSTANTIATE_TrAB_GATHER_GEMM_OPERATIONS(                                                     \
+      cutlass::bfloat16_t, cutlass::bfloat16_t, float, float, TileTag, ArchTag);
+#else
+#define _WCN_INSTANTIATE_TRAB_BF16_VARIANTS(TileTag, ArchTag)
+#endif
+
+#define INSTANTIATE_TRAB_FOR_ARCH(TileTag, ArchTag)     \
+  _WCN_INSTANTIATE_TRAB_HALF_VARIANTS(TileTag, ArchTag) \
+  _WCN_INSTANTIATE_TRAB_BF16_VARIANTS(TileTag, ArchTag)
