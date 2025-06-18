@@ -111,6 +111,6 @@ def get_logger(name: str = None, rank_zero_only: bool = True) -> RankedLogger:
         logger.setLevel(level)
 
         # Prevent propagation to avoid duplicate logs
-        logger.propagate = False
+        logger.logger.propagate = False
 
     return logger

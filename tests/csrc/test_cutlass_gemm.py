@@ -99,7 +99,7 @@ def test_cutlass_gemm_gather_scatter(test_types):
     )
 
     # Test with explicit accumulator type (default is float32)
-    status = _C.gemm.cutlass_gemm_ad_gather_scatter(
+    status = _C.gemm.cutlass_gemm_AD_gather_scatter(
         tensor_a=tensor_a,
         tensor_b=tensor_b,
         tensor_c=tensor_c,
@@ -114,7 +114,7 @@ def test_cutlass_gemm_gather_scatter(test_types):
     torch.cuda.synchronize()
     assert (
         status == 0
-    ), f"Error in cutlass_gemm_ad_gather_scatter: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
+    ), f"Error in cutlass_gemm_AD_gather_scatter: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
 
     # Compute reference result using PyTorch (convert to float32 for computation)
     a_gathered = tensor_a[indices_a.squeeze()]

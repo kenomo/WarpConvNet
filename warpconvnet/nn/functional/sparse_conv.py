@@ -554,7 +554,7 @@ def _cutlass_implicit_gemm_forward_logic(
             continue
         in_map = in_map.to(device)
         out_map = out_map.to(device)
-        status = _C.gemm.cutlass_gemm_ad_gather_scatter(
+        status = _C.gemm.cutlass_gemm_AD_gather_scatter(
             in_features,
             weight[i],
             output_feature_tensor,
@@ -606,7 +606,7 @@ def _cutlass_implicit_gemm_backward_logic(
         curr_weight = weight[i]
 
         # grad_in_features[in_map] += torch.matmul(grad_output[out_map], curr_weight.T)
-        status = _C.gemm.cutlass_gemm_ad_gather_scatter(
+        status = _C.gemm.cutlass_gemm_AD_gather_scatter(
             grad_output,
             curr_weight.T.contiguous(),
             grad_in_features,
