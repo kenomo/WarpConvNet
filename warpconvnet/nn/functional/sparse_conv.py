@@ -32,6 +32,12 @@ from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.cuda_utils import load_kernel
 from warpconvnet.utils.logger import get_logger
+from warpconvnet.utils.benchmark_cache import (
+    load_benchmark_cache,
+    save_benchmark_cache,
+    mark_benchmark_cache_dirty,
+)
+from warpconvnet.utils.type_cast import _min_dtype, _max_dtype
 
 logger = get_logger(__name__)
 try:
@@ -116,6 +122,14 @@ def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821
     return x
 
 
+_SPARSE_CONV_CONFIG_DTYPE_TO_INT = {
+    torch.bfloat16: 0,
+    torch.float16: 1,
+    torch.float32: 2,
+    torch.float64: 3,
+}
+
+
 @dataclass
 class SpatiallySparseConvConfig:
     log_num_in_coords: int
@@ -123,6 +137,7 @@ class SpatiallySparseConvConfig:
     in_channels: int
     out_channels: int
     kernel_volume: int
+    in_dtype: torch.dtype
     # explicit_matmul_batch_size: Optional[int] = None # TODO: Add if supporting batched explicit
 
     def __init__(
@@ -132,6 +147,7 @@ class SpatiallySparseConvConfig:
         in_channels: int,
         out_channels: int,
         kernel_volume: int,
+        in_dtype: torch.dtype,
         # explicit_matmul_batch_size: Optional[int] = None, # TODO
     ):
         self.log_num_in_coords = math.ceil(math.log2(num_in_coords)) if num_in_coords > 0 else 0
@@ -139,6 +155,8 @@ class SpatiallySparseConvConfig:
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_volume = kernel_volume
+        assert in_dtype in _SPARSE_CONV_CONFIG_DTYPE_TO_INT, f"Unsupported in_dtype: {in_dtype}"
+        self.in_dtype = in_dtype
         # self.explicit_matmul_batch_size = explicit_matmul_batch_size # TODO
 
     def __hash__(self):
@@ -149,6 +167,7 @@ class SpatiallySparseConvConfig:
                 self.in_channels,
                 self.out_channels,
                 self.kernel_volume,
+                _SPARSE_CONV_CONFIG_DTYPE_TO_INT[self.in_dtype],
             ]
         )
 
@@ -161,6 +180,7 @@ class SpatiallySparseConvConfig:
             self.in_channels == other.in_channels
             and self.out_channels == other.out_channels
             and self.kernel_volume == other.kernel_volume
+            and self.in_dtype == other.in_dtype
         )
 
 
@@ -194,6 +214,26 @@ _BENCHMARK_FORWARD_RESULTS: Dict[
 _BENCHMARK_BACKWARD_RESULTS: Dict[
     SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]]
 ] = {}
+
+
+# Load cached benchmark results at module initialization
+def _initialize_benchmark_cache():
+    """Load cached benchmark results and populate global dictionaries."""
+    try:
+        cached_forward, cached_backward = load_benchmark_cache()
+        _BENCHMARK_FORWARD_RESULTS.update(cached_forward)
+        _BENCHMARK_BACKWARD_RESULTS.update(cached_backward)
+        if cached_forward or cached_backward:
+            logger.info(
+                f"Loaded {len(cached_forward)} forward and {len(cached_backward)} "
+                f"backward benchmark configurations from cache"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to initialize benchmark cache: {e}")
+
+
+# Initialize cache on module load
+_initialize_benchmark_cache()
 
 
 def _maybe_cast(tensor: torch.Tensor, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
@@ -523,11 +563,14 @@ def _cutlass_implicit_gemm_forward_logic(
 
     device = in_features.device
     iden_idx = kernel_map.identity_map_index
+    in_dtype = _min_dtype(in_features.dtype, weight.dtype)
+    in_features = in_features.to(dtype=in_dtype)
+    weight = weight.to(dtype=in_dtype)
     if iden_idx is not None:
         output_feature_tensor = torch.matmul(in_features, weight[iden_idx])
     else:
         output_feature_tensor = torch.zeros(
-            num_out_coords, weight.shape[-1], device=device, dtype=in_features.dtype
+            num_out_coords, weight.shape[-1], device=device, dtype=in_dtype
         )
 
     for i in range(len(kernel_map)):
@@ -575,12 +618,18 @@ def _cutlass_implicit_gemm_backward_logic(
     if device is None:
         device = in_features.device
 
+    in_dtype = _min_dtype(in_features.dtype, weight.dtype, grad_output.dtype)
+    grad_output = grad_output.to(dtype=in_dtype)
+    in_features = in_features.to(dtype=in_dtype)
+    orig_weight_dtype = weight.dtype
     grad_weight = torch.zeros_like(weight, device=device)
+    # Downcast to for input
+    weight = weight.to(dtype=in_dtype)
 
     iden_idx = kernel_map.identity_map_index
     if iden_idx is not None:
         grad_in_features = torch.matmul(grad_output, weight[iden_idx].T)
-        grad_weight[iden_idx] = torch.matmul(in_features.T, grad_output)
+        grad_weight[iden_idx] = torch.matmul(in_features.T, grad_output).to(orig_weight_dtype)
     else:
         grad_in_features = torch.zeros_like(in_features, device=device)
 
@@ -619,6 +668,7 @@ def _cutlass_implicit_gemm_backward_logic(
             out_map,
             alpha=1.0,
             beta=0,
+            accumulator_type=accumulator_type,
             split_k_slices=split_k_slices_trab,
             mma_tile=mma_tile_trab,
         )
@@ -626,7 +676,7 @@ def _cutlass_implicit_gemm_backward_logic(
             return status, i
     return (
         grad_in_features.to(dtype=in_features.dtype),
-        grad_weight.to(dtype=weight.dtype),
+        grad_weight.to(dtype=orig_weight_dtype),
     )
 
 
@@ -1183,9 +1233,9 @@ def _run_forward_benchmarks(
         for _ in range(warmup_iters):
             status = _execute_single_fwd_pass(algo_mode, params_config)
             if isinstance(status, int) and status != 0:
-                logger.warning(
-                    f"Error in _run_forward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
-                )
+                # logger.warning(
+                #     f"Error in _run_forward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
+                # )
                 # Save the inf time for this algo_mode
                 all_benchmark_results.append((algo_mode, params_config, float("inf")))
                 continue
@@ -1304,9 +1354,9 @@ def _run_backward_benchmarks(
         for _ in range(warmup_iters):
             status = _execute_single_bwd_pass(algo_mode, params_config)
             if isinstance(status, int) and status != 0:
-                logger.warning(
-                    f"Error in _run_backward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
-                )
+                # logger.warning(
+                #     f"Error in _run_backward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
+                # )
                 # Save the inf time for this algo_mode
                 all_benchmark_results.append((algo_mode, params_config, float("inf")))
                 continue
@@ -1377,6 +1427,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 in_channels=in_features.shape[1],
                 out_channels=weight.shape[2],
                 kernel_volume=weight.shape[0],
+                in_dtype=in_features.dtype,
             )
             global _BENCHMARK_FORWARD_RESULTS  # noqa: F824
             cached_result = _BENCHMARK_FORWARD_RESULTS.get(config)
@@ -1397,6 +1448,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
                     0
                 ]  # Best is first
                 # print(f"Chosen fwd after benchmark: {chosen_fwd_algo}, {chosen_fwd_params}, time: {min_time}")
+
+                # Save benchmark cache after new results
+                mark_benchmark_cache_dirty()
+                save_benchmark_cache(_BENCHMARK_FORWARD_RESULTS, _BENCHMARK_BACKWARD_RESULTS)
 
         if chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
             output_feature_tensor = _explicit_gemm_forward_logic(
@@ -1527,6 +1582,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 in_channels=config_params["in_channels"],
                 out_channels=config_params["out_channels"],
                 kernel_volume=config_params["kernel_volume"],
+                in_dtype=grad_output.dtype,
             )
             global _BENCHMARK_BACKWARD_RESULTS  # noqa: F824
             cached_result = _BENCHMARK_BACKWARD_RESULTS.get(config)
@@ -1549,6 +1605,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
                     0
                 ]  # Best is first
                 # print(f"Chosen bwd after benchmark: {chosen_bwd_algo}, {chosen_bwd_params}, time: {min_time}")
+
+                # Save benchmark cache after new results
+                mark_benchmark_cache_dirty()
+                save_benchmark_cache(_BENCHMARK_FORWARD_RESULTS, _BENCHMARK_BACKWARD_RESULTS)
 
         if chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM:
             grad_in_features, grad_weight = _explicit_gemm_backward_logic(
