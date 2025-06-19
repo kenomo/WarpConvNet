@@ -1449,9 +1449,8 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 ]  # Best is first
                 # print(f"Chosen fwd after benchmark: {chosen_fwd_algo}, {chosen_fwd_params}, time: {min_time}")
 
-                # Save benchmark cache after new results
+                # Mark cache as dirty - background thread will save periodically
                 mark_benchmark_cache_dirty()
-                save_benchmark_cache(_BENCHMARK_FORWARD_RESULTS, _BENCHMARK_BACKWARD_RESULTS)
 
         if chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
             output_feature_tensor = _explicit_gemm_forward_logic(
@@ -1606,9 +1605,8 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 ]  # Best is first
                 # print(f"Chosen bwd after benchmark: {chosen_bwd_algo}, {chosen_bwd_params}, time: {min_time}")
 
-                # Save benchmark cache after new results
+                # Mark cache as dirty - background thread will save periodically
                 mark_benchmark_cache_dirty()
-                save_benchmark_cache(_BENCHMARK_FORWARD_RESULTS, _BENCHMARK_BACKWARD_RESULTS)
 
         if chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM:
             grad_in_features, grad_weight = _explicit_gemm_backward_logic(

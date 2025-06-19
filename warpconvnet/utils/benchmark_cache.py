@@ -38,6 +38,7 @@ class BenchmarkCache:
     """
     Manages saving and loading of benchmark results to/from disk.
     Only rank 0 process saves to avoid conflicts in distributed training.
+    Uses a background thread for periodic saving to avoid blocking the main computation.
     """
 
     def __init__(self, cache_dir: str = "~/.cache/warpconvnet"):
@@ -46,16 +47,92 @@ class BenchmarkCache:
         self.lock = threading.Lock()
 
         # Periodic save settings
-        self.save_interval = 300.0  # seconds
+        self.save_interval = 60.0  # seconds - reduced from 300 to 60 for more frequent saves
         self.last_save_time = 0.0
         self.pending_changes = False
+        self._shutdown_requested = False
+
+        # Background thread for saving
+        self._save_thread = None
+        self._save_condition = threading.Condition(self.lock)
 
         # Ensure cache directory exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Register exit handler for final save
+        # Start background save thread only for rank 0
         if _is_rank_zero():
+            self._start_background_saver()
             atexit.register(self._save_on_exit)
+
+    def _start_background_saver(self) -> None:
+        """Start the background thread for periodic saving."""
+        if self._save_thread is not None:
+            return
+
+        self._save_thread = threading.Thread(
+            target=self._background_save_worker, name="BenchmarkCacheSaver", daemon=True
+        )
+        self._save_thread.start()
+        logger.debug("Started background benchmark cache saver thread")
+
+    def _background_save_worker(self) -> None:
+        """Background worker thread that periodically saves the cache."""
+        while not self._shutdown_requested:
+            with self._save_condition:
+                # Wait for either pending changes or timeout
+                self._save_condition.wait(timeout=self.save_interval)
+
+                if self._shutdown_requested:
+                    break
+
+                # Check if we need to save
+                current_time = time.time()
+                if (
+                    self.pending_changes
+                    and (current_time - self.last_save_time) >= self.save_interval
+                ):
+                    self._do_save()
+
+    def _do_save(self) -> None:
+        """Internal method to perform the actual save (assumes lock is held)."""
+        if not self.pending_changes:
+            return
+
+        try:
+            # Import here to avoid circular imports
+            from warpconvnet.nn.functional.sparse_conv import (
+                _BENCHMARK_FORWARD_RESULTS,
+                _BENCHMARK_BACKWARD_RESULTS,
+            )
+
+            current_time = time.time()
+
+            # Prepare cache data
+            cache_data = {
+                "forward_results": _BENCHMARK_FORWARD_RESULTS,
+                "backward_results": _BENCHMARK_BACKWARD_RESULTS,
+                "timestamp": current_time,
+                "version": "1.0",  # For future compatibility
+            }
+
+            # Atomic write: write to temp file then rename
+            temp_file = self.cache_file.with_suffix(".tmp")
+            with open(temp_file, "wb") as f:
+                pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # Atomic move
+            temp_file.replace(self.cache_file)
+
+            self.last_save_time = current_time
+            self.pending_changes = False
+
+            logger.debug(
+                f"Background saved benchmark cache: {len(_BENCHMARK_FORWARD_RESULTS)} forward, "
+                f"{len(_BENCHMARK_BACKWARD_RESULTS)} backward configurations"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to save benchmark cache in background: {e}")
 
     def load_cache(self) -> Tuple[Dict, Dict]:
         """
@@ -95,21 +172,19 @@ class BenchmarkCache:
     ) -> None:
         """
         Save benchmark results to cache file.
-        Only saves if enough time has passed since last save (unless force=True).
-        Only rank 0 process performs the actual save.
+        This method is deprecated in favor of background saving.
+        Only used for forced saves (e.g., on exit).
         """
         if not _is_rank_zero():
             return
 
+        if not force:
+            # For non-forced saves, just mark dirty and let background thread handle it
+            self.mark_dirty()
+            return
+
         with self.lock:
             current_time = time.time()
-
-            # Mark that we have pending changes
-            self.pending_changes = True
-
-            # Check if we should save now
-            if not force and (current_time - self.last_save_time) < self.save_interval:
-                return
 
             try:
                 # Prepare cache data
@@ -132,21 +207,38 @@ class BenchmarkCache:
                 self.pending_changes = False
 
                 logger.debug(
-                    f"Saved benchmark cache: {len(forward_results)} forward, "
+                    f"Force saved benchmark cache: {len(forward_results)} forward, "
                     f"{len(backward_results)} backward configurations"
                 )
 
             except Exception as e:
-                logger.warning(f"Failed to save benchmark cache: {e}")
+                logger.warning(f"Failed to force save benchmark cache: {e}")
 
     def mark_dirty(self) -> None:
         """Mark that cache has pending changes that should be saved."""
-        self.pending_changes = True
+        if not _is_rank_zero():
+            return
+
+        with self._save_condition:
+            self.pending_changes = True
+            # Notify the background thread that there are changes
+            self._save_condition.notify()
 
     def _save_on_exit(self) -> None:
         """Save cache on program exit if there are pending changes."""
+        # Signal shutdown to background thread
+        self._shutdown_requested = True
+
+        # Wake up the background thread
+        with self._save_condition:
+            self._save_condition.notify()
+
+        # Wait for background thread to finish (with timeout)
+        if self._save_thread is not None:
+            self._save_thread.join(timeout=5.0)
+
+        # Perform final save if there are still pending changes
         if self.pending_changes:
-            # Import here to avoid circular imports
             from warpconvnet.nn.functional.sparse_conv import (
                 _BENCHMARK_FORWARD_RESULTS,
                 _BENCHMARK_BACKWARD_RESULTS,
@@ -176,7 +268,14 @@ def load_benchmark_cache() -> Tuple[Dict, Dict]:
 def save_benchmark_cache(
     forward_results: Dict, backward_results: Dict, force: bool = False
 ) -> None:
-    """Save benchmark cache."""
+    """
+    Save benchmark cache.
+
+    Args:
+        forward_results: Forward benchmark results
+        backward_results: Backward benchmark results
+        force: If True, save immediately. If False, schedule for background save.
+    """
     cache = get_benchmark_cache()
     cache.save_cache(forward_results, backward_results, force=force)
 
