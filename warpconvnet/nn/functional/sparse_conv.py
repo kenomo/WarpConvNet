@@ -803,7 +803,10 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         kernel_map: IntSearchResult,
         num_out_coords: int,
         accumulator_type: torch.dtype = torch.float32,
-        split_k_slices: int = 1,
+        split_k_slices_ad: int = 1,
+        split_k_slices_trab: int = 1,
+        mma_tile_ad: int = 0,
+        mma_tile_trab: int = 0,
     ) -> Union[Float[Tensor, "M C_out"], int]:
         output_feature_tensor = _cutlass_implicit_gemm_forward_logic(
             in_features,
@@ -811,7 +814,8 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
             kernel_map,
             num_out_coords,
             accumulator_type,
-            split_k_slices,
+            split_k_slices=split_k_slices_ad,
+            mma_tile=mma_tile_ad,
         )
         if isinstance(output_feature_tensor, int):
             raise RuntimeError(
@@ -820,8 +824,13 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
 
         ctx.save_for_backward(in_features, weight)
         ctx.kernel_map = kernel_map
-        ctx.accumulator_type = accumulator_type
-        ctx.split_k_slices = split_k_slices
+        ctx.cutlass_params = {
+            "accumulator_type": accumulator_type,
+            "split_k_slices_ad": split_k_slices_ad,
+            "split_k_slices_trab": split_k_slices_trab,
+            "mma_tile_ad": mma_tile_ad,
+            "mma_tile_trab": mma_tile_trab,
+        }
         ctx.device = in_features.device
         return output_feature_tensor
 
@@ -833,16 +842,17 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         None,
         None,
         None,
+        None,
+        None,
+        None,
     ]:
         in_features, weight = ctx.saved_tensors
         kernel_map = ctx.kernel_map
-        compute_dtype = ctx.compute_dtype
-        accumulator_type = ctx.accumulator_type
-        split_k_slices = ctx.split_k_slices
+        cutlass_params = ctx.cutlass_params
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 6)
+            return _backward_return(None, None, 9)
 
         # Basic check for empty inputs, similar to how it was in Unified Function
         N_in, C_in = in_features.shape
@@ -851,17 +861,19 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return _backward_return(grad_in_final, grad_weight_final, 6)
+            return _backward_return(grad_in_final, grad_weight_final, 9)
 
         grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
             grad_output,
             in_features,
             weight,
             kernel_map,
-            compute_dtype,
-            accumulator_type,
-            split_k_slices,
-            device,
+            accumulator_type=cutlass_params["accumulator_type"],
+            split_k_slices_ad=cutlass_params["split_k_slices_ad"],
+            split_k_slices_trab=cutlass_params["split_k_slices_trab"],
+            mma_tile_ad=cutlass_params["mma_tile_ad"],
+            mma_tile_trab=cutlass_params["mma_tile_trab"],
+            device=device,
         )
         if isinstance(grad_in_features, int):
             raise RuntimeError(
@@ -872,7 +884,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return _backward_return(grad_in_features, grad_weight, 6)
+        return _backward_return(grad_in_features, grad_weight, 9)
 
 
 class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
@@ -1572,7 +1584,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 in_features,
                 weight,
                 kernel_map,
-                split_k_slices=chosen_bwd_params.get("split_k_slices", 1),
+                split_k_slices_ad=chosen_bwd_params.get("split_k_slices_ad", 1),
+                split_k_slices_trab=chosen_bwd_params.get("split_k_slices_trab", 1),
+                mma_tile_ad=chosen_bwd_params.get("mma_tile_ad", 0),
+                mma_tile_trab=chosen_bwd_params.get("mma_tile_trab", 0),
                 accumulator_type=chosen_bwd_params.get("accumulator_type", torch.float32),
                 device=device,
             )
