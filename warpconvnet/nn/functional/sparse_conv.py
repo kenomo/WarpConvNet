@@ -167,48 +167,26 @@ class SpatiallySparseConvConfig:
 _BENCHMARK_NUM_RUNS = 2
 _BENCHMARK_FORWARD_PARAMS = [
     (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}),
-    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 0}),
-    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 1}),
-    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 2}),
-    (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": 3}),
-    (
-        SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"fwd_block_size": 8},
-    ),
-    (
-        SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"fwd_block_size": 16},
-    ),
-    (
-        SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"fwd_block_size": 24},
-    ),
-    (
-        SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"fwd_block_size": 32},
-    ),
+    *[(SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": tile}) for tile in range(4)],
+    *[
+        (SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM, {"fwd_block_size": block_size})
+        for block_size in [8, 16, 24, 32]
+    ],
 ]
 _BENCHMARK_BACKWARD_PARAMS = [
     (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}),
     # Generate all combinations of MMA tile configurations (4x4 = 16 combinations)
-    *[(SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile_ad": ad, "mma_tile_trab": trab})
-      for ad, trab in itertools.product(range(4), repeat=2)],
-    (
-        SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"bwd_block_size": 8},
-    ),
-    (
-        SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"bwd_block_size": 16},
-    ),
-    (
-        SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"bwd_block_size": 24},
-    ),
-    (
-        SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
-        {"bwd_block_size": 32},
-    ),
+    *[
+        (
+            SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM,
+            {"mma_tile_ad": ad, "mma_tile_trab": trab},
+        )
+        for ad, trab in itertools.product(range(4), repeat=2)
+    ],
+    *[
+        (SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM, {"bwd_block_size": block_size})
+        for block_size in [8, 16, 24, 32]
+    ],
 ]
 _BENCHMARK_FORWARD_RESULTS: Dict[
     SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]]
