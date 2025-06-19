@@ -5,15 +5,23 @@ Utility script to inspect and pretty print the stored benchmark cache.
 Usage:
     python inspect_benchmark_cache.py                    # Full inspection of all cached benchmarks
     python inspect_benchmark_cache.py --best-only        # Show only the best algorithm for each config
+    python inspect_benchmark_cache.py --top-k K          # Show top K fastest algorithms for each config
+    python inspect_benchmark_cache.py --forward-only     # Show only forward pass results
+    python inspect_benchmark_cache.py --backward-only    # Show only backward pass results
     python inspect_benchmark_cache.py <search_term>      # Search for configurations containing the term
     python inspect_benchmark_cache.py --best-only <term> # Search and show only best results
 
 Examples:
-    python inspect_benchmark_cache.py                    # Show all cached benchmarks
-    python inspect_benchmark_cache.py --best-only        # Show only best performing algorithms
-    python inspect_benchmark_cache.py "float16"          # Find configurations with float16
-    python inspect_benchmark_cache.py --best-only "32"   # Find 32-channel configs, show only best
-    python inspect_benchmark_cache.py "EXPLICIT_GEMM"    # Find EXPLICIT_GEMM results
+    python inspect_benchmark_cache.py                           # Show all cached benchmarks
+    python inspect_benchmark_cache.py --best-only               # Show only best performing algorithms
+    python inspect_benchmark_cache.py --top-k 3                 # Show top 3 fastest algorithms for each config
+    python inspect_benchmark_cache.py --forward-only            # Show only forward pass results
+    python inspect_benchmark_cache.py --backward-only           # Show only backward pass results
+    python inspect_benchmark_cache.py --best-only --forward-only # Show only best forward results
+    python inspect_benchmark_cache.py --top-k 2 --forward-only  # Show top 2 fastest forward algorithms
+    python inspect_benchmark_cache.py "float16"                 # Find configurations with float16
+    python inspect_benchmark_cache.py --best-only "32"          # Find 32-channel configs, show only best
+    python inspect_benchmark_cache.py --top-k 3 "EXPLICIT_GEMM" # Find EXPLICIT_GEMM, show top 3 results
 
 The script loads benchmark results from ~/.cache/warpconvnet/benchmark_cache.pkl and formats them
 for human-readable inspection. Each configuration shows:
@@ -29,7 +37,7 @@ from typing import Dict, Any
 from warpconvnet.utils.benchmark_cache import load_benchmark_cache, get_benchmark_cache
 
 
-def format_value(value: Any, indent: int = 0, best_only: bool = False) -> str:
+def format_value(value: Any, indent: int = 0, top_k: int = None) -> str:
     """Format a value for pretty printing with proper indentation."""
     spaces = "  " * indent
 
@@ -39,7 +47,7 @@ def format_value(value: Any, indent: int = 0, best_only: bool = False) -> str:
 
         lines = ["{"]
         for k, v in value.items():
-            formatted_value = format_value(v, indent + 1, best_only)
+            formatted_value = format_value(v, indent + 1, top_k)
             lines.append(f"{spaces}  {k}: {formatted_value}")
         lines.append(f"{spaces}}}")
         return "\n".join(lines)
@@ -48,17 +56,27 @@ def format_value(value: Any, indent: int = 0, best_only: bool = False) -> str:
         if not value:
             return "[]"
 
-        # If best_only is True and this looks like benchmark results, show only the first (best) result
+        # If top_k is specified and this looks like benchmark results, show only the top K results
         if (
-            best_only
+            top_k is not None
             and len(value) > 0
             and isinstance(value[0], (list, tuple))
             and len(value[0]) >= 3
         ):
-            # This looks like benchmark results - show only the best (first) result
-            best_result = value[0]
-            formatted_item = format_value(best_result, indent + 1, best_only)
-            return f"[\n{spaces}  {formatted_item}\n{spaces}]"
+            # This looks like benchmark results - show only the top K results
+            top_results = value[:top_k]
+            if len(top_results) == 1:
+                # Single result, format inline
+                formatted_item = format_value(top_results[0], indent + 1, top_k)
+                return f"[\n{spaces}  {formatted_item}\n{spaces}]"
+            else:
+                # Multiple results, format each
+                lines = ["["]
+                for i, result in enumerate(top_results):
+                    formatted_item = format_value(result, indent + 1, top_k)
+                    lines.append(f"{spaces}  {formatted_item}")
+                lines.append(f"{spaces}]")
+                return "\n".join(lines)
 
         if len(value) <= 3 and all(isinstance(x, (int, float, str)) for x in value):
             # Keep short lists on one line
@@ -66,7 +84,7 @@ def format_value(value: Any, indent: int = 0, best_only: bool = False) -> str:
 
         lines = ["["]
         for item in value:
-            formatted_item = format_value(item, indent + 1, best_only)
+            formatted_item = format_value(item, indent + 1, top_k)
             lines.append(f"{spaces}  {formatted_item}")
         lines.append(f"{spaces}]")
         return "\n".join(lines)
@@ -87,11 +105,13 @@ def format_value(value: Any, indent: int = 0, best_only: bool = False) -> str:
         return str(value)
 
 
-def pretty_print_benchmark_results(results: Dict, title: str, best_only: bool = False) -> None:
+def pretty_print_benchmark_results(results: Dict, title: str, top_k: int = None) -> None:
     """Pretty print benchmark results with clear formatting."""
     print(f"\n{'='*60}")
-    if best_only:
+    if top_k == 1:
         print(f"{title.upper()} - BEST RESULTS ONLY")
+    elif top_k is not None:
+        print(f"{title.upper()} - TOP {top_k} RESULTS")
     else:
         print(f"{title.upper()}")
     print(f"{'='*60}")
@@ -101,8 +121,10 @@ def pretty_print_benchmark_results(results: Dict, title: str, best_only: bool = 
         return
 
     print(f"Total configurations: {len(results)}")
-    if best_only:
+    if top_k == 1:
         print("(Showing only the best performing algorithm for each configuration)")
+    elif top_k is not None:
+        print(f"(Showing top {top_k} performing algorithms for each configuration)")
     print()
 
     # Sort configurations by in_channels (primary) and out_channels (secondary)
@@ -162,16 +184,20 @@ def pretty_print_benchmark_results(results: Dict, title: str, best_only: bool = 
         print()
 
         # Print the result
-        if best_only:
+        if top_k == 1:
             print("Best Algorithm:")
+        elif top_k is not None:
+            print(f"Top {top_k} Algorithms:")
         else:
             print("Benchmark Results:")
-        formatted_result = format_value(result, 1, best_only)
+        formatted_result = format_value(result, 1, top_k)
         print(f"  {formatted_result}")
         print()
 
 
-def load_and_inspect_cache(best_only: bool = False) -> None:
+def load_and_inspect_cache(
+    top_k: int = None, show_forward: bool = True, show_backward: bool = True
+) -> None:
     """Load and display the benchmark cache in a human-readable format."""
     print("Loading benchmark cache...")
 
@@ -197,18 +223,22 @@ def load_and_inspect_cache(best_only: bool = False) -> None:
 
         # Print summary
         print("\nCache Summary:")
-        print(f"  Forward configurations: {len(forward_results)}")
-        print(f"  Backward configurations: {len(backward_results)}")
+        if show_forward:
+            print(f"  Forward configurations: {len(forward_results)}")
+        if show_backward:
+            print(f"  Backward configurations: {len(backward_results)}")
 
         # Pretty print forward results
-        pretty_print_benchmark_results(
-            forward_results, "🔄 Forward Pass Benchmark Results", best_only
-        )
+        if show_forward:
+            pretty_print_benchmark_results(
+                forward_results, "🔄 Forward Pass Benchmark Results", top_k
+            )
 
         # Pretty print backward results
-        pretty_print_benchmark_results(
-            backward_results, "⏪ Backward Pass Benchmark Results", best_only
-        )
+        if show_backward:
+            pretty_print_benchmark_results(
+                backward_results, "⏪ Backward Pass Benchmark Results", top_k
+            )
 
         print(f"\n{'='*60}")
         print("Inspection complete.")
@@ -218,13 +248,17 @@ def load_and_inspect_cache(best_only: bool = False) -> None:
         print(f"Error loading cache: {e}")
 
 
-def search_cache(pattern: str, best_only: bool = False) -> None:
+def search_cache(
+    pattern: str, top_k: int = None, show_forward: bool = True, show_backward: bool = True
+) -> None:
     """Search for configurations matching a pattern."""
     forward_results, backward_results = load_benchmark_cache()
 
     print(f"\nSearching for configurations containing: '{pattern}'")
-    if best_only:
+    if top_k == 1:
         print("(Showing only best results)")
+    elif top_k is not None:
+        print(f"(Showing top {top_k} results)")
     print(f"{'='*50}")
 
     # Helper function to sort configurations
@@ -256,49 +290,107 @@ def search_cache(pattern: str, best_only: bool = False) -> None:
         return (in_channels, out_channels)
 
     # Search forward results
-    forward_matches = {
-        k: v for k, v in forward_results.items() if pattern.lower() in str(k).lower()
-    }
-    if forward_matches:
-        print(f"\n🔄 Forward Pass Matches ({len(forward_matches)}):")
-        # Sort the matches
-        sorted_forward_matches = sorted(forward_matches.keys(), key=get_sort_key)
-        for i, config_key in enumerate(sorted_forward_matches, 1):
-            config_str = str(config_key)
-            if len(config_str) > 80:
-                # Truncate long config strings for search results
-                config_str = config_str[:77] + "..."
-            print(f"  {i}. {config_str}")
+    if show_forward:
+        forward_matches = {
+            k: v for k, v in forward_results.items() if pattern.lower() in str(k).lower()
+        }
+        if forward_matches:
+            print(f"\n🔄 Forward Pass Matches ({len(forward_matches)}):")
+            # Sort the matches
+            sorted_forward_matches = sorted(forward_matches.keys(), key=get_sort_key)
+            for i, config_key in enumerate(sorted_forward_matches, 1):
+                config_str = str(config_key)
+                if len(config_str) > 80:
+                    # Truncate long config strings for search results
+                    config_str = config_str[:77] + "..."
+                print(f"  {i}. {config_str}")
 
     # Search backward results
-    backward_matches = {
-        k: v for k, v in backward_results.items() if pattern.lower() in str(k).lower()
-    }
-    if backward_matches:
-        print(f"\n⏪ Backward Pass Matches ({len(backward_matches)}):")
-        # Sort the matches
-        sorted_backward_matches = sorted(backward_matches.keys(), key=get_sort_key)
-        for i, config_key in enumerate(sorted_backward_matches, 1):
-            config_str = str(config_key)
-            if len(config_str) > 80:
-                # Truncate long config strings for search results
-                config_str = config_str[:77] + "..."
-            print(f"  {i}. {config_str}")
+    if show_backward:
+        backward_matches = {
+            k: v for k, v in backward_results.items() if pattern.lower() in str(k).lower()
+        }
+        if backward_matches:
+            print(f"\n⏪ Backward Pass Matches ({len(backward_matches)}):")
+            # Sort the matches
+            sorted_backward_matches = sorted(backward_matches.keys(), key=get_sort_key)
+            for i, config_key in enumerate(sorted_backward_matches, 1):
+                config_str = str(config_key)
+                if len(config_str) > 80:
+                    # Truncate long config strings for search results
+                    config_str = config_str[:77] + "..."
+                print(f"  {i}. {config_str}")
 
-    if not forward_matches and not backward_matches:
-        print("No matches found.")
+    if show_forward and show_backward:
+        if not forward_matches and not backward_matches:
+            print("No matches found.")
+    elif show_forward:
+        if not forward_matches:
+            print("No forward matches found.")
+    elif show_backward:
+        if not backward_matches:
+            print("No backward matches found.")
 
 
 if __name__ == "__main__":
     # Parse command line arguments
+    top_k = None
+
+    # Handle --best-only (equivalent to --top-k 1)
     best_only = "--best-only" in sys.argv
     if best_only:
         sys.argv.remove("--best-only")
+        top_k = 1
+
+    # Handle --top-k K
+    if "--top-k" in sys.argv:
+        try:
+            idx = sys.argv.index("--top-k")
+            if idx + 1 >= len(sys.argv):
+                print("Error: --top-k requires an integer argument")
+                sys.exit(1)
+
+            top_k_value = int(sys.argv[idx + 1])
+            if top_k_value <= 0:
+                print("Error: --top-k argument must be a positive integer")
+                sys.exit(1)
+
+            if top_k is not None:
+                print("Error: Cannot specify both --best-only and --top-k")
+                sys.exit(1)
+
+            top_k = top_k_value
+            # Remove both --top-k and its argument
+            sys.argv.pop(idx)  # Remove --top-k
+            sys.argv.pop(idx)  # Remove the argument (now at the same index)
+        except (ValueError, IndexError):
+            print("Error: --top-k requires a valid integer argument")
+            sys.exit(1)
+
+    forward_only = "--forward-only" in sys.argv
+    if forward_only:
+        sys.argv.remove("--forward-only")
+
+    backward_only = "--backward-only" in sys.argv
+    if backward_only:
+        sys.argv.remove("--backward-only")
+
+    # Determine what to show
+    show_forward = True
+    show_backward = True
+
+    if forward_only and backward_only:
+        print("Error: Cannot specify both --forward-only and --backward-only")
+        sys.exit(1)
+    elif forward_only:
+        show_backward = False
+    elif backward_only:
+        show_forward = False
 
     if len(sys.argv) > 1:
         # Search mode
         pattern = " ".join(sys.argv[1:])
-        search_cache(pattern, best_only)
+        search_cache(pattern, top_k, show_forward, show_backward)
     else:
         # Full inspection mode
-        load_and_inspect_cache(best_only)
+        load_and_inspect_cache(top_k, show_forward, show_backward)

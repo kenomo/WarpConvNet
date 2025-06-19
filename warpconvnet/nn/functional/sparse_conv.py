@@ -184,18 +184,66 @@ class SpatiallySparseConvConfig:
         )
 
 
+# Separate benchmark parameters for independent operations
 _BENCHMARK_NUM_RUNS = 2
-_BENCHMARK_FORWARD_PARAMS = [
-    (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}),
-    *[(SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, {"mma_tile": tile}) for tile in range(4)],
+
+# AD_gather_scatter operation (used in forward pass and backward pass for input gradients)
+_BENCHMARK_AD_GATHER_SCATTER_PARAMS = [
+    # Base configurations without split-K
+    *[{"mma_tile": tile, "split_k_slices": 1} for tile in range(4)],
+    # Successful combinations from current benchmarks
     *[
-        (SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM, {"fwd_block_size": block_size})
-        for block_size in [8, 16, 24, 32]
+        {"mma_tile": tile, "split_k_slices": k}
+        for tile, k in [
+            # Proven successful combinations from forward/backward results
+            (0, 2),
+            (0, 4),  # Intermediate between successful 2 and 8
+            (0, 8),  # MMA=0 patterns
+            (1, 2),
+            (1, 4),
+            (1, 16),
+            (1, 32),  # MMA=1 patterns
+            (3, 2),
+            (3, 4),
+            (3, 8),
+            (3, 16),
+            (3, 32),  # MMA=3 patterns (most successful)
+        ]
     ],
 ]
+
+# trAB_gather operation (used only in backward pass for weight gradients)
+_BENCHMARK_TRAB_GATHER_PARAMS = [
+    # Base configurations without split-K
+    *[{"mma_tile": tile, "split_k_slices": 1} for tile in range(4)],
+    # Successful combinations from backward results
+    *[
+        {"mma_tile": tile, "split_k_slices": k}
+        for tile, k in [
+            (0, 8),  # MMA=0 for large problems
+            (1, 4),  # Intermediate between successful 1 and 8
+            (1, 8),
+            (1, 16),
+            (1, 32),  # MMA=1 TrAB patterns
+            (3, 4),
+            (3, 8),
+            (3, 16),
+            (3, 32),  # MMA=3 TrAB patterns (most successful)
+        ]
+    ],
+]
+
+# Forward pass uses only AD_gather_scatter operation
+_BENCHMARK_FORWARD_PARAMS = [
+    *[
+        (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, params)
+        for params in _BENCHMARK_AD_GATHER_SCATTER_PARAMS
+    ],
+]
+
+# Backward pass combines best AD params with best TrAB params
 _BENCHMARK_BACKWARD_PARAMS = [
-    (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}),
-    # Generate all combinations of MMA tile configurations (4x4 = 16 combinations)
+    # Base combinations without split-K (for compatibility)
     *[
         (
             SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM,
@@ -203,11 +251,25 @@ _BENCHMARK_BACKWARD_PARAMS = [
         )
         for ad, trab in itertools.product(range(4), repeat=2)
     ],
+    # Cartesian product of best AD params × best TrAB params
     *[
-        (SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM, {"bwd_block_size": block_size})
-        for block_size in [8, 16, 24, 32]
+        (
+            SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM,
+            {
+                "mma_tile_ad": ad_params.get("mma_tile", 0),
+                "split_k_slices_ad": ad_params.get("split_k_slices", 1),
+                "mma_tile_trab": trab_params.get("mma_tile", 0),
+                "split_k_slices_trab": trab_params.get("split_k_slices", 1),
+            },
+        )
+        for ad_params in _BENCHMARK_AD_GATHER_SCATTER_PARAMS
+        for trab_params in _BENCHMARK_TRAB_GATHER_PARAMS
+        # Only include combinations with split-K to avoid duplicating base cases
+        if ad_params.get("split_k_slices") is not None
+        or trab_params.get("split_k_slices") is not None
     ],
 ]
+
 _BENCHMARK_FORWARD_RESULTS: Dict[
     SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]]
 ] = {}
@@ -608,6 +670,7 @@ def _cutlass_implicit_gemm_backward_logic(
     split_k_slices_trab: int = 1,
     mma_tile_ad: int = 0,
     mma_tile_trab: int = 0,
+    requires_grad: Tuple[bool, bool] = (True, True),
     device: torch.device = None,
 ) -> Union[Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]], Tuple[int, int]]:
     if _C is None:
@@ -644,36 +707,38 @@ def _cutlass_implicit_gemm_backward_logic(
         curr_weight = weight[i]
 
         # grad_in_features[in_map] += torch.matmul(grad_output[out_map], curr_weight.T)
-        status = _C.gemm.cutlass_gemm_AD_gather_scatter(
-            grad_output,
-            curr_weight.T.contiguous(),
-            grad_in_features,
-            grad_in_features,
-            out_map,
-            in_map,
-            accumulator_type=accumulator_type,
-            split_k_slices=split_k_slices_ad,
-            mma_tile=mma_tile_ad,
-        )
-        if status != 0:
-            return status, i
+        if requires_grad[0]:
+            status = _C.gemm.cutlass_gemm_AD_gather_scatter(
+                grad_output,
+                curr_weight.T.contiguous(),
+                grad_in_features,
+                grad_in_features,
+                out_map,
+                in_map,
+                accumulator_type=accumulator_type,
+                split_k_slices=split_k_slices_ad,
+                mma_tile=mma_tile_ad,
+            )
+            if status != 0:
+                return status, i
 
         # grad_weight[i] += torch.matmul(curr_in_feats.T, curr_grad_output)
-        status = _C.gemm.cutlass_gemm_trAB_gather(
-            in_features,
-            grad_output,
-            grad_weight[i],
-            grad_weight[i],
-            in_map,
-            out_map,
-            alpha=1.0,
-            beta=0,
-            accumulator_type=accumulator_type,
-            split_k_slices=split_k_slices_trab,
-            mma_tile=mma_tile_trab,
-        )
-        if status != 0:
-            return status, i
+        if requires_grad[1]:
+            status = _C.gemm.cutlass_gemm_trAB_gather(
+                in_features,
+                grad_output,
+                grad_weight[i],
+                grad_weight[i],
+                in_map,
+                out_map,
+                alpha=1.0,
+                beta=0,
+                accumulator_type=accumulator_type,
+                split_k_slices=split_k_slices_trab,
+                mma_tile=mma_tile_trab,
+            )
+            if status != 0:
+                return status, i
     return (
         grad_in_features.to(dtype=in_features.dtype),
         grad_weight.to(dtype=orig_weight_dtype),
@@ -923,6 +988,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
             split_k_slices_trab=cutlass_params["split_k_slices_trab"],
             mma_tile_ad=cutlass_params["mma_tile_ad"],
             mma_tile_trab=cutlass_params["mma_tile_trab"],
+            requires_grad=(ctx.needs_input_grad[0], ctx.needs_input_grad[1]),
             device=device,
         )
         if isinstance(grad_in_features, int):
@@ -1190,6 +1256,7 @@ def _run_forward_benchmarks(
         "Using benchmarked forward algo. Until the algorithm finds the best parameters, forward performance will be slow."
     )
     all_benchmark_results: List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]] = []
+    timer = CUDATimer()
 
     def _execute_single_fwd_pass(
         algo_mode: SPARSE_CONV_FWD_ALGO_MODE, params_config: Dict[str, Any]
@@ -1236,8 +1303,6 @@ def _run_forward_benchmarks(
                 # logger.warning(
                 #     f"Error in _run_forward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
                 # )
-                # Save the inf time for this algo_mode
-                all_benchmark_results.append((algo_mode, params_config, float("inf")))
                 continue
 
         if status is not None and status != 0:
@@ -1252,7 +1317,6 @@ def _run_forward_benchmarks(
             if warmup_iters == 0:
                 continue  # No runs at all for this config, skip
         else:
-            timer = CUDATimer()
             for _ in range(benchmark_iters):
                 with timer:
                     _execute_single_fwd_pass(algo_mode, params_config)
@@ -1272,8 +1336,9 @@ def _run_forward_benchmarks(
             "Warning: No forward benchmark was successful or no algorithms to test. Defaulting to EXPLICIT_GEMM."
         )
         # Return a default entry indicating failure or no successful benchmarks
-        default_result = (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf"))
-        all_benchmark_results.append(default_result)
+        with timer:
+            _execute_single_fwd_pass(SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {})
+        all_benchmark_results.append((SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time))
 
     # Sort results by time (3rd element of tuple), ascending
     all_benchmark_results.sort(key=lambda x: x[2])
@@ -1305,6 +1370,7 @@ def _run_backward_benchmarks(
     benchmark_iters = max(benchmark_iters, 1)
 
     all_benchmark_results: List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]] = []
+    timer = CUDATimer()
 
     def _execute_single_bwd_pass(
         algo_mode: SPARSE_CONV_BWD_ALGO_MODE, params_config: Dict[str, Any]
@@ -1357,8 +1423,6 @@ def _run_backward_benchmarks(
                 # logger.warning(
                 #     f"Error in _run_backward_benchmarks: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(status))}"
                 # )
-                # Save the inf time for this algo_mode
-                all_benchmark_results.append((algo_mode, params_config, float("inf")))
                 continue
 
         if status is not None and status != 0:
@@ -1371,7 +1435,6 @@ def _run_backward_benchmarks(
             if warmup_iters == 0:
                 continue
         else:
-            timer = CUDATimer()
             for _ in range(benchmark_iters):
                 with timer:
                     _execute_single_bwd_pass(algo_mode, params_config)
@@ -1387,8 +1450,9 @@ def _run_backward_benchmarks(
         logger.warning(
             "Warning: No backward benchmark was successful or no algorithms to test. Defaulting to EXPLICIT_GEMM."
         )
-        default_result = (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, float("inf"))
-        all_benchmark_results.append(default_result)
+        with timer:
+            _execute_single_bwd_pass(SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {})
+        all_benchmark_results.append((SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time))
 
     # Sort results by time (3rd element of tuple), ascending
     all_benchmark_results.sort(key=lambda x: x[2])
