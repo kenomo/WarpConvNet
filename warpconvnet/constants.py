@@ -46,7 +46,7 @@ WARPCONVNET_SKIP_SYMMETRIC_KERNEL_MAP = _get_env_bool(
 )
 
 # String constants with validation
-VALID_ALGOS = ["explicit_gemm", "implicit_gemm", "auto"]
+VALID_ALGOS = ["explicit_gemm", "auto"]
 WARPCONVNET_FWD_ALGO_MODE = _get_env_string("WARPCONVNET_FWD_ALGO_MODE", "auto", VALID_ALGOS)
 WARPCONVNET_BWD_ALGO_MODE = _get_env_string("WARPCONVNET_BWD_ALGO_MODE", "auto", VALID_ALGOS)
 
