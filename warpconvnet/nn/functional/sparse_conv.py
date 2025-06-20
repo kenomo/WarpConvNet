@@ -1338,7 +1338,9 @@ def _run_forward_benchmarks(
         # Return a default entry indicating failure or no successful benchmarks
         with timer:
             _execute_single_fwd_pass(SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {})
-        all_benchmark_results.append((SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time))
+        all_benchmark_results.append(
+            (SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time)
+        )
 
     # Sort results by time (3rd element of tuple), ascending
     all_benchmark_results.sort(key=lambda x: x[2])
@@ -1452,7 +1454,9 @@ def _run_backward_benchmarks(
         )
         with timer:
             _execute_single_bwd_pass(SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {})
-        all_benchmark_results.append((SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time))
+        all_benchmark_results.append(
+            (SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM, {}, timer.elapsed_time)
+        )
 
     # Sort results by time (3rd element of tuple), ascending
     all_benchmark_results.sort(key=lambda x: x[2])

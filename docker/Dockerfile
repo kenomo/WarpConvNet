@@ -1,6 +1,4 @@
-# Use dockerhub pytorch/pytorch:2.3.1-cuda12.1-cudnn8-devel
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-devel
-
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-devel
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,17 +15,39 @@ RUN pip install --no-cache-dir --upgrade pip
 
 RUN pip install --no-cache-dir \
     "jaxtyping>=0.2"        \
-    "torch_scatter>=2.1"    \
     "torchinfo>=1.8"        \
     "warp-lang>=1.2"        \
     "webdataset>=0.2"       \
     pre-commit              \
     black                   \
     isort                   \
-    flake8
+    flake8                  \
+    build                   \
+    pybind11                \
+    ipdb                    \
+    pytest                  \
+    rich                    \
+    h5py                    \
+    wandb                   \
+    hydra-core              \
+    omegaconf               \
+    lightning               \
+    torchmetrics            \
+    cupy-cuda12x
+
+# Install torch_scatter from github source
+RUN pip install --no-cache-dir git+https://github.com/rusty1s/pytorch_scatter.git
+
+# Install warpconvnet and install only the 3rdparty/cutlass submodule
+RUN mkdir -p /opt/warpconvnet && cd /opt/warpconvnet && \
+    git clone https://github.com/NVlabs/WarpConvNet.git && \
+    cd WarpConvNet && \
+    git submodule update --init 3rdparty/cutlass && \
+    python -m build --wheel --no-isolation && \
+    pip install dist/*.whl
 
 # Add a non-root user with a fixed UID and GID
-ARG USERNAME=du
+ARG USERNAME=wcnuser
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
 
@@ -41,3 +61,5 @@ RUN apt-get update && apt-get install -y \
     sudo;
 RUN echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME; \
     chmod 0440 /etc/sudoers.d/$USERNAME;
+
+WORKDIR /workspace

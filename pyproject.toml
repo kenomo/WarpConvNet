@@ -17,12 +17,12 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11", "nvidia-cutlass"]
+dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11"]
 dynamic = ["version"]
 
 [project.urls]
-GitHub = "https://github.com/NVlabs/warpconvnet"
-Documentation = "https://nvlabs.github.io/warpconvnet"
+GitHub = "https://github.com/NVlabs/WarpConvNet"
+Documentation = "https://nvlabs.github.io/WarpConvNet"
 
 [project.optional-dependencies]
 dev = [
