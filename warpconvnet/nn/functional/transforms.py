@@ -63,8 +63,9 @@ def cat(*inputs: Geometry, dim: int = -1):
     assert all(
         isinstance(input, Geometry) for input in inputs
     ), f"Expected all inputs to be BatchedSpatialFeatures, got {type(inputs)}"
+    # Ignore the log, int type difference
     assert all(
-        torch.allclose(input.offsets, inputs[0].offsets) for input in inputs
+        torch.allclose(input.offsets.long(), inputs[0].offsets.long()) for input in inputs
     ), "All inputs must have the same offsets"
     return inputs[0].replace(
         batched_features=torch.cat([input.feature_tensor for input in inputs], dim=dim),
