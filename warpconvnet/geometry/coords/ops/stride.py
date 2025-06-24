@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 
 from warpconvnet.geometry.coords.ops.batch_index import offsets_from_batch_index
-from warpconvnet.geometry.coords.ops.serialization import morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.utils.ntuple import ntuple
 from warpconvnet.utils.ravel import ravel_multi_index_auto_shape
 from warpconvnet.utils.unique import unique_hashmap, unique_inverse
@@ -18,7 +18,7 @@ from warpconvnet.utils.unique import unique_hashmap, unique_inverse
 def stride_coords(
     batch_indexed_coords: Int[Tensor, "N D+1"],
     stride: Tuple[int, ...],
-    backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",  # hashmap is the fastest
+    order: POINT_ORDERING | str = POINT_ORDERING.RANDOM,
 ) -> Tuple[Int[Tensor, "M D+1"], Int[Tensor, "B + 1"]]:  # noqa: F821
     """
     Downsample the coordinates by the stride.
@@ -39,27 +39,16 @@ def stride_coords(
     )
     # discretize the coordinates by floor division
     discretized_coords = torch.floor(batch_indexed_coords / batched_stride).int()
-    if backend == "hashmap":
-        unique_indices, _ = unique_hashmap(discretized_coords)
-        unique_coords = discretized_coords[unique_indices]
-    elif backend == "ravel":
-        code = ravel_multi_index_auto_shape(discretized_coords)
-        to_unique_indices, to_orig_indices = unique_inverse(code)
-        unique_coords = discretized_coords[to_unique_indices]
-    elif backend == "unique":
-        unique_coords = torch.unique(discretized_coords, dim=0, sorted=True)
-    elif backend == "morton":
-        code = morton_code(discretized_coords, return_to_morton=False)
-        to_unique_indices, to_orig_indices = unique_inverse(code)
-        unique_coords = discretized_coords[to_unique_indices]
-    else:
-        raise ValueError(f"Invalid method: {backend}")
-
-    if backend == "hashmap":
+    unique_indices, _ = unique_hashmap(discretized_coords)
+    unique_coords = discretized_coords[unique_indices]
+    if order == POINT_ORDERING.RANDOM:
         # sort the batch index for the offset
         out_batch_index = unique_coords[:, 0]
-        _, perm = torch.sort(out_batch_index)
+        perm = torch.argsort(out_batch_index)
         unique_coords = unique_coords[perm]
+    else:
+        code_result = encode(unique_coords, order=order, return_perm=True)
+        unique_coords = unique_coords[code_result.perm]
 
     out_offsets = offsets_from_batch_index(unique_coords[:, 0])
     return unique_coords, out_offsets

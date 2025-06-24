@@ -75,13 +75,13 @@ class RealCoords(Coords):
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
-        _, perm = encode(
+        result = encode(
             torch.floor(self.batched_tensor / voxel_size).int(),
             batch_offsets=self.offsets,
             order=ordering,
             return_perm=True,
         )
         return self.__class__(
-            batched_tensor=self.batched_tensor[perm],
+            batched_tensor=self.batched_tensor[result.perm],
             offsets=self.offsets,
         )

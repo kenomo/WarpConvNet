@@ -251,7 +251,7 @@ class Voxels(Geometry):
             self.batched_features, CatFeatures
         ), "Features must be a CatBatchedFeatures to sort."
 
-        _, perm = encode(
+        code_result = encode(
             self.coordinate_tensor,
             batch_offsets=self.offsets,
             order=ordering,
@@ -259,10 +259,10 @@ class Voxels(Geometry):
         )
         kwargs = self.extra_attributes.copy()
         kwargs["ordering"] = ordering
-        kwargs["code"] = self.coordinate_tensor[perm]
+        kwargs["code"] = code_result.codes
         return self.__class__(
-            batched_coordinates=IntCoords(self.coordinate_tensor[perm], self.offsets),
-            batched_features=CatFeatures(self.feature_tensor[perm], self.offsets),
+            batched_coordinates=IntCoords(self.coordinate_tensor[code_result.perm], self.offsets),
+            batched_features=CatFeatures(self.feature_tensor[code_result.perm], self.offsets),
             **kwargs,
         )
 

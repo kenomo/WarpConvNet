@@ -6,6 +6,7 @@ from typing import Optional, Tuple, Union, Literal
 
 import torch
 
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.search.cache import IntSearchCache, IntSearchCacheKey
 from warpconvnet.geometry.coords.search.search_results import IntSearchResult
@@ -22,11 +23,11 @@ from warpconvnet.utils.unique import unique_inverse
 
 
 def sparse_reduce(
-    spatially_sparse_tensor: Voxels,
+    voxels: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
     reduction: Union[REDUCTIONS, str] = REDUCTIONS.MAX,
-    out_code_backend: Literal["hashmap", "ravel", "unique", "morton"] = "hashmap",
+    order: POINT_ORDERING = POINT_ORDERING.RANDOM,
 ) -> Voxels:
     """
     Max pooling for spatially sparse tensors.
@@ -36,18 +37,18 @@ def sparse_reduce(
 
     if stride is None:
         stride = kernel_size
-    ndim = spatially_sparse_tensor.num_spatial_dims
+    ndim = voxels.num_spatial_dims
     stride = ntuple(stride, ndim=ndim)
     kernel_size = ntuple(kernel_size, ndim=ndim)
 
-    in_tensor_stride = spatially_sparse_tensor.stride
+    in_tensor_stride = voxels.stride
     if in_tensor_stride is None:
         in_tensor_stride = ntuple(1, ndim=ndim)
     out_tensor_stride = tuple(o * s for o, s in zip(stride, in_tensor_stride))
 
-    batch_indexed_in_coords = spatially_sparse_tensor.batch_indexed_coordinates
+    batch_indexed_in_coords = voxels.batch_indexed_coordinates
     batch_indexed_out_coords, output_offsets = stride_coords(
-        batch_indexed_in_coords, stride, backend=out_code_backend
+        batch_indexed_in_coords, stride, order=order
     )
     from warpconvnet.nn.functional.sparse_conv import STRIDED_CONV_MODE
 
@@ -58,12 +59,12 @@ def sparse_reduce(
         generative=False,
         stride_mode=str(STRIDED_CONV_MODE.STRIDE_ONLY),
         skip_symmetric_kernel_map=False,
-        in_offsets=spatially_sparse_tensor.offsets,
+        in_offsets=voxels.offsets,
         out_offsets=output_offsets,
     )
     kernel_map = None
-    if spatially_sparse_tensor.cache is not None:
-        kernel_map = spatially_sparse_tensor.cache.get(kernel_map_cache_key)
+    if voxels.cache is not None:
+        kernel_map = voxels.cache.get(kernel_map_cache_key)
 
     if kernel_map is None:
         # Find mapping from in to out
@@ -76,12 +77,12 @@ def sparse_reduce(
             skip_symmetric_kernel_map=False,
         )
 
-    if spatially_sparse_tensor.cache is None:
-        spatially_sparse_tensor._extra_attributes["_cache"] = IntSearchCache()
-    spatially_sparse_tensor.cache.put(kernel_map_cache_key, kernel_map)
+    if voxels.cache is None:
+        voxels._extra_attributes["_cache"] = IntSearchCache()
+    voxels.cache.put(kernel_map_cache_key, kernel_map)
 
     in_maps, unique_out_maps, map_offsets = kernel_map.to_csr()
-    in_features = spatially_sparse_tensor.feature_tensor
+    in_features = voxels.feature_tensor
     device = in_features.device
 
     out_features = row_reduction(in_features[in_maps], map_offsets.to(device), reduction)
@@ -97,13 +98,13 @@ def sparse_reduce(
         new_out_features = torch.zeros(
             batch_indexed_out_coords.shape[0],
             in_features.shape[1],
-            device=spatially_sparse_tensor.device,
+            device=voxels.device,
         )
         new_out_features[unique_out_maps] = out_features
         out_features = new_out_features
 
     output_offsets = output_offsets.cpu()
-    return spatially_sparse_tensor.replace(
+    return voxels.replace(
         batched_coordinates=IntCoords(
             batch_indexed_out_coords[:, 1:],
             output_offsets,
@@ -114,38 +115,38 @@ def sparse_reduce(
 
 
 def sparse_max_pool(
-    spatially_sparse_tensor: Voxels,
+    voxels: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
 ) -> Voxels:
     """
     Max pooling for spatially sparse tensors.
     """
-    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, reduction=REDUCTIONS.MAX)
+    return sparse_reduce(voxels, kernel_size, stride, reduction=REDUCTIONS.MAX)
 
 
 def sparse_avg_pool(
-    spatially_sparse_tensor: Voxels,
+    voxels: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Optional[Union[int, Tuple[int, ...]]] = None,
 ) -> Voxels:
     """
     Average pooling for spatially sparse tensors.
     """
-    return sparse_reduce(spatially_sparse_tensor, kernel_size, stride, reduction=REDUCTIONS.MEAN)
+    return sparse_reduce(voxels, kernel_size, stride, reduction=REDUCTIONS.MEAN)
 
 
 def sparse_unpool(
-    pooled_st: Voxels,
-    unpooled_st: Voxels,
+    pooled_voxels: Voxels,
+    unpooled_voxels: Voxels,
     kernel_size: Union[int, Tuple[int, ...]],
     stride: Union[int, Tuple[int, ...]],
-    concat_unpooled_st: bool = False,
+    concat_unpooled_voxels: bool = False,
 ) -> Voxels:
     """
     Unpooling for spatially sparse tensors.
     """
-    ndim = pooled_st.num_spatial_dims
+    ndim = pooled_voxels.num_spatial_dims
     stride = ntuple(stride, ndim=ndim)
     kernel_size = ntuple(kernel_size, ndim=ndim)
 
@@ -159,11 +160,11 @@ def sparse_unpool(
         generative=False,
         stride_mode=str(STRIDED_CONV_MODE.STRIDE_ONLY),
         skip_symmetric_kernel_map=False,
-        in_offsets=unpooled_st.offsets,
-        out_offsets=pooled_st.offsets,
+        in_offsets=unpooled_voxels.offsets,
+        out_offsets=pooled_voxels.offsets,
     )
-    assert pooled_st.cache is not None
-    kernel_map = pooled_st.cache.get(kernel_map_cache_key)
+    assert pooled_voxels.cache is not None
+    kernel_map = pooled_voxels.cache.get(kernel_map_cache_key)
     assert kernel_map is not None
 
     # Switch
@@ -171,8 +172,8 @@ def sparse_unpool(
     pooled_maps = kernel_map.out_maps
 
     perm = torch.argsort(unpooled_maps)
-    rep_feats = pooled_st.feature_tensor[pooled_maps[perm]]
-    if concat_unpooled_st:
-        rep_feats = torch.cat([unpooled_st.feature_tensor, rep_feats], dim=-1)
+    rep_feats = pooled_voxels.feature_tensor[pooled_maps[perm]]
+    if concat_unpooled_voxels:
+        rep_feats = torch.cat([unpooled_voxels.feature_tensor, rep_feats], dim=-1)
 
-    return unpooled_st.replace(batched_features=rep_feats)
+    return unpooled_voxels.replace(batched_features=rep_feats)

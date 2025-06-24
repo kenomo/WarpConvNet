@@ -11,6 +11,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
 from warpconvnet.geometry.features.cat import CatFeatures
@@ -19,7 +20,7 @@ from warpconvnet.geometry.features.ops.convert import (
     cat_to_pad_tensor,
     pad_to_cat_tensor,
 )
-from warpconvnet.nn.modules.normalizations import LayerNorm, RMSNorm
+from warpconvnet.nn.modules.normalizations import LayerNorm
 from warpconvnet.types import NestedTensor
 
 
@@ -135,7 +136,6 @@ class Attention(nn.Module):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
-        use_sdpa: bool = True,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -146,7 +146,6 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.use_sdpa = use_sdpa
 
     def forward(
         self,
@@ -172,24 +171,14 @@ class Attention(nn.Module):
             q = q + pos_enc.unsqueeze(1)
             k = k + pos_enc.unsqueeze(1)
 
-        if self.use_sdpa:
-            x = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                attn_mask=mask,
-                dropout_p=self.attn_drop.p,
-                scale=self.scale,
-            )
-        else:
-            attn = (q @ k.transpose(-2, -1)) * self.scale
-            if mask is not None:
-                attn = attn + mask
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        if mask is not None:
+            attn = attn + mask
 
-            attn = attn.softmax(dim=-1)
-            attn = self.attn_drop(attn)
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
 
-            x = attn @ v
+        x = attn @ v
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -220,7 +209,6 @@ class SpatialFeatureAttention(Attention):
             qk_scale,
             attn_drop,
             proj_drop,
-            use_sdpa=True,
         )
         self.to_attn = ToAttention(
             dim,
@@ -354,8 +342,7 @@ class PatchAttention(BaseSpatialModule):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
-        use_sdpa: bool = True,
-        rand_perm_patch: bool = False,
+        order: POINT_ORDERING = POINT_ORDERING.MORTON_XYZ,
     ):
         super().__init__()
         self.patch_size = patch_size
@@ -363,12 +350,8 @@ class PatchAttention(BaseSpatialModule):
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim**-0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.use_sdpa = use_sdpa
-        self.rand_perm_patch = rand_perm_patch
-        if not use_sdpa:
-            self.attn_drop = nn.Dropout(attn_drop)
-        else:
-            self.attn_drop = attn_drop
+        self.order = order
+        self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -377,18 +360,20 @@ class PatchAttention(BaseSpatialModule):
         K = self.patch_size
         skip = x
 
-        if self.rand_perm_patch:
-            # Create permutation that preserves batch boundaries
-            perm = []
-            offsets = x.offsets
-            for i in range(len(offsets) - 1):
-                start, end = offsets[i], offsets[i + 1]
-                perm.append(torch.randperm(end - start, device=x.device) + start)
-            perm = torch.cat(perm)
-            inverse_perm = torch.argsort(perm)
-            x = x.replace(batched_features=x.feature_tensor[perm])
+        batched_features = x.batched_features
+        inverse_perm = None
+        if self.order != POINT_ORDERING.RANDOM:
+            # Generate new ordering and inverse permutation
+            code_result = encode(
+                x.coordinate_tensor, order=self.order, return_perm=True, return_inverse=True
+            )
+            batched_features = CatFeatures(
+                batched_tensor=batched_features.batched_tensor[code_result.perm.clone()],
+                offsets=batched_features.offsets,
+            )
+            inverse_perm = code_result.inverse_perm.clone()
 
-        patch_feats: CatPatchFeatures = CatPatchFeatures.from_cat(x.batched_features, K)
+        patch_feats: CatPatchFeatures = CatPatchFeatures.from_cat(batched_features, K)
         feats = patch_feats.batched_tensor  # MxC
         M, C = feats.shape
         qkv = (
@@ -404,43 +389,28 @@ class PatchAttention(BaseSpatialModule):
             qkv[2],
         )  # make torchscript happy (cannot use tensor as tuple)
 
-        if self.use_sdpa:
-            mask = torch.ones(M // K, 1, K, K, dtype=torch.bool, device=q.device)
-            patch_offsets = patch_feats.patch_offsets
-            num_points = patch_feats.offsets.diff()
-            for i in range(patch_feats.batch_size):
-                if num_points[i] % K != 0:
-                    mask[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = False
-            out_feat = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                attn_mask=mask,
-                dropout_p=self.attn_drop if self.training else 0,
-                scale=self.scale,
-            )
-            out_feat = out_feat.transpose(1, 2).reshape(M, C)
-        else:
-            # attn: (M // K) x num_heads x K x K
-            attn = (q @ k.transpose(-2, -1)) * self.scale
-            # mask out the attention weights for the padded points
-            patch_offsets = patch_feats.patch_offsets
-            num_points = patch_feats.offsets.diff()
-            for i in range(patch_feats.batch_size):
-                if num_points[i] % K != 0:
-                    attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
+        # attn: (M // K) x num_heads x K x K
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        # mask out the attention weights for the padded points
+        patch_offsets = patch_feats.patch_offsets
+        num_points = patch_feats.offsets.diff()
+        for i in range(patch_feats.batch_size):
+            if num_points[i] % K != 0:
+                attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
 
-            attn = attn.softmax(dim=-1)
-            attn = self.attn_drop(attn)
-            out_feat = (attn @ v).transpose(1, 2).reshape(M, C)
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+        out_feat = (attn @ v).transpose(1, 2).reshape(M, C)
 
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
-        out_patch_feats: CatFeatures = patch_feats.replace(batched_tensor=out_feat).to_cat()
+        out_patch_feats: Tensor = (
+            patch_feats.replace(batched_tensor=out_feat).to_cat().batched_tensor
+        )
 
-        if self.rand_perm_patch:
-            out_patch_feats = out_patch_feats.batched_tensor[inverse_perm]
+        if inverse_perm is not None:
+            out_patch_feats = out_patch_feats[inverse_perm]
 
         return skip.replace(batched_features=out_patch_feats)
 

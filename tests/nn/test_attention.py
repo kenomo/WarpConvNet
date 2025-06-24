@@ -116,7 +116,6 @@ def test_patch_attention(setup_points):
         patch_size=patch_size,
         num_heads=num_heads,
         qkv_bias=True,
-        use_sdpa=False,
     ).to(device)
 
     # Forward pass

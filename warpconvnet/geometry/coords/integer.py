@@ -72,13 +72,13 @@ class IntCoords(Coords):
             assert isinstance(self.tensor_stride, (int, tuple))
 
     def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.MORTON_XYZ) -> "IntCoords":
-        _, perm = encode(
+        result = encode(
             self.batched_tensor,
             batch_offsets=self.offsets,
             order=ordering,
             return_perm=True,
         )
-        return self.__class__(self.batched_tensor[perm], self.offsets)
+        return self.__class__(self.batched_tensor[result.perm], self.offsets)
 
     def unique(self) -> "IntCoords":
         unique_indices, batch_offsets = voxel_downsample_random_indices(

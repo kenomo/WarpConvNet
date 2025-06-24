@@ -98,22 +98,20 @@ class Points(Geometry):
         """
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
-        _, perm = encode(
+        result = encode(
             torch.floor(self.coordinate_tensor / voxel_size).int(),
             batch_offsets=self.offsets,
             order=ordering,
             return_perm=True,
         )
         kwargs = self.extra_attributes.copy()
-        kwargs["ordering"] = ordering
-        kwargs["code"] = self.coordinate_tensor[perm]
         return self.__class__(
             batched_coordinates=RealCoords(
-                batched_tensor=self.coordinate_tensor[perm],
+                batched_tensor=self.coordinate_tensor[result.perm],
                 offsets=self.offsets,
             ),
             batched_features=CatFeatures(
-                batched_tensor=self.feature_tensor[perm],
+                batched_tensor=self.feature_tensor[result.perm],
                 offsets=self.offsets,
             ),
             **kwargs,

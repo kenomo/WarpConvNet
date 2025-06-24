@@ -91,7 +91,7 @@ def test_sparse_unpool(setup_voxels, concat_unpooled):
         voxels,
         kernel_size=kernel_size,
         stride=stride,
-        concat_unpooled_st=concat_unpooled,
+        concat_unpooled_voxels=concat_unpooled,
     )
 
     # Verify output shape

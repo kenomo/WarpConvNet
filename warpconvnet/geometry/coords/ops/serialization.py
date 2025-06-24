@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from enum import Enum
-from typing import Optional, Tuple, Union
+from typing import NamedTuple, Optional, Tuple, Union
 
 import torch
 
@@ -11,10 +11,12 @@ import math
 from jaxtyping import Int
 from torch import Tensor
 
+from warpconvnet.utils.logger import get_logger
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 from warpconvnet.utils.cuda_utils import load_kernel
 
+logger = get_logger(__name__)
 
 # cuda_utils.py automatically handles the csrc path for just filename
 _assign_order_16bit_kernel = load_kernel(
@@ -45,78 +47,131 @@ POINT_ORDERING_TO_MORTON_PERMUTATIONS = {
 }
 
 
+class SerializationResult(NamedTuple):
+    """
+    Named tuple containing serialization results.
+
+    Attributes:
+        codes: Serialization codes of the grid coordinates
+        perm: Permutation that sorts coordinates by their codes (sorted_data = original_data[perm])
+        inverse_perm: Inverse permutation to restore original order (original_data = sorted_data[inverse_perm])
+    """
+
+    codes: Tensor
+    perm: Optional[Tensor] = None
+    inverse_perm: Optional[Tensor] = None
+
+
 @torch.inference_mode()
 def encode(
     grid_coord: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],
     batch_offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
     order: POINT_ORDERING | str = POINT_ORDERING.MORTON_XYZ,
     return_perm: bool = False,
-) -> Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]:
+    return_inverse: bool = False,
+) -> Union[Int[Tensor, "N"], SerializationResult]:  # noqa: F821
     """
-    Generate ordering of the grid coordinates.
+    Generate ordering of the grid coordinates with optional permutation and inverse permutation.
 
     Args:
-        grid_coord: Grid coordinates (N, 3)
+        grid_coord: Grid coordinates (N, 3) or (N, 4)
         batch_offsets: Batch offsets for multi-batch processing.
         order: Coordinate ordering scheme (e.g., POINT_ORDERING.MORTON_XYZ, POINT_ORDERING.MORTON_XZY, etc.)
-        return_perm: Whether to return the permutation of the grid coordinates. Use this to sort the input coordinate to the new ordering.
-            ```python
-            _, perm = encode(coords, order=POINT_ORDERING.MORTON_XYZ, return_perm=True)
-            sorted_coords = coords[perm]
-            ```
+        return_perm: Whether to return the permutation that sorts the coordinates by their codes.
+        return_inverse: Whether to return the inverse permutation to restore original order.
 
     Returns:
-        codes: ordering of the grid coordinates
-        perm: permutation of the grid coordinates
+        If return_perm=False and return_inverse=False:
+            codes: serialization codes only (backward compatibility)
+        Otherwise:
+            SerializationResult with codes and requested permutations
+
+    Examples:
+        ```python
+        # Just get codes (backward compatibility)
+        codes = encode(coords, order=POINT_ORDERING.MORTON_XYZ)
+
+        # Get structured result with permutation
+        result = encode(coords, order=POINT_ORDERING.MORTON_XYZ, return_perm=True)
+        sorted_coords = coords[result.perm]
+
+        # Get structured result with permutation and inverse (Point Transformer style)
+        result = encode(coords, order=POINT_ORDERING.MORTON_XYZ,
+                       return_perm=True, return_inverse=True)
+        sorted_coords = coords[result.perm]
+        restored_coords = sorted_coords[result.inverse_perm]  # Should equal original coords
+
+        # Access fields
+        codes = result.codes
+        perm = result.perm
+        inverse_perm = result.inverse_perm
+        ```
     """
     if isinstance(order, str):
         order = POINT_ORDERING(order)
 
-    # Empty grid handling
+    # Early return for backward compatibility when no permutations requested
     if grid_coord.shape[0] == 0:
-        return torch.empty(0)
-
-    # Run morton code if order is MORTON_*
-    if order in POINT_ORDERING_TO_MORTON_PERMUTATIONS.keys():
-        return morton_code(
-            grid_coord,
-            batch_offsets=batch_offsets,
-            return_to_morton=return_perm,
-            order=order,
-        )
+        codes = torch.empty(0, dtype=torch.int64)
+    elif order in POINT_ORDERING_TO_MORTON_PERMUTATIONS.keys():
+        codes = morton_code(grid_coord, batch_offsets=batch_offsets, order=order)
     elif order == POINT_ORDERING.RANDOM:
-        code = torch.randperm(grid_coord.shape[0])
-        if return_perm:
-            return code, torch.argsort(code)
-        return code
+        codes = torch.randperm(grid_coord.shape[0])
     else:
         raise NotImplementedError(f"Order '{order}' not supported at the moment")
+
+    # Early return
+    if not return_perm and not return_inverse:
+        return codes
+
+    # Handle empty grid for structured result
+    if (return_perm or return_inverse) and codes.shape[0] == 0:
+        empty_tensor = torch.empty(0, dtype=torch.int64)
+        return SerializationResult(
+            codes=codes,
+            perm=empty_tensor if return_perm else None,
+            inverse_perm=empty_tensor if return_inverse else None,
+        )
+
+    # Generate permutation (when either return_perm or return_inverse is True)
+    perm = torch.argsort(codes)
+
+    # Generate inverse permutation if requested
+    inverse_perm = None
+    if return_inverse:
+        inverse_perm = torch.zeros_like(perm).scatter_(
+            0, perm, torch.arange(len(perm), device=perm.device)
+        )
+
+    return SerializationResult(
+        codes=codes,
+        perm=perm,
+        inverse_perm=inverse_perm,
+    )
 
 
 @torch.inference_mode()
 def morton_code(
     coords: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],  # noqa: F821
     batch_offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
-    return_to_morton: bool = True,
     threads_per_block: int = 256,
     order: POINT_ORDERING | str = POINT_ORDERING.MORTON_XYZ,
-) -> Union[Int[Tensor, "N"], Tuple[Int[Tensor, "N"], Int[Tensor, "N"]]]:  # noqa: F821
+) -> Int[Tensor, "N"]:  # noqa: F821
     """
-    Returns the permutation of the input coordinates that sorts them according to the ordering.
+    Generate Morton codes for the input coordinates.
 
     Args:
         coords: Input coordinates (N, 3) or (N, 4)
-        offsets: Batch offsets for multi-batch processing.
-        return_to_morton: Whether to return sorting permutation
+        batch_offsets: Batch offsets for multi-batch processing.
         threads_per_block: CUDA threads per block
         order: Coordinate ordering scheme (e.g., POINT_ORDERING.MORTON_XYZ, POINT_ORDERING.MORTON_XZY, etc.)
 
     Returns:
-        Morton codes and optionally sorting permutation
+        Morton codes
 
     The coords must be in the range [0, 2^16 - 1] for 16-bit path (batched)
     or effectively [0, 2^20 - 1] for 20-bit path (single batch, after normalization)
-    and the result_order will be the z-order number of the point.
+    and the result will be the z-order number of the point.
     """
     if isinstance(order, str):
         order = POINT_ORDERING(order)
@@ -128,10 +183,7 @@ def morton_code(
 
     # Empty grid handling
     if coords.shape[0] == 0:
-        if return_to_morton:
-            return torch.empty(0), torch.empty(0)
-        else:
-            return torch.empty(0)
+        return torch.empty(0, dtype=torch.int64)
 
     min_coord = coords.min(0).values
     coords_normalized = (coords - min_coord).to(dtype=torch.int32).cuda()
@@ -169,10 +221,20 @@ def morton_code(
             bcoords = batch_indexed_coordinates(bcoords, batch_offsets).to(
                 device=device, dtype=torch.int32
             )
-        # bcoords is now [N, 4]
+        assert bcoords.shape[1] == 4, "bcoords must be [N, 4]"
 
         # Ensure bcoords_cp is C-contiguous
         bcoords_cp = cp.from_dlpack(bcoords.contiguous())
+
+        # Max coord for 16-bit is 2^16 - 1 = 65535
+        coord_max = bcoords.max().item()
+        if coord_max > 65535:
+            logger.warning(
+                f"bcoords max is {coord_max}, which is greater than 65535, which is the max value for 16-bit morton code. "
+                "Truncating the coordinates to 16-bit."
+            )
+            div = math.ceil(coord_max / 65535)
+            bcoords_cp = bcoords_cp // div
 
         # Kernel expects: const int* bcoords_data, int num_points, int64_t* result_order
         blocks_per_grid = math.ceil(num_points / threads_per_block)
@@ -183,9 +245,5 @@ def morton_code(
         )
 
     # Convert result from CuPy array back to PyTorch tensor on the original device
-    result_code = torch.from_dlpack(result_code_cp).to(device)
-
-    if return_to_morton:
-        to_morton_order = argsort(result_code, backend="torch")
-        return result_code, to_morton_order
+    result_code = torch.as_tensor(result_code_cp, device=device)
     return result_code

@@ -10,7 +10,7 @@ from jaxtyping import Int
 from torch import Tensor
 
 from warpconvnet.geometry.coords.search.torch_hashmap import HashMethod, TorchHashTable
-from warpconvnet.geometry.coords.ops.serialization import morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.utils.ravel import ravel_multi_index
 
 
@@ -135,7 +135,7 @@ class ToUnique:
 
     def __init__(
         self,
-        unique_method: Literal["torch", "ravel", "morton"] = "torch",
+        unique_method: Literal["torch", "ravel", "encode"] = "torch",
         return_to_unique_indices: bool = False,
     ):
         # Ravel can be used only when the raveled coordinates is less than 2**31
@@ -147,9 +147,11 @@ class ToUnique:
             min_coords = x.min(dim=dim).values
             shifted_x = x - min_coords
             shape = shifted_x.max(dim=dim).values + 1
-            unique_input = ravel_multi_index(shifted_x, shape)
-        elif self.unique_method == "morton":
-            unique_input = morton_code(x, return_to_morton=False)
+            unique_input = ravel_multi_index(shifted_x, spatial_shape=shape)
+        elif self.unique_method == "encode":
+            unique_input = encode(
+                x, order=POINT_ORDERING.MORTON_XYZ, return_perm=False, return_inverse=False
+            )
         else:
             unique_input = x
 

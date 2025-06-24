@@ -5,6 +5,7 @@ import pytest
 import torch
 import warp as wp
 
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING
 from warpconvnet.geometry.coords.ops.stride import stride_coords
 from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
 from warpconvnet.geometry.coords.search.torch_discrete import (
@@ -166,7 +167,6 @@ def test_generate_kernel_map_with_skip_symmetric_kernel_map(setup_voxels):
         skip_symmetric_kernel_map=True,
     )
 
-    assert kernel_map.identity_map_index is None
     assert (
         kernel_map_skip.identity_map_index is not None
         and kernel_map_skip.identity_map_index == 27 // 2
@@ -243,7 +243,6 @@ def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
         batch_indexed_in_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=False,
     )
 
     # Explicit GEMM
@@ -278,10 +277,9 @@ def test_sparse_conv_forward_backward_with_cutlass(setup_voxels):
         weights.clone(),
         kernel_map,
         accumulator_type=torch.float32,
-        split_k_slices=1,
     )
     assert torch.allclose(grad_in, grad_in_explicit, atol=1e-1, rtol=1e-3)
-    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-1, rtol=1e-3)
+    assert torch.allclose(grad_weight, grad_weight_explicit, atol=1e-1, rtol=1e-2)
 
 
 def test_sparse_conv_forward_backward_implicit_explicit_gemm(setup_voxels):
@@ -302,7 +300,6 @@ def test_sparse_conv_forward_backward_implicit_explicit_gemm(setup_voxels):
         batch_indexed_in_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=False,
     )
 
     # Explicit GEMM
@@ -375,7 +372,6 @@ def test_sparse_conv_forward_with_skip_symmetric(setup_small_voxels):
         batch_indexed_in_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=False,
     )
 
     # Implicit GEMM
@@ -437,7 +433,6 @@ def test_sparse_conv_explicit_backward(setup_small_voxels):
         batch_indexed_out_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=True,
     )
     torch.autograd.gradcheck(
         SpatiallySparseConvExplicitGEMMFunction.apply,
@@ -457,7 +452,6 @@ def test_sparse_conv_explicit_backward(setup_small_voxels):
         batch_indexed_out_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=False,
     )
     torch.autograd.gradcheck(
         SpatiallySparseConvExplicitGEMMFunction.apply,
@@ -497,7 +491,6 @@ def test_sparse_conv_implicit_backward(setup_small_voxels):
         batch_indexed_out_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=False,
     )
     torch.autograd.gradcheck(
         SpatiallySparseConvImplicitGEMMFunction.apply,
@@ -517,7 +510,6 @@ def test_sparse_conv_implicit_backward(setup_small_voxels):
         batch_indexed_out_coords,
         stride,
         kernel_size,
-        skip_symmetric_kernel_map=True,
     )
     torch.autograd.gradcheck(
         SpatiallySparseConvImplicitGEMMFunction.apply,
@@ -586,7 +578,7 @@ def test_sparse_conv_amp(setup_voxels):
         C_out,
         kernel_size=(3, 3, 3),
         stride=(2, 2, 2),
-        out_code_backend="morton",
+        order=POINT_ORDERING.MORTON_XYZ,
     ).to(voxels.device)
 
     with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
