@@ -113,7 +113,7 @@ def test_sort(setup_voxels):
     voxels, _, _ = setup_voxels
     device = torch.device("cuda:0")
     voxels = voxels.to(device)
-    sorted_voxels = voxels.sort(ordering=POINT_ORDERING.Z_ORDER)
+    sorted_voxels = voxels.sort(ordering=POINT_ORDERING.MORTON_XYZ)
     assert sorted_voxels is not None
 
 

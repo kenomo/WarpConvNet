@@ -11,7 +11,7 @@ from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.integer import IntCoords
 from warpconvnet.geometry.coords.real import RealCoords
 from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
-from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.geometry.features.cat import CatFeatures
 from warpconvnet.geometry.features.pad import PadFeatures
 from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
@@ -243,7 +243,7 @@ class Voxels(Geometry):
         batched_points = RealCoords(self.coordinate_tensor * voxel_size, self.offsets)
         return Points(batched_points, self.batched_features)
 
-    def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "Voxels":
+    def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.MORTON_XYZ) -> "Voxels":
         if ordering == self.ordering:
             return self
 
@@ -251,10 +251,15 @@ class Voxels(Geometry):
             self.batched_features, CatFeatures
         ), "Features must be a CatBatchedFeatures to sort."
 
-        code, perm = morton_code(self.coordinate_tensor, self.offsets, ordering)  # noqa: F821
+        _, perm = encode(
+            self.coordinate_tensor,
+            batch_offsets=self.offsets,
+            order=ordering,
+            return_perm=True,
+        )
         kwargs = self.extra_attributes.copy()
         kwargs["ordering"] = ordering
-        kwargs["code"] = code[perm]
+        kwargs["code"] = self.coordinate_tensor[perm]
         return self.__class__(
             batched_coordinates=IntCoords(self.coordinate_tensor[perm], self.offsets),
             batched_features=CatFeatures(self.feature_tensor[perm], self.offsets),

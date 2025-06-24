@@ -9,7 +9,7 @@ from torch import Tensor
 
 from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.torch_hashmap import TorchHashTable
-from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.geometry.coords.ops.voxel import voxel_downsample_random_indices
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
 from warpconvnet.geometry.utils.list_to_batch import list_to_cat_tensor
@@ -71,25 +71,14 @@ class IntCoords(Coords):
         if self.tensor_stride is not None:
             assert isinstance(self.tensor_stride, (int, tuple))
 
-    def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER) -> "IntCoords":
-        assert ordering == POINT_ORDERING.Z_ORDER, "Only Z-ordering is supported atm"
-        rank, perm = morton_code(self.batched_tensor, self.offsets, return_to_morton=True)
+    def sort(self, ordering: POINT_ORDERING = POINT_ORDERING.MORTON_XYZ) -> "IntCoords":
+        _, perm = encode(
+            self.batched_tensor,
+            batch_offsets=self.offsets,
+            order=ordering,
+            return_perm=True,
+        )
         return self.__class__(self.batched_tensor[perm], self.offsets)
-
-    def neighbors(
-        self,
-        search_args: "DiscreteNeighborSearchArgs",  # noqa: F821
-        query_coords: Optional["IntCoords"] = None,
-    ) -> "DiscreteNeighborSearchResult":  # noqa: F821
-        """
-        Returns CSR format neighbor indices
-        """
-        if query_coords is None:
-            query_coords = self
-
-        assert isinstance(query_coords, IntCoords), "query_coords must be BatchedCoordinates"
-
-        raise NotImplementedError
 
     def unique(self) -> "IntCoords":
         unique_indices, batch_offsets = voxel_downsample_random_indices(

@@ -10,7 +10,7 @@ from warpconvnet.geometry.base.coords import Coords
 from warpconvnet.geometry.coords.search.search_results import RealSearchResult
 from warpconvnet.geometry.coords.search.search_configs import RealSearchConfig
 from warpconvnet.geometry.coords.sample import random_sample_per_batch
-from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, morton_code
+from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.geometry.coords.search.continuous import (
     neighbor_search,
 )
@@ -66,18 +66,20 @@ class RealCoords(Coords):
 
     def sort(
         self,
-        ordering: POINT_ORDERING = POINT_ORDERING.Z_ORDER,
+        ordering: POINT_ORDERING = POINT_ORDERING.MORTON_XYZ,
         voxel_size: Optional[float] = None,
     ):
         """
         Sort the points according to the ordering provided.
         The voxel size defines the smallest descritization and points in the same voxel will have random order.
         """
-        assert ordering == POINT_ORDERING.Z_ORDER, "Only Z-ordering is supported atm"
         # Warp uses int32 so only 10 bits per coordinate supported. Thus max 1024.
         assert self.device.type != "cpu", "Sorting is only supported on GPU"
-        code, perm = morton_code(
-            torch.floor(self.batched_tensor / voxel_size).int(), self.offsets, ordering
+        _, perm = encode(
+            torch.floor(self.batched_tensor / voxel_size).int(),
+            batch_offsets=self.offsets,
+            order=ordering,
+            return_perm=True,
         )
         return self.__class__(
             batched_tensor=self.batched_tensor[perm],
