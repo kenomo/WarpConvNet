@@ -10,6 +10,11 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor
 
+try:
+    import flash_attn
+except ImportError:
+    flash_attn = None
+
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
@@ -136,14 +141,21 @@ class Attention(nn.Module):
         qk_scale: Optional[float] = None,
         attn_drop: float = 0.0,
         proj_drop: float = 0.0,
+        enable_flash: bool = True,
     ):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim**-0.5
+        self.enable_flash = enable_flash
+
+        if enable_flash:
+            assert flash_attn is not None, "Make sure flash_attn is installed."
+            self.attn_drop_p = attn_drop
+        else:
+            self.attn_drop = nn.Dropout(attn_drop)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -155,31 +167,58 @@ class Attention(nn.Module):
         num_points: Optional[Int[Tensor, "B"]] = None,  # noqa: F821
     ) -> Float[Tensor, "B N C"]:
         B, N, C = x.shape
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
-            .permute(2, 0, 3, 1, 4)
-        )
-        q, k, v = (
-            qkv[0],
-            qkv[1],
-            qkv[2],
-        )  # make torchscript happy (cannot use tensor as tuple)
+        qkv = self.qkv(x)
 
-        # Apply positional encoding to the query and key
-        if pos_enc is not None:
-            q = q + pos_enc.unsqueeze(1)
-            k = k + pos_enc.unsqueeze(1)
+        if not self.enable_flash:
+            qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+            q, k, v = (
+                qkv[0],
+                qkv[1],
+                qkv[2],
+            )  # make torchscript happy (cannot use tensor as tuple)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        if mask is not None:
-            attn = attn + mask
+            # Apply positional encoding to the query and key
+            if pos_enc is not None:
+                q = q + pos_enc.unsqueeze(1)
+                k = k + pos_enc.unsqueeze(1)
 
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            if mask is not None:
+                attn = attn + mask
 
-        x = attn @ v
-        x = x.transpose(1, 2).reshape(B, N, C)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+
+            x = attn @ v
+            x = x.transpose(1, 2).reshape(B, N, C)
+        else:
+            # Flash attention path
+            if pos_enc is not None:
+                # Add positional encoding to input before QKV projection
+                x_with_pos = x + pos_enc
+                qkv = self.qkv(x_with_pos)
+
+            # Reshape for flash attention: (B, N, 3, num_heads, head_dim)
+            qkv = qkv.reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+            # Flash attention - preserve original dtype if possible
+            original_dtype = qkv.dtype
+            if qkv.dtype not in [torch.float16, torch.bfloat16]:
+                # Convert to half precision for flash attention
+                qkv_flash = qkv.half()
+            else:
+                qkv_flash = qkv
+
+            x = flash_attn.flash_attn_qkvpacked_func(
+                qkv_flash,
+                dropout_p=self.attn_drop_p if self.training else 0.0,
+                softmax_scale=self.scale,
+            ).reshape(B, N, C)
+
+            # Convert back to original dtype if necessary
+            if x.dtype != original_dtype:
+                x = x.to(original_dtype)
+
         x = self.proj(x)
         x = self.proj_drop(x)
 
@@ -200,6 +239,7 @@ class SpatialFeatureAttention(Attention):
         num_encoding_channels: int = 32,
         encoding_range: float = 1.0,
         use_encoding: bool = False,
+        enable_flash: bool = True,
         **kwargs,
     ):
         super().__init__(
@@ -209,6 +249,7 @@ class SpatialFeatureAttention(Attention):
             qk_scale,
             attn_drop,
             proj_drop,
+            enable_flash,
         )
         self.to_attn = ToAttention(
             dim,
@@ -228,110 +269,6 @@ class SpatialFeatureAttention(Attention):
         return y
 
 
-class NestedAttention(BaseSpatialModule):
-    """
-    Warning: does not support gradient
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 8,
-        qk_scale: Optional[float] = None,
-        attn_drop: float = 0.0,
-        proj_drop: float = 0.0,
-        pos_enc: Optional[nn.Module] = None,
-        **kwargs,
-    ):
-        super().__init__()
-
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim**-0.5
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-        self.pos_enc = pos_enc
-
-    def forward(
-        self,
-        query: Union[Geometry, Tensor, NestedTensor],
-        key: Optional[Geometry] = None,
-        value: Optional[Geometry] = None,
-        query_pos: Optional[Tensor] = None,
-        key_pos: Optional[Tensor] = None,
-    ) -> Union[Geometry, Tensor, NestedTensor]:
-        if isinstance(query, Geometry):
-            query_feats = query.nested_features
-        elif query.is_nested:
-            query_feats = query
-        elif isinstance(query, Tensor):
-            query_feats = torch.nested.as_nested_tensor([q for q in query])
-
-        # Assert query does not require gradient
-        assert not query_feats.requires_grad, "NestedAttention does not support gradient"
-
-        # All computations are done on nested tensors
-        key_feats = key.nested_features if key is not None else query_feats
-        value_feats = value.nested_features if value is not None else key_feats
-        if self.pos_enc is not None:
-            assert isinstance(query, Geometry)
-            query_pos = self.pos_enc(query.nested_coordinates)
-            key_pos = self.pos_enc(key.nested_coordinates) if key is not None else query_pos
-
-        if query_pos is not None:
-            if not query_pos.is_nested:
-                query_pos = torch.nested.as_nested_tensor([q for q in query_pos])
-            query_feats = query_feats + query_pos
-
-        if key_pos is not None:
-            if not key_pos.is_nested:
-                key_pos = torch.nested.as_nested_tensor([k for k in key_pos])
-            key_feats = key_feats + key_pos
-
-        # Reshape for heads
-        C = query_feats.size(-1)
-        query_feats = torch.nested.nested_tensor(
-            [
-                q.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
-                for q in query_feats
-            ]
-        )
-        key_feats = torch.nested.nested_tensor(
-            [
-                k.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
-                for k in key_feats
-            ]
-        )
-        value_feats = torch.nested.nested_tensor(
-            [
-                v.reshape(-1, self.num_heads, C // self.num_heads).permute(1, 0, 2)
-                for v in value_feats
-            ]
-        )
-        # Reshape for heads
-        x = F.scaled_dot_product_attention(
-            query_feats,
-            key_feats,
-            value_feats,
-            dropout_p=self.attn_drop.p,
-            scale=self.scale,
-        )
-        x = torch.nested.nested_tensor([x_.permute(1, 0, 2).flatten(1) for x_ in x])
-
-        # apply proj and proj_drop
-        x = self.proj(x)
-        x = self.proj_drop(x)
-
-        # Return based on the type of query
-        if isinstance(query, Geometry):
-            return query.replace(batched_features=CatFeatures.from_nested(x))
-        elif query.is_nested:
-            return x
-        else:
-            return torch.stack([x_ for x_ in x])
-
-
 class PatchAttention(BaseSpatialModule):
     def __init__(
         self,
@@ -347,72 +284,107 @@ class PatchAttention(BaseSpatialModule):
         super().__init__()
         self.patch_size = patch_size
         self.num_heads = num_heads
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim**-0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.order = order
-        self.attn_drop = nn.Dropout(attn_drop)
+        assert flash_attn is not None, "Make sure flash_attn is installed."
+        self.attn_drop_p = attn_drop
+
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x: Geometry) -> Geometry:
-        # Assert that x is serialized
-        K = self.patch_size
-        skip = x
+    def _offset_to_attn_offset(
+        self, offsets: Int[Tensor, "B+1"], patch_size: Optional[int] = None
+    ) -> Int[Tensor, "B"]:
+        """
+        Convert offsets to cumulative attention offsets required for flash attention.
+        If the patch size is 8 and the offsets are [0, 3, 11, 40] (3 batches),
+        the cumulative attention offsets are [0, 3, 3 + 8 = 11, 11 + 8, 11 + 8 + 8, 11 + 8 + 8 + 8, 40].
 
-        batched_features = x.batched_features
-        inverse_perm = None
-        if self.order != POINT_ORDERING.RANDOM:
-            # Generate new ordering and inverse permutation
-            code_result = encode(
-                x.coordinate_tensor, order=self.order, return_perm=True, return_inverse=True
-            )
-            batched_features = CatFeatures(
-                batched_tensor=batched_features.batched_tensor[code_result.perm.clone()],
-                offsets=batched_features.offsets,
-            )
-            inverse_perm = code_result.inverse_perm.clone()
+        Args:
+            offsets: (B+1)
+            patch_size: Optional[int]
+        Returns:
+            cum_seqlens: M
+        """
+        patch_size = patch_size or self.patch_size
+        counts = torch.diff(offsets)
+        num_patches_per_batch = counts // patch_size
 
-        patch_feats: CatPatchFeatures = CatPatchFeatures.from_cat(batched_features, K)
-        feats = patch_feats.batched_tensor  # MxC
-        M, C = feats.shape
-        qkv = (
-            self.qkv(feats)
-            .reshape(M // K, K, 3, self.num_heads, C // self.num_heads)
-            .permute(2, 0, 3, 1, 4)
+        # Fast path: if no patches, return original offsets
+        if num_patches_per_batch.sum() == 0:
+            return offsets
+
+        # Calculate how many elements each batch contributes (1 start + num_patches)
+        elements_per_batch = 1 + num_patches_per_batch
+
+        # Create indices for which batch each element belongs to
+        batch_indices = torch.repeat_interleave(
+            torch.arange(len(offsets) - 1, device=offsets.device), elements_per_batch
         )
 
-        # q: (M // K) x num_heads x K x C // num_heads
-        q, k, v = (
-            qkv[0],
-            qkv[1],
-            qkv[2],
-        )  # make torchscript happy (cannot use tensor as tuple)
+        # Create indices for position within each batch's sequence (0, 1, 2, ...)
+        within_batch_indices = torch.cat(
+            [
+                torch.arange(n + 1, device=offsets.device, dtype=offsets.dtype)
+                for n in num_patches_per_batch
+            ]
+        )
 
-        # attn: (M // K) x num_heads x K x K
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        # mask out the attention weights for the padded points
-        patch_offsets = patch_feats.patch_offsets
-        num_points = patch_feats.offsets.diff()
-        for i in range(patch_feats.batch_size):
-            if num_points[i] % K != 0:
-                attn[patch_offsets[i + 1] // K - 1, :, :, num_points[i] % K :] = -torch.inf
+        # Calculate the actual offsets: start_offset + patch_index * patch_size
+        start_offsets = offsets[:-1][batch_indices]
+        patch_contributions = within_batch_indices * patch_size
+        result_middle = start_offsets + patch_contributions
 
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-        out_feat = (attn @ v).transpose(1, 2).reshape(M, C)
+        # Add the final offset
+        result = torch.cat([result_middle, offsets[-1].unsqueeze(0)])
+
+        return result
+
+    def forward(self, x: Geometry, order: Optional[POINT_ORDERING] = None) -> Geometry:
+        # Assert that x is serialized
+        K = self.patch_size
+
+        feats = x.features
+        M, C = feats.shape[:2]
+        inverse_perm = None
+        order = order or self.order
+        if not hasattr(x, "order") or (order != x.order):
+            # Generate new ordering and inverse permutation
+            code_result = encode(
+                x.coordinate_tensor,
+                batch_offsets=x.offsets,
+                order=order,
+                return_perm=True,
+                return_inverse=True,
+            )
+            feats = feats[code_result.perm]
+            inverse_perm = code_result.inverse_perm.clone()
+
+        # Flash attention path - use variable length version for patches
+        # Reshape for flash attention: (M, 3, num_heads, head_dim)
+        qkv = self.qkv(feats)
+        qkv = qkv.reshape(-1, 3, self.num_heads, C // self.num_heads)
+
+        attn_offsets = self._offset_to_attn_offset(x.offsets, K).to(qkv.device)
+        out_feat = flash_attn.flash_attn_varlen_qkvpacked_func(
+            qkv.half(),
+            attn_offsets,
+            max_seqlen=K,
+            dropout_p=self.attn_drop_p if self.training else 0.0,
+            softmax_scale=self.scale,
+        )
+        out_feat = out_feat.reshape(M, C)
 
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)
 
-        out_patch_feats: Tensor = (
-            patch_feats.replace(batched_tensor=out_feat).to_cat().batched_tensor
-        )
-
         if inverse_perm is not None:
-            out_patch_feats = out_patch_feats[inverse_perm]
+            out_feat = out_feat[inverse_perm]
 
-        return skip.replace(batched_features=out_patch_feats)
+        return x.replace(batched_features=out_feat)
 
 
 class FeedForward(BaseSpatialModule):
@@ -453,6 +425,7 @@ class TransformerBlock(BaseSpatialModule):
         norm_eps: float = 1e-5,
         attn_fn: Optional[Callable[..., nn.Module]] = None,
         norm_fn: Optional[Callable[..., nn.Module]] = LayerNorm,
+        enable_flash: bool = True,
     ):
         super().__init__()
         if attn_fn is None:
@@ -465,6 +438,7 @@ class TransformerBlock(BaseSpatialModule):
             qk_scale=qk_scale,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
+            enable_flash=enable_flash,
         )
         self.feed_forward = FeedForward(
             dim=dim,

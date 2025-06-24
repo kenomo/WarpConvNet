@@ -17,7 +17,7 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11"]
+dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11", "flash-attn"]
 dynamic = ["version"]
 
 [project.urls]

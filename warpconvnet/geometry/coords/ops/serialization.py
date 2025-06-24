@@ -62,7 +62,7 @@ class SerializationResult(NamedTuple):
     inverse_perm: Optional[Tensor] = None
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def encode(
     grid_coord: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],
     batch_offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
@@ -150,7 +150,7 @@ def encode(
     )
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def morton_code(
     coords: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],  # noqa: F821
     batch_offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821

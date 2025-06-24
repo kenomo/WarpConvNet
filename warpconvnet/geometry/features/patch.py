@@ -56,7 +56,7 @@ class CatPatchFeatures(CatFeatures):
 
     @classmethod
     def from_cat(cls, features: CatFeatures, patch_size: int):
-        # Convert the [N1, N2, ..., N_B] batch of points into [N1 + K - 1 // K * K, N2 + K - 1 // K * K, ..., N_B + K - 1 // K * K]
+        # Convert the [N1, N2, ..., N_B] batch of points into [(N1 + K - 1) // K * K, (N2 + K - 1) // K * K, ..., (N_B + K - 1) // K * K]
         # by padding each batch with Ni % K points.
         num_points = features.offsets.diff()
         num_points_padded = (num_points + patch_size - 1) // patch_size * patch_size

@@ -149,6 +149,7 @@ class ToUnique:
             shape = shifted_x.max(dim=dim).values + 1
             unique_input = ravel_multi_index(shifted_x, spatial_shape=shape)
         elif self.unique_method == "encode":
+            assert x.shape[1] == 3, "Encode only supports 3D coordinates"
             unique_input = encode(
                 x, order=POINT_ORDERING.MORTON_XYZ, return_perm=False, return_inverse=False
             )
