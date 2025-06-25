@@ -483,6 +483,7 @@ def _implicit_gemm_forward_logic(
                         out_map_k_cp[start_idx:end_idx],
                     ),
                 )
+
     return torch.from_dlpack(output_feature_tensor_cp).to(dtype=in_features.dtype)
 
 
@@ -740,6 +741,9 @@ def _cutlass_implicit_gemm_backward_logic(
             )
             if status != 0:
                 return status, i
+
+    # Synchronize before returning tensors that depend on custom CUDA kernels
+    torch.cuda.current_stream().synchronize()
     return (
         grad_in_features.to(dtype=in_features.dtype),
         grad_weight.to(dtype=orig_weight_dtype),

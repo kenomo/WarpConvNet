@@ -341,7 +341,7 @@ class PatchAttention(BaseSpatialModule):
         # Add the final offset
         result = torch.cat([result_middle, offsets[-1].unsqueeze(0)])
 
-        return result
+        return result.contiguous()
 
     def forward(self, x: Geometry, order: Optional[POINT_ORDERING] = None) -> Geometry:
         # Assert that x is serialized
@@ -384,7 +384,7 @@ class PatchAttention(BaseSpatialModule):
         if inverse_perm is not None:
             out_feat = out_feat[inverse_perm]
 
-        return x.replace(batched_features=out_feat)
+        return x.replace(batched_features=out_feat.to(feats.dtype))
 
 
 class FeedForward(BaseSpatialModule):

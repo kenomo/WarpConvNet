@@ -4,11 +4,10 @@
 # Use hydra config to run the script
 # python scannet.py model._target=mink_unet.MinkUNet34 train.batch_size=12
 
-# WARNING: This is an example of how to use the warpconvnet library.
-# The data loader does apply any augmentation to the point cloud.
-# Please create your own data augmentation pipeline to augment the point cloud data.
-from typing import Dict, List, Literal, Optional, Tuple
-import os
+# WARNING: This is a simple example of how to use the warpconvnet library.
+# The data loader does NOT apply any augmentation to the point cloud.
+# Please create your own data augmentation pipeline for high-quality training.
+from typing import Dict, List, Optional, Tuple
 import yaml
 
 try:
