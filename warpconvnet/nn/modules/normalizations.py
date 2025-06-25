@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import List
+from typing import List, Union
 
 import torch
 from jaxtyping import Float
@@ -31,7 +31,7 @@ class NormalizationBase(BaseSpatialModule):
 
     def forward(
         self,
-        input: Geometry,
+        input: Union[Geometry, Tensor],
     ):
         return apply_feature_transform(input, self.norm)
 

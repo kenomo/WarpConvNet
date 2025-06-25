@@ -1,20 +1,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Callable, Sequence
+from typing import Callable, Sequence, Union
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 
 from warpconvnet.geometry.base.geometry import Geometry
 
 
 def apply_feature_transform(
-    input: Geometry,
+    input: Union[Geometry, Tensor],
     transform: Callable,
 ):
-    assert isinstance(input, Geometry), f"Expected BatchedSpatialFeatures, got {type(input)}"
-    return input.replace(batched_features=transform(input.feature_tensor))
+    if isinstance(input, Geometry):
+        return input.replace(batched_features=transform(input.feature_tensor))
+    else:
+        assert isinstance(input, Tensor), f"Expected Tensor, got {type(input)}"
+        return transform(input)
 
 
 def create_activation_function(torch_func):
