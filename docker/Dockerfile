@@ -36,7 +36,9 @@ RUN pip install --no-cache-dir \
     cupy-cuda12x
 
 # Install torch_scatter from github source
-RUN pip install --no-cache-dir git+https://github.com/rusty1s/pytorch_scatter.git
+# ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0 9.1 9.2"
+# RUN pip install --no-cache-dir git+https://github.com/rusty1s/pytorch_scatter.git
+RUN pip install torch-scatter -f https://data.pyg.org/whl/torch-2.7.0+cu128.html
 
 # Install warpconvnet and install only the 3rdparty/cutlass submodule
 RUN mkdir -p /opt/warpconvnet && cd /opt/warpconvnet && \

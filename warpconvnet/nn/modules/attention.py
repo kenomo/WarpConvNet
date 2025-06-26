@@ -367,16 +367,18 @@ class PatchAttention(BaseSpatialModule):
         # Reshape for flash attention: (M, 3, num_heads, head_dim)
         qkv = self.qkv(feats)
         qkv = qkv.reshape(-1, 3, self.num_heads, C // self.num_heads)
+        if qkv.dtype not in [torch.float16, torch.bfloat16]:
+            qkv = qkv.to(torch.float16)
 
         attn_offsets = self._offset_to_attn_offset(x.offsets, K).to(qkv.device)
         out_feat = flash_attn.flash_attn_varlen_qkvpacked_func(
-            qkv.half(),
+            qkv,
             attn_offsets,
             max_seqlen=K,
             dropout_p=self.attn_drop_p if self.training else 0.0,
             softmax_scale=self.scale,
         )
-        out_feat = out_feat.reshape(M, C)
+        out_feat = out_feat.reshape(M, C).to(feats.dtype)
 
         out_feat = self.proj(out_feat)
         out_feat = self.proj_drop(out_feat)

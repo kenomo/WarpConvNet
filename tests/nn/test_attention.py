@@ -10,7 +10,6 @@ from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.modules.attention import (
     Attention,
-    NestedAttention,
     PatchAttention,
     SpatialFeatureAttention,
     ToAttention,

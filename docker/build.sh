@@ -11,7 +11,7 @@ DEFAULT_IMAGE_FULL_NAME="${DEFAULT_IMAGE_NAME}:${DEFAULT_IMAGE_TAG}"
 IMAGE_FULL_NAME="${1:-${DEFAULT_IMAGE_FULL_NAME}}"
 
 DOCKER_DIR=$(dirname "$(realpath -s "$0")")
-WARP_DIR=$(realpath -s "${DOCKER_DIR}"/../../..)
+WARPCONVNET_DIR=$(realpath -s "${DOCKER_DIR}"/..)
 
 echo -e "\e[0;32m"
 echo "Building image: ${IMAGE_FULL_NAME}"
@@ -21,7 +21,7 @@ docker build \
     -t "${IMAGE_FULL_NAME}" \
     --network=host \
     -f "${DOCKER_DIR}"/Dockerfile \
-    "${WARP_DIR}"
+    "${WARPCONVNET_DIR}"
 
 # Run docker with all GPUs if available and test importing warpconvnet
 if [ -z "$(nvidia-smi -L | wc -l)" ]; then
