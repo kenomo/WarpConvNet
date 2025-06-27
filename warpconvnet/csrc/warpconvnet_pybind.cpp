@@ -14,6 +14,13 @@
 
 namespace py = pybind11;
 
+// Forward declaration for unified CUB sort function
+py::object cub_segmented_sort(const torch::Tensor &keys,
+                              const torch::Tensor &segment_offsets,
+                              const py::object &values,
+                              bool descending,
+                              bool return_indices);
+
 // Type mapping from PyTorch scalar types to CUTLASS types
 template <torch::ScalarType T>
 struct torch_to_cutlass;
@@ -549,6 +556,22 @@ PYBIND11_MODULE(_C, m) {
       },
       py::arg("status"),
       "Return the human-readable string associated with a GemmStatus value");
+
+  // Create submodule 'utils' for utility functions
+  py::module_ utils = m.def_submodule("utils", "Utility functions including sorting operations");
+
+  // Unified CUB-based segmented sorting function
+  utils.def("segmented_sort",
+            &cub_segmented_sort,
+            "Unified segmented sort using CUB DeviceSegmentedSort\n"
+            "- values=None: sort keys only, returns sorted_keys\n"
+            "- values=Tensor: sort values by keys, returns (sorted_values, sorted_keys)\n"
+            "- return_indices=True: also return permutation indices",
+            py::arg("keys"),
+            py::arg("segment_offsets"),
+            py::arg("values") = py::none(),
+            py::arg("descending") = false,
+            py::arg("return_indices") = false);
 }
 
 // ------------------ Implementation of dispatch helpers with mma_tile switch ------------------

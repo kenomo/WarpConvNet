@@ -98,9 +98,10 @@ ext_modules = [
     CUDAExtension(
         name="warpconvnet._C",
         sources=[
-            "warpconvnet/csrc/cutlass_gemm_pybind.cpp",
+            "warpconvnet/csrc/warpconvnet_pybind.cpp",
             "warpconvnet/csrc/cutlass_gemm_gather_scatter.cu",
             "warpconvnet/csrc/cutlass_gemm_gather_scatter_sm80_fp32.cu",
+            "warpconvnet/csrc/cub_sort.cu",
         ],
         include_dirs=include_dirs,
         library_dirs=library_dirs,
