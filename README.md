@@ -14,22 +14,33 @@ WarpConvNet is a high-performance library for 3D deep learning, built on NVIDIA'
 Recommend using [`uv`](https://docs.astral.sh/uv/) to install the dependencies.
 
 ```bash
-# Specify the CUDA version
-export CUDA=cu121  # For CUDA 12.1
+# Install PyTorch first (specify your CUDA version)
+export CUDA=cu128  # For CUDA 12.8
 pip install torch torchvision --index-url https://download.pytorch.org/whl/${CUDA}
-# From source to support all CUDA versions
-pip install git+https://github.com/rusty1s/pytorch_scatter.git
+
+# Install WarpConvNet with CUDA-specific dependencies (choose one):
+# For CUDA 12.8:
+pip install warpconvnet[torch270-cuda128]
+
+# Install Flash Attention (requires special installation)
+pip install flash-attn --no-build-isolation
+
+# Alternative: Install dependencies separately
 pip install cupy-cuda12x  # use cupy-cuda11x for CUDA 11.x
-# From PyPI
+pip install git+https://github.com/rusty1s/pytorch_scatter.git
+pip install flash-attn --no-build-isolation
 pip install warpconvnet
-# From source
+
+# Or install from source
 pip install git+https://github.com/NVlabs/warpconvnet.git
 ```
 
 Available optional dependency groups:
+
 - `warpconvnet[dev]`: Development tools (pytest, coverage, pre-commit)
 - `warpconvnet[docs]`: Documentation building tools
 - `warpconvnet[models]`: Additional dependencies for model training (wandb, hydra, etc.)
+- `warpconvnet[torch270-cuda128]`: torch-scatter and cupy for torch 2.7.0 and CUDA 12.8
 
 ## Directory Structure
 

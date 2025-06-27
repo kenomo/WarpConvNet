@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "build", "wheel", "torch>=2.0.0", "pybind11"]
+requires = ["setuptools", "build", "wheel", "torch>=2.0.0", "pybind11", "ninja"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -17,7 +17,7 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11", "flash-attn"]
+dependencies = ["numpy", "torch", "warp-lang", "jaxtyping", "pybind11"]
 dynamic = ["version"]
 
 [project.urls]
@@ -25,6 +25,8 @@ GitHub = "https://github.com/NVlabs/WarpConvNet"
 Documentation = "https://nvlabs.github.io/WarpConvNet"
 
 [project.optional-dependencies]
+flash-attn = ["flash-attn"]  # use `pip install flash-attn --no-build-isolation` when failing to install
+
 dev = [
     "ipdb",
     "pre-commit",
@@ -48,6 +50,11 @@ models = [
     "omegaconf",
     "lightning",
     "torchmetrics",
+]
+
+torch270-cuda128 = [
+    "torch-scatter @ https://data.pyg.org/whl/torch-2.7.0%2Bcu128/torch_scatter-2.1.2%2Bpt27cu128-cp311-cp311-linux_x86_64.whl",
+    "cupy-cuda12x",
 ]
 
 all = [
