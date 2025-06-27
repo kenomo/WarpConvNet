@@ -89,6 +89,8 @@ class ToAttention(BaseSpatialModule):
         self.out_type = out_type
         self.use_encoding = use_encoding
         if use_encoding:
+            assert num_encoding_channels is not None, "num_encoding_channels must be provided"
+            assert encoding_range is not None, "encoding_range must be provided"
             self.encoding = nn.Sequential(
                 SinusoidalEncoding(
                     num_channels=num_encoding_channels,
@@ -104,7 +106,7 @@ class ToAttention(BaseSpatialModule):
 
     def forward(
         self, x: Geometry
-    ) -> Tuple[Float[Tensor, "B M C"], Float[Tensor, "B M C"], Float[Tensor, "B M M"]]:
+    ) -> Tuple[Float[Tensor, "B M C"], Union[Float[Tensor, "B M C"], None], Float[Tensor, "B M M"], Int[Tensor, "B"]]:
         if self.out_type == "nested":
             features = x.nested_features
             coordinates = x.nested_coordinates
@@ -427,7 +429,6 @@ class TransformerBlock(BaseSpatialModule):
         norm_eps: float = 1e-5,
         attn_fn: Optional[Callable[..., nn.Module]] = None,
         norm_fn: Optional[Callable[..., nn.Module]] = LayerNorm,
-        enable_flash: bool = True,
     ):
         super().__init__()
         if attn_fn is None:
@@ -440,7 +441,6 @@ class TransformerBlock(BaseSpatialModule):
             qk_scale=qk_scale,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
-            enable_flash=enable_flash,
         )
         self.feed_forward = FeedForward(
             dim=dim,

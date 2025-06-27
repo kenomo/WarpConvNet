@@ -11,6 +11,8 @@ import math
 from jaxtyping import Int
 from torch import Tensor
 
+import warpconvnet._C as _C
+
 from warpconvnet.utils.logger import get_logger
 from warpconvnet.utils.argsort import argsort
 from warpconvnet.geometry.coords.ops.batch_index import batch_indexed_coordinates
@@ -26,6 +28,11 @@ _assign_order_20bit_kernel_4points = load_kernel(
     kernel_file="morton_code.cu", kernel_name="assign_order_discrete_20bit_kernel_4points"
 )
 
+# # Hash serialization kernels
+# _xorsum_div_kernel = load_kernel(
+#     kernel_file="hash_serialization.cu", kernel_name="xorsum_div_kernel"
+# )
+
 
 class POINT_ORDERING(Enum):
     RANDOM = 0
@@ -35,6 +42,7 @@ class POINT_ORDERING(Enum):
     MORTON_YZX = 4
     MORTON_ZXY = 5
     MORTON_ZYX = 6
+    # XORSUM_DIV = 7
 
 
 POINT_ORDERING_TO_MORTON_PERMUTATIONS = {
@@ -69,6 +77,8 @@ def encode(
     order: POINT_ORDERING | str = POINT_ORDERING.MORTON_XYZ,
     return_perm: bool = False,
     return_inverse: bool = False,
+    size: Optional[int] = None,
+    num_buckets: Optional[int] = None,
 ) -> Union[Int[Tensor, "N"], SerializationResult]:  # noqa: F821
     """
     Generate ordering of the grid coordinates with optional permutation and inverse permutation.
@@ -76,9 +86,16 @@ def encode(
     Args:
         grid_coord: Grid coordinates (N, 3) or (N, 4)
         batch_offsets: Batch offsets for multi-batch processing.
-        order: Coordinate ordering scheme (e.g., POINT_ORDERING.MORTON_XYZ, POINT_ORDERING.MORTON_XZY, etc.)
+        order: Coordinate ordering scheme. Options include:
+            - Morton codes: MORTON_XYZ, MORTON_XZY, MORTON_YXZ, MORTON_YZX, MORTON_ZXY, MORTON_ZYX
+            - Hash functions: XORSUM_DIV, XORSUM_MOD, ZORDER_DIV, ZORDER_MOD, SUM_DIV
+            - Other: RANDOM
         return_perm: Whether to return the permutation that sorts the coordinates by their codes.
         return_inverse: Whether to return the inverse permutation to restore original order.
+        size: Size parameter for division-based hash functions (XORSUM_DIV, ZORDER_DIV, SUM_DIV).
+            If None, uses number of points.
+        num_buckets: Number of buckets for modulo-based hash functions (XORSUM_MOD, ZORDER_MOD).
+            If None, uses sqrt of number of points.
 
     Returns:
         If return_perm=False and return_inverse=False:
@@ -101,6 +118,10 @@ def encode(
         sorted_coords = coords[result.perm]
         restored_coords = sorted_coords[result.inverse_perm]  # Should equal original coords
 
+        # Use hash functions with custom parameters
+        result = encode(coords, order=POINT_ORDERING.XORSUM_DIV, size=1000, return_perm=True)
+        result = encode(coords, order=POINT_ORDERING.XORSUM_MOD, num_buckets=128, return_perm=True)
+
         # Access fields
         codes = result.codes
         perm = result.perm
@@ -114,9 +135,14 @@ def encode(
     if grid_coord.shape[0] == 0:
         codes = torch.empty(0, dtype=torch.int64)
     elif order in POINT_ORDERING_TO_MORTON_PERMUTATIONS.keys():
-        codes = morton_code(grid_coord, batch_offsets=batch_offsets, order=order)
+        codes = morton_code(grid_coord, order=order)
     elif order == POINT_ORDERING.RANDOM:
-        codes = torch.randperm(grid_coord.shape[0])
+        codes = torch.randperm(grid_coord.shape[0], device=grid_coord.device)
+    # elif order in [POINT_ORDERING.XORSUM_DIV, POINT_ORDERING.XORSUM_MOD,
+    #                POINT_ORDERING.ZORDER_DIV, POINT_ORDERING.ZORDER_MOD,
+    #                POINT_ORDERING.SUM_DIV]:
+    #     codes = hash_code(grid_coord, order=order,
+    #                      size=size, num_buckets=num_buckets)
     else:
         raise NotImplementedError(f"Order '{order}' not supported at the moment")
 
@@ -134,7 +160,12 @@ def encode(
         )
 
     # Generate permutation (when either return_perm or return_inverse is True)
-    perm = torch.argsort(codes)
+    if batch_offsets is not None:
+        perm, _ = _C.utils.segmented_sort(
+            codes, batch_offsets.to(codes.device), descending=False, return_indices=True
+        )
+    else:
+        perm = torch.argsort(codes)
 
     # Generate inverse permutation if requested
     inverse_perm = None
@@ -153,7 +184,6 @@ def encode(
 @torch.no_grad()
 def morton_code(
     coords: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],  # noqa: F821
-    batch_offsets: Optional[Int[Tensor, "B+1"]] = None,  # noqa: F821
     threads_per_block: int = 256,
     order: POINT_ORDERING | str = POINT_ORDERING.MORTON_XYZ,
 ) -> Int[Tensor, "N"]:  # noqa: F821
@@ -162,7 +192,6 @@ def morton_code(
 
     Args:
         coords: Input coordinates (N, 3) or (N, 4)
-        batch_offsets: Batch offsets for multi-batch processing.
         threads_per_block: CUDA threads per block
         order: Coordinate ordering scheme (e.g., POINT_ORDERING.MORTON_XYZ, POINT_ORDERING.MORTON_XZY, etc.)
 
@@ -202,47 +231,79 @@ def morton_code(
     num_points = len(coords_normalized)
     result_code_cp = cp.empty(num_points, dtype=cp.int64)
 
-    if coords_normalized.shape[1] == 3 and (batch_offsets is None or len(batch_offsets) < 2):
-        # Single batch path (20-bit)
-        coords_cp = cp.from_dlpack(coords_normalized.contiguous())
-        # The kernel loads 4 points per thread, so we need to adjust the number of blocks
-        blocks_per_grid = math.ceil(num_points / (threads_per_block * 4))
-        _assign_order_20bit_kernel_4points(
+    assert coords_normalized.shape[1] == 3, "coords must be [N, 3]"
+    # Single batch path (20-bit)
+    coords_cp = cp.from_dlpack(coords_normalized.contiguous())
+    # The kernel loads 4 points per thread, so we need to adjust the number of blocks
+    blocks_per_grid = math.ceil(num_points / (threads_per_block * 4))
+    _assign_order_20bit_kernel_4points(
+        (blocks_per_grid,),
+        (threads_per_block,),
+        (coords_cp, num_points, result_code_cp),
+    )
+
+    # Convert result from CuPy array back to PyTorch tensor on the original device
+    result_code = torch.as_tensor(result_code_cp, device=device)
+    return result_code
+
+
+@torch.no_grad()
+def hash_code(
+    coords: Int[Tensor, "N 3"] | Int[Tensor, "N 4"],  # noqa: F821
+    threads_per_block: int = 256,
+    order: POINT_ORDERING | str = "XORSUM_DIV",
+    size: Optional[int] = None,
+    num_buckets: Optional[int] = None,
+) -> Int[Tensor, "N"]:  # noqa: F821
+    """
+    Generate hash codes for the input coordinates using various hash functions.
+
+    Args:
+        coords: Input coordinates (N, 3)
+        threads_per_block: CUDA threads per block
+        order: Hash function type (XORSUM_DIV, XORSUM_MOD, ZORDER_DIV, ZORDER_MOD, SUM_DIV)
+        size: Size parameter for division-based hash functions (if None, uses number of points)
+        num_buckets: Number of buckets for modulo-based hash functions (if None, uses sqrt of number of points)
+
+    Returns:
+        Hash codes
+    """
+    if isinstance(order, str):
+        order = POINT_ORDERING(order)
+
+    # Empty grid handling
+    if coords.shape[0] == 0:
+        return torch.empty(0, dtype=torch.int64)
+
+    min_coord = coords.min(0).values
+    coords_normalized = (coords - min_coord).to(dtype=torch.int32).cuda()
+
+    device = coords_normalized.device
+    num_points = len(coords_normalized)
+    result_code_cp = cp.empty(num_points, dtype=cp.int64)
+
+    # Set default parameters
+    if size is None:
+        size = max(1, num_points)
+    if num_buckets is None:
+        num_buckets = max(1, int(math.sqrt(num_points)))
+
+    assert coords_normalized.shape[1] == 3, "coords must be [N, 3]"
+    # Single batch path
+    coords_cp = cp.from_dlpack(coords_normalized.contiguous())
+    blocks_per_grid = math.ceil(num_points / threads_per_block)
+
+    # Select appropriate parameter for the hash function
+    param = size if "DIV" in order.name else num_buckets
+
+    if order == POINT_ORDERING.XORSUM_DIV:
+        _xorsum_div_kernel(
             (blocks_per_grid,),
             (threads_per_block,),
-            (coords_cp, num_points, result_code_cp),
+            (coords_cp, num_points, param, result_code_cp),
         )
-    elif coords_normalized.shape[1] in [3, 4]:
-        # Convert Nx3 or Nx4 to Nx4
-
-        # Multiple batches path (16-bit)
-        bcoords = coords_normalized
-        if bcoords.shape[1] == 3 and batch_offsets is not None:
-            bcoords = batch_indexed_coordinates(bcoords, batch_offsets).to(
-                device=device, dtype=torch.int32
-            )
-        assert bcoords.shape[1] == 4, "bcoords must be [N, 4]"
-
-        # Ensure bcoords_cp is C-contiguous
-        bcoords_cp = cp.from_dlpack(bcoords.contiguous())
-
-        # Max coord for 16-bit is 2^16 - 1 = 65535
-        coord_max = bcoords.max().item()
-        if coord_max > 65535:
-            logger.warning(
-                f"bcoords max is {coord_max}, which is greater than 65535, which is the max value for 16-bit morton code. "
-                "Truncating the coordinates to 16-bit."
-            )
-            div = math.ceil(coord_max / 65535)
-            bcoords_cp = bcoords_cp // div
-
-        # Kernel expects: const int* bcoords_data, int num_points, int64_t* result_order
-        blocks_per_grid = math.ceil(num_points / threads_per_block)
-        _assign_order_16bit_kernel(
-            (blocks_per_grid,),
-            (threads_per_block,),
-            (bcoords_cp, num_points, result_code_cp),
-        )
+    else:
+        raise NotImplementedError(f"Hash order '{order}' not supported")
 
     # Convert result from CuPy array back to PyTorch tensor on the original device
     result_code = torch.as_tensor(result_code_cp, device=device)
