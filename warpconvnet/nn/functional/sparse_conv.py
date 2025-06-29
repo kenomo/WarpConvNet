@@ -742,8 +742,6 @@ def _cutlass_implicit_gemm_backward_logic(
             if status != 0:
                 return status, i
 
-    # Synchronize before returning tensors that depend on custom CUDA kernels
-    torch.cuda.current_stream().synchronize()
     return (
         grad_in_features.to(dtype=in_features.dtype),
         grad_weight.to(dtype=orig_weight_dtype),

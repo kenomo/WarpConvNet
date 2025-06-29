@@ -376,6 +376,10 @@ class PatchAttention(BaseSpatialModule):
             qkv = qkv.to(torch.float16)
 
         attn_offsets = self._offset_to_attn_offset(x.offsets, K).to(qkv.device)
+        # Warning: When the loss is NaN, this module will fail during backward with
+        # index out of bounds error.
+        # e.g. /pytorch/aten/src/ATen/native/cuda/ScatterGatherKernel.cu:144: operator(): block: [192,0,0], thread: [32,0,0] Assertion `idx_dim >= 0 && idx_dim < index_size && "
+        # https://discuss.pytorch.org/t/scattergatherkernel-cu-assertion-idx-dim-0-idx-dim-index-size-index-out-of-bounds/195356
         out_feat = flash_attn.flash_attn_varlen_qkvpacked_func(
             qkv,
             attn_offsets,
