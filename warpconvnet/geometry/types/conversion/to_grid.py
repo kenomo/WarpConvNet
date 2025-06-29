@@ -1,14 +1,74 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple, TYPE_CHECKING
 from jaxtyping import Float, Int
 
 import torch
 from torch import Tensor
+from torch_scatter import segment_csr
 
+import warpconvnet._C as _C
 from warpconvnet.utils.ravel import ravel_multi_index
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS
+
+# Import types for type checking only to avoid circular imports
+if TYPE_CHECKING:
+    from warpconvnet.geometry.coords.search.search_results import RealSearchResult
+    from warpconvnet.geometry.coords.grid import GridCoords
+    from warpconvnet.geometry.features.grid import GridFeatures
+    from warpconvnet.geometry.types.grid import GridMemoryFormat, Grid
+    from warpconvnet.geometry.types.points import Points
+    from warpconvnet.geometry.types.voxels import Voxels
+
+
+def points_to_closest_voxel_mapping(points, grid_shape, bounds, memory_format=None):
+    """Find the closest voxel center for each point using CUDA acceleration.
+
+    Args:
+        points: Points object with coordinates and offsets
+        grid_shape: Tuple of (H, W, D) for the grid shape
+        bounds: Tuple of (min_bounds, max_bounds) tensors
+        memory_format: Grid memory format (unused but kept for compatibility)
+
+    Returns:
+        Tensor of voxel indices for each point
+    """
+    assert points.device.type == "cuda", "points_to_closest_voxel_mapping only supports CUDA"
+    # Extract coordinates and offsets
+    coords = points.coordinate_tensor
+    offsets = points.offsets
+
+    # Convert grid shape to tensor
+    grid_shape_tensor = torch.tensor(grid_shape, dtype=torch.int32)
+
+    # Get bounds
+    if bounds is None:
+        # Compute bounds from points if not provided
+        min_coords = coords.min(dim=0)[0]
+        max_coords = coords.max(dim=0)[0]
+        # Add some padding
+        padding = (max_coords - min_coords) * 0.01
+        bounds_min = min_coords - padding
+        bounds_max = max_coords + padding
+    else:
+        bounds_min = bounds[0]
+        bounds_max = bounds[1]
+
+    # Ensure bounds are on the correct device
+    bounds_min = bounds_min.to(device=points.device, dtype=coords.dtype)
+    bounds_max = bounds_max.to(device=points.device, dtype=coords.dtype)
+
+    # Call CUDA kernel
+    voxel_indices = _C.utils.points_to_closest_voxel_mapping(
+        coords,
+        offsets.to(device=points.device, dtype=torch.int32),
+        grid_shape_tensor,
+        bounds_min,
+        bounds_max,
+    )
+    # Convert to int64 as expected by PyTorch operations
+    return voxel_indices.to(torch.int64)
 
 
 def _point_to_grid_mapping(
@@ -18,7 +78,7 @@ def _point_to_grid_mapping(
     grid_offsets: Int[Tensor, "B + 1"],  # noqa: F821
     search_radius: Optional[float] = None,
     k: Optional[int] = None,
-    search_type: Literal["radius", "knn"] = "radius",
+    search_type: Literal["radius", "knn", "voxel"] = "radius",
     search_grid_dim: Optional[int] = None,
 ) -> "RealSearchResult":
     """Compute the mapping from points to grid voxels.
@@ -50,6 +110,11 @@ def _point_to_grid_mapping(
     elif search_type == "knn":
         search_mode = RealSearchMode.KNN
         search_config = RealSearchConfig(mode=search_mode, knn_k=k)
+    elif search_type == "voxel":
+        # Use the closest voxel center to the point
+        raise ValueError(
+            "Voxel search should not be used for _point_to_grid_mapping as the grid_shape and bounds should be used to efficiently find the closest voxel center"
+        )
     else:
         raise ValueError(f"Unsupported search type: {search_type}")
 
@@ -238,7 +303,7 @@ def _points_to_grid_features(
         memory_format: Memory format for grid features
         search_radius: Search radius for radius search
         k: Number of neighbors for kNN search
-        search_type: Search type ('radius' or 'knn')
+        search_type: Search type ('radius', 'knn', 'voxel')
         reduction: Reduction method ('mean', 'max', 'sum', 'mul')
 
     Returns:
@@ -358,7 +423,7 @@ def points_to_grid(
     bounds: Optional[Tuple[Tensor, Tensor]] = None,
     search_radius: Optional[float] = None,
     k: int = 8,
-    search_type: Literal["radius", "knn"] = "radius",
+    search_type: Literal["radius", "knn", "voxel"] = "radius",
     reduction: REDUCTION_TYPES_STR = "mean",
 ) -> "Grid":
     """Convert point features to a grid.
@@ -385,6 +450,93 @@ def points_to_grid(
     # Create grid coordinates
     batch_size = points.batch_size
     device = points.device
+
+    if search_type == "voxel":
+        to_voxel_indices = points_to_closest_voxel_mapping(
+            points, grid_shape, bounds, memory_format
+        )
+
+        # Create grid structure
+        from warpconvnet.geometry.features.grid import GridFeatures
+
+        H, W, D = grid_shape
+        num_channels = points.num_channels
+        total_voxels = batch_size * H * W * D
+
+        # Initialize grid tensor with zeros
+        grid_tensor = torch.zeros(
+            (batch_size, H, W, D, num_channels),
+            device=device,
+            dtype=points.batched_features.batched_tensor.dtype,
+        )
+
+        # Flatten grid for indexing
+        flat_grid = grid_tensor.view(total_voxels, num_channels)
+
+        # Apply reduction by voxel
+        if reduction == "mean":
+            # Count points per voxel
+            counts = torch.zeros(total_voxels, device=device)
+            counts.scatter_add_(
+                0, to_voxel_indices, torch.ones_like(to_voxel_indices, dtype=torch.float32)
+            )
+            # Sum features per voxel
+            flat_grid.scatter_add_(
+                0,
+                to_voxel_indices.unsqueeze(1).expand(-1, num_channels),
+                points.batched_features.batched_tensor,
+            )
+            # Average where count > 0
+            mask = counts > 0
+            flat_grid[mask] /= counts[mask].unsqueeze(1)
+        elif reduction == "max":
+            # Use scatter_reduce with reduce='amax'
+            flat_grid.scatter_reduce_(
+                0,
+                to_voxel_indices.unsqueeze(1).expand(-1, num_channels),
+                points.batched_features.batched_tensor,
+                reduce="amax",
+            )
+        elif reduction == "sum":
+            flat_grid.scatter_add_(
+                0,
+                to_voxel_indices.unsqueeze(1).expand(-1, num_channels),
+                points.batched_features.batched_tensor,
+            )
+        else:
+            raise ValueError(f"Unsupported reduction: {reduction} for voxel search")
+
+        # Convert to target memory format if needed
+        if memory_format != GridMemoryFormat.b_x_y_z_c:
+            B = batch_size
+            C = num_channels
+            if memory_format == GridMemoryFormat.b_c_x_y_z:
+                grid_tensor = grid_tensor.permute(0, 4, 1, 2, 3)
+            elif memory_format == GridMemoryFormat.b_zc_x_y:
+                grid_tensor = grid_tensor.permute(0, 3, 4, 1, 2).reshape(B, D * C, H, W)
+            elif memory_format == GridMemoryFormat.b_xc_y_z:
+                grid_tensor = grid_tensor.permute(0, 1, 4, 2, 3).reshape(B, H * C, W, D)
+            elif memory_format == GridMemoryFormat.b_yc_x_z:
+                grid_tensor = grid_tensor.permute(0, 2, 4, 1, 3).reshape(B, W * C, H, D)
+            else:
+                raise ValueError(f"Unsupported memory format: {memory_format}")
+
+        # Create grid coordinates
+        grid_coords = GridCoords.from_shape(
+            grid_shape=grid_shape,
+            bounds=bounds,
+            batch_size=batch_size,
+            device=device,
+            flatten=False,
+        )
+
+        # Create grid features
+        grid_features = GridFeatures(
+            grid_tensor, grid_coords.offsets, memory_format, grid_shape, num_channels
+        )
+
+        # Return Grid object
+        return Grid(grid_coords, grid_features, memory_format)
 
     grid_coords = GridCoords.from_shape(
         grid_shape=grid_shape,
@@ -414,7 +566,7 @@ def voxels_to_grid(
     grid_shape: Tuple[int, int, int],
     grid_bounds: Optional[Tuple[Tensor, Tensor]] = None,
     memory_format: Optional["GridMemoryFormat"] = None,
-    search_type: Literal["cell"] = "cell",
+    search_type: Literal["voxel"] = "voxel",
     reduction: REDUCTION_TYPES_STR = "mean",
 ) -> "Grid":
     """Convert voxel features to a grid.
@@ -454,7 +606,7 @@ def voxels_to_grid(
     )
     grid_feats = grid.features
 
-    if search_type == "cell":
+    if search_type == "voxel":
         from warpconvnet.geometry.coords.ops.batch_index import batch_index_from_offset
 
         # Find cell indices that voxels belong to

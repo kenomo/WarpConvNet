@@ -104,9 +104,12 @@ class ToAttention(BaseSpatialModule):
                 ),
             )
 
-    def forward(
-        self, x: Geometry
-    ) -> Tuple[Float[Tensor, "B M C"], Union[Float[Tensor, "B M C"], None], Float[Tensor, "B M M"], Int[Tensor, "B"]]:
+    def forward(self, x: Geometry) -> Tuple[
+        Float[Tensor, "B M C"],
+        Union[Float[Tensor, "B M C"], None],
+        Float[Tensor, "B M M"],
+        Int[Tensor, "B"],
+    ]:
         if self.out_type == "nested":
             features = x.nested_features
             coordinates = x.nested_coordinates

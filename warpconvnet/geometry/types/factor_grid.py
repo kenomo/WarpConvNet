@@ -170,37 +170,3 @@ class FactorGrid:
     def shapes(self) -> List[Dict[str, Union[int, Tuple[int, ...]]]]:
         """Get shape information for all geometries."""
         return [geo.shape for geo in self.geometries]
-
-
-def points_to_factor_grid(
-    points: Points,
-    grid_shapes: List[Tuple[int, int, int]],
-    memory_formats: List[Union[GridMemoryFormat, str]],
-    search_radius: Optional[float] = None,
-    k: Optional[int] = None,
-    search_type: str = "radius",
-    reduction: str = "mean",
-) -> FactorGrid:
-    """Convert points to a factorized grid geometry.
-
-    Args:
-        points: Points to convert
-        grid_shapes: List of grid resolutions (H, W, D)
-        memory_formats: List of factorized formats to use
-
-    Returns:
-        Factorized grid geometry
-    """
-    geometries = []
-    for grid_shape, memory_format in zip(grid_shapes, memory_formats):
-        geometry = points_to_grid(
-            points,
-            grid_shape,
-            memory_format,
-            search_radius=search_radius,
-            k=k,
-            search_type=search_type,
-            reduction=reduction,
-        )
-        geometries.append(geometry)
-    return FactorGrid(geometries)

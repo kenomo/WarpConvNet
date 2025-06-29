@@ -21,6 +21,13 @@ py::object cub_segmented_sort(const torch::Tensor &keys,
                               bool descending,
                               bool return_indices);
 
+// Forward declarations for voxel mapping functions
+torch::Tensor points_to_closest_voxel_mapping(torch::Tensor points,
+                                              torch::Tensor offsets,
+                                              torch::Tensor grid_shape,
+                                              torch::Tensor bounds_min,
+                                              torch::Tensor bounds_max);
+
 // Type mapping from PyTorch scalar types to CUTLASS types
 template <torch::ScalarType T>
 struct torch_to_cutlass;
@@ -572,6 +579,16 @@ PYBIND11_MODULE(_C, m) {
             py::arg("values") = py::none(),
             py::arg("descending") = false,
             py::arg("return_indices") = false);
+
+  // Voxel mapping functions
+  utils.def("points_to_closest_voxel_mapping",
+            &points_to_closest_voxel_mapping,
+            "Find the closest voxel center for each point",
+            py::arg("points"),
+            py::arg("offsets"),
+            py::arg("grid_shape"),
+            py::arg("bounds_min"),
+            py::arg("bounds_max"));
 }
 
 // ------------------ Implementation of dispatch helpers with mma_tile switch ------------------

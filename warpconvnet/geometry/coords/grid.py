@@ -34,6 +34,9 @@ class GridCoords(Coords):
     needed, improving memory efficiency for large grids.
     """
 
+    bounds: Tuple[Tensor, Tensor] = (torch.zeros(3), torch.ones(3))
+    grid_shape: Tuple[int, int, int] = (1, 1, 1)
+
     def __init__(
         self,
         batched_tensor: Tensor,
@@ -57,6 +60,7 @@ class GridCoords(Coords):
         # Set initialization flag first to avoid triggering lazy init
         # during parent class initialization
         self._is_initialized = lazy_init is None
+        assert len(grid_shape) == 3, "Grid shape must be (H, W, D)"
         self.grid_shape = grid_shape
 
         # Set bounds
@@ -65,6 +69,11 @@ class GridCoords(Coords):
             min_bound = torch.zeros(3)
             max_bound = torch.ones(3)
         else:
+            assert len(bounds) == 2, "Bounds must be a tuple of (min, max)"
+            assert (
+                bounds[0].shape == bounds[1].shape
+            ), "Min and max bounds must have the same shape"
+            assert bounds[0].shape == (3,), "Bounds must be a tuple of (min, max)"
             min_bound = bounds[0].to("cpu")
             max_bound = bounds[1].to("cpu")
 

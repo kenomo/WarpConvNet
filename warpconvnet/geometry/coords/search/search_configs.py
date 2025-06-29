@@ -12,6 +12,7 @@ from torch import Tensor
 class RealSearchMode(Enum):
     RADIUS = "radius"
     KNN = "knn"
+    VOXEL = "voxel"
 
 
 class IntSearchMode(Enum):

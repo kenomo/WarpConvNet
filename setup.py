@@ -102,6 +102,7 @@ ext_modules = [
             "warpconvnet/csrc/cutlass_gemm_gather_scatter.cu",
             "warpconvnet/csrc/cutlass_gemm_gather_scatter_sm80_fp32.cu",
             "warpconvnet/csrc/cub_sort.cu",
+            "warpconvnet/csrc/voxel_mapping_kernels.cu",
         ],
         include_dirs=include_dirs,
         library_dirs=library_dirs,
