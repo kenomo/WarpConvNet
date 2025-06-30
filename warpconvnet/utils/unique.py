@@ -14,6 +14,28 @@ from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.utils.ravel import ravel_multi_index
 
 
+def unique_segmented(
+    x: Int[Tensor, "N"],
+    offsets: Int[Tensor, "N+1"],
+    return_counts: bool = False,
+) -> Tuple[Tensor, Tensor]:
+    """
+    Get the sorted unique elements and their counts.
+    """
+    unique_keys = []
+    unique_counts = []
+    for i in range(len(offsets) - 1):
+        start = offsets[i].item()
+        end = offsets[i + 1].item()
+        result = torch.unique_consecutive(x[start:end], return_counts=return_counts)
+        if return_counts:
+            unique_keys.append(result[0])
+            unique_counts.append(result[1])
+        else:
+            unique_keys.append(result)
+    return torch.cat(unique_keys), torch.cat(unique_counts)
+
+
 def unique_inverse(
     x: Tensor,
     dim: int = 0,

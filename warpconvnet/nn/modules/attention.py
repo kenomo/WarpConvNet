@@ -366,7 +366,7 @@ class PatchAttention(BaseSpatialModule):
                 return_inverse=True,
             )
             feats = feats[code_result.perm]
-            inverse_perm = code_result.inverse_perm.clone()
+            inverse_perm = code_result.inverse_perm
 
         # Flash attention path - use variable length version for patches
         # Reshape for flash attention: (M, 3, num_heads, head_dim)

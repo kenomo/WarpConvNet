@@ -63,11 +63,13 @@ class SerializationResult(NamedTuple):
         codes: Serialization codes of the grid coordinates
         perm: Permutation that sorts coordinates by their codes (sorted_data = original_data[perm])
         inverse_perm: Inverse permutation to restore original order (original_data = sorted_data[inverse_perm])
+        counts: Number of codes with the same value
     """
 
     codes: Tensor
     perm: Optional[Tensor] = None
     inverse_perm: Optional[Tensor] = None
+    counts: Optional[Tensor] = None
 
 
 @torch.no_grad()
