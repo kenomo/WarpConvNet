@@ -45,6 +45,16 @@ class POINT_ORDERING(Enum):
     # XORSUM_DIV = 7
 
 
+STR2POINT_ORDERING = {
+    "random": POINT_ORDERING.RANDOM,
+    "morton_xyz": POINT_ORDERING.MORTON_XYZ,
+    "morton_xzy": POINT_ORDERING.MORTON_XZY,
+    "morton_yxz": POINT_ORDERING.MORTON_YXZ,
+    "morton_yzx": POINT_ORDERING.MORTON_YZX,
+    "morton_zxy": POINT_ORDERING.MORTON_ZXY,
+    "morton_zyx": POINT_ORDERING.MORTON_ZYX,
+}
+
 POINT_ORDERING_TO_MORTON_PERMUTATIONS = {
     POINT_ORDERING.MORTON_XYZ: [0, 1, 2],
     POINT_ORDERING.MORTON_XZY: [0, 2, 1],
@@ -131,7 +141,7 @@ def encode(
         ```
     """
     if isinstance(order, str):
-        order = POINT_ORDERING(order)
+        order = STR2POINT_ORDERING[order.lower()]
 
     # Early return for backward compatibility when no permutations requested
     if grid_coord.shape[0] == 0:
