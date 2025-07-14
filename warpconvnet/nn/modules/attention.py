@@ -382,7 +382,7 @@ class PatchAttention(BaseSpatialModule):
         # https://discuss.pytorch.org/t/scattergatherkernel-cu-assertion-idx-dim-0-idx-dim-index-size-index-out-of-bounds/195356
         out_feat = flash_attn.flash_attn_varlen_qkvpacked_func(
             qkv,
-            attn_offsets,
+            attn_offsets.to(torch.int32),
             max_seqlen=K,
             dropout_p=self.attn_drop_p if self.training else 0.0,
             softmax_scale=self.scale,
