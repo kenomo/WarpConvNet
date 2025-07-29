@@ -31,6 +31,39 @@ int run_implicit_fma_templated(const void *tensor_a,
                                const std::string &kernel_type);
 }  // namespace implicit_fma
 
+// Forward declaration for implicit GEMM function (implemented in .cu file)
+namespace implicit_gemm {
+template <typename ElementA, typename ElementB, typename ElementC, typename Itype>
+int run_implicit_gemm_templated(const void *tensor_a,
+                                const void *tensor_b,
+                                void *tensor_c,
+                                const Itype *in_map,
+                                const Itype *out_map,
+                                int wA,
+                                int hA,
+                                int wB,
+                                int hB,
+                                int indices_size,
+                                const std::string &kernel_type,
+                                int block_size);
+}  // namespace implicit_gemm
+
+// Forward declaration for split-K implicit GEMM function (implemented in .cu file)
+namespace split_k_implicit_gemm {
+template <typename ElementA, typename ElementB, typename ElementC, typename Itype>
+int run_split_k_implicit_gemm_templated(const void *tensor_a,
+                                        const void *tensor_b,
+                                        void *tensor_c,
+                                        const Itype *indices_a,
+                                        const Itype *indices_b,
+                                        int N,
+                                        int C_a,
+                                        int C_b,
+                                        int K,
+                                        int split_k_factor,
+                                        int block_threads);
+}  // namespace split_k_implicit_gemm
+
 // Forward declarations for implicit reduction functions (implemented in .cu file)
 namespace implicit_reduction {
 template <typename ElementA, typename ElementB, typename ElementOutput>
@@ -45,6 +78,19 @@ int run_implicit_reduction_templated(const void *tensor_a,
                                      int N_B,
                                      const std::string &kernel_type);
 }  // namespace implicit_reduction
+
+namespace segmented_arithmetic {
+template <typename ElementB, typename ElementC, typename ElementD>
+int run_segmented_arithmetic_templated(const void *tensor_b,
+                                       const void *tensor_c,
+                                       void *tensor_d,
+                                       const int *offsets,
+                                       int N,
+                                       int C,
+                                       int K,
+                                       const std::string &operation,
+                                       const std::string &kernel_type);
+}  // namespace segmented_arithmetic
 }  // namespace warpconvnet
 
 // Forward declaration for unified CUB sort function
@@ -69,6 +115,24 @@ void implicit_fma_cuda(torch::Tensor a,
                        torch::Tensor out_indices,
                        const std::string &kernel_type = "basic");
 
+// Forward declarations for implicit GEMM functions
+int implicit_gemm_cuda(torch::Tensor a,
+                       torch::Tensor b,
+                       torch::Tensor c,
+                       torch::Tensor in_map,
+                       torch::Tensor out_map,
+                       const std::string &kernel_type = "basic",
+                       int block_size = 16);
+
+// Forward declarations for split-K implicit GEMM functions
+int split_k_implicit_gemm_cuda(torch::Tensor a,
+                               torch::Tensor b,
+                               torch::Tensor c,
+                               torch::Tensor indices_a,
+                               torch::Tensor indices_b,
+                               int split_k_factor = 4,
+                               int block_size = 16);
+
 // Forward declarations for implicit reduction functions
 void implicit_reduction_cuda(torch::Tensor a,
                              torch::Tensor a_indices,
@@ -76,6 +140,14 @@ void implicit_reduction_cuda(torch::Tensor a,
                              const py::object &b_indices,  // optional, can be None
                              torch::Tensor result,
                              const std::string &kernel_type = "basic");
+
+// Forward declarations for segmented arithmetic functions
+void segmented_arithmetic_cuda(torch::Tensor tensor_b,
+                               torch::Tensor tensor_c,
+                               torch::Tensor tensor_d,
+                               torch::Tensor offsets,
+                               const std::string &operation,
+                               const std::string &kernel_type = "basic");
 
 // Type mapping from PyTorch scalar types to CUTLASS types
 template <torch::ScalarType T>
@@ -216,7 +288,7 @@ inline void assert_gemm_status(int status) {
   TORCH_CHECK(false, ss.str());
 }
 
-// ------------------- NEW: Common validation helpers -------------------
+// ------------------- Common validation helpers -------------------
 namespace {
 
 inline void _check_2d(const torch::Tensor &t, const char *name) {
@@ -656,6 +728,213 @@ void implicit_fma_cuda(torch::Tensor a,
   }
 }
 
+// Implementation of implicit GEMM CUDA function
+int implicit_gemm_cuda(torch::Tensor a,
+                       torch::Tensor b,
+                       torch::Tensor c,
+                       torch::Tensor in_map,
+                       torch::Tensor out_map,
+                       const std::string &kernel_type,
+                       int block_size) {
+  // Validate input tensors
+  TORCH_CHECK(a.dim() == 2, "Matrix A must be 2D");
+  TORCH_CHECK(b.dim() == 2, "Matrix B must be 2D");
+  TORCH_CHECK(c.dim() == 2, "Matrix C must be 2D");
+  TORCH_CHECK(in_map.dim() == 1, "Input map must be 1D");
+  TORCH_CHECK(out_map.dim() == 1, "Output map must be 1D");
+
+  TORCH_CHECK(in_map.scalar_type() == torch::kInt32, "Maps must be int32");
+  TORCH_CHECK(out_map.scalar_type() == torch::kInt32, "Maps must be int32");
+
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(), "A and B must have the same data type");
+  TORCH_CHECK(a.scalar_type() == c.scalar_type(), "A and C must have the same data type");
+
+  // Validate dimensions
+  int hA = a.size(0);
+  int wA = a.size(1);
+  int hB = b.size(0);
+  int wB = b.size(1);
+
+  TORCH_CHECK(wA == hB,
+              "Matrix dimensions must be compatible for multiplication. wA: " + std::to_string(wA) +
+                  ", hB: " + std::to_string(hB));
+  TORCH_CHECK(c.size(1) == wB,
+              "Matrix C must have same number of columns as B. wB: " + std::to_string(wB) +
+                  ", c.size(1): " + std::to_string(c.size(1)));
+
+  // Ensure tensors are on CUDA and contiguous
+  TORCH_CHECK(a.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(b.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(c.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(in_map.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(out_map.is_cuda(), "All tensors must be on CUDA");
+
+  a = a.contiguous();
+  b = b.contiguous();
+  c = c.contiguous();
+  in_map = in_map.contiguous();
+  out_map = out_map.contiguous();
+
+  // Get indices size
+  int indices_size = in_map.size(0);
+  TORCH_CHECK(indices_size == out_map.size(0), "Input and output maps must have the same size");
+
+  // Dispatch based on data type using template function
+  int status = 0;
+  if (a.scalar_type() == torch::kFloat32) {
+    status = warpconvnet::implicit_gemm::run_implicit_gemm_templated<float, float, float, int>(
+        a.data_ptr(),
+        b.data_ptr(),
+        c.data_ptr(),
+        in_map.data_ptr<int>(),
+        out_map.data_ptr<int>(),
+        wA,
+        hA,
+        wB,
+        hB,
+        indices_size,
+        kernel_type,
+        block_size);
+  } else if (a.scalar_type() == torch::kFloat16) {
+    status = warpconvnet::implicit_gemm::run_implicit_gemm_templated<__half, __half, __half, int>(
+        a.data_ptr(),
+        b.data_ptr(),
+        c.data_ptr(),
+        in_map.data_ptr<int>(),
+        out_map.data_ptr<int>(),
+        wA,
+        hA,
+        wB,
+        hB,
+        indices_size,
+        kernel_type,
+        block_size);
+  } else if (a.scalar_type() == torch::kBFloat16) {
+    status = warpconvnet::implicit_gemm::
+        run_implicit_gemm_templated<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16, int>(
+            a.data_ptr(),
+            b.data_ptr(),
+            c.data_ptr(),
+            in_map.data_ptr<int>(),
+            out_map.data_ptr<int>(),
+            wA,
+            hA,
+            wB,
+            hB,
+            indices_size,
+            kernel_type,
+            block_size);
+  } else {
+    TORCH_CHECK(false, "Unsupported data type for implicit GEMM");
+  }
+
+  // Check status
+  if (status != 0) {
+    TORCH_CHECK(false, "Implicit GEMM kernel failed with status: " + std::to_string(status));
+  }
+
+  return status;
+}
+
+// Implementation of split-K implicit GEMM CUDA function
+int split_k_implicit_gemm_cuda(torch::Tensor a,
+                               torch::Tensor b,
+                               torch::Tensor c,
+                               torch::Tensor indices_a,
+                               torch::Tensor indices_b,
+                               int split_k_factor,
+                               int block_size) {
+  // Validate input tensors
+  TORCH_CHECK(a.dim() == 2, "Matrix A must be 2D");
+  TORCH_CHECK(b.dim() == 2, "Matrix B must be 2D");
+  TORCH_CHECK(c.dim() == 2, "Matrix C must be 2D");
+  TORCH_CHECK(indices_a.dim() == 1, "Indices A must be 1D");
+  TORCH_CHECK(indices_b.dim() == 1, "Indices B must be 1D");
+
+  TORCH_CHECK(indices_a.scalar_type() == torch::kInt32, "Indices must be int32");
+  TORCH_CHECK(indices_b.scalar_type() == torch::kInt32, "Indices must be int32");
+
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(), "A and B must have the same data type");
+  TORCH_CHECK(a.scalar_type() == c.scalar_type(), "A and C must have the same data type");
+
+  // Validate dimensions
+  int N = std::max(a.size(0), b.size(0));  // Number of rows in A and B
+  int C_a = a.size(1);                     // Number of columns in A
+  int C_b = b.size(1);                     // Number of columns in B
+  int K = indices_a.size(0);               // Number of indices
+
+  TORCH_CHECK(c.size(0) == C_a, "Matrix C must have C_a rows");
+  TORCH_CHECK(c.size(1) == C_b, "Matrix C must have C_b columns");
+  TORCH_CHECK(indices_b.size(0) == K, "Indices A and B must have same length");
+
+  // Ensure tensors are on CUDA and contiguous
+  TORCH_CHECK(a.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(b.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(c.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(indices_a.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(indices_b.is_cuda(), "All tensors must be on CUDA");
+
+  a = a.contiguous();
+  b = b.contiguous();
+  c = c.contiguous();
+  indices_a = indices_a.contiguous();
+  indices_b = indices_b.contiguous();
+
+  // Dispatch based on data type using template function
+  int status = 0;
+  if (a.scalar_type() == torch::kFloat32) {
+    status = warpconvnet::split_k_implicit_gemm::
+        run_split_k_implicit_gemm_templated<float, float, float, int>(a.data_ptr(),
+                                                                      b.data_ptr(),
+                                                                      c.data_ptr(),
+                                                                      indices_a.data_ptr<int>(),
+                                                                      indices_b.data_ptr<int>(),
+                                                                      N,
+                                                                      C_a,
+                                                                      C_b,
+                                                                      K,
+                                                                      split_k_factor,
+                                                                      block_size);
+  } else if (a.scalar_type() == torch::kFloat16) {
+    status = warpconvnet::split_k_implicit_gemm::
+        run_split_k_implicit_gemm_templated<__half, __half, __half, int>(a.data_ptr(),
+                                                                         b.data_ptr(),
+                                                                         c.data_ptr(),
+                                                                         indices_a.data_ptr<int>(),
+                                                                         indices_b.data_ptr<int>(),
+                                                                         N,
+                                                                         C_a,
+                                                                         C_b,
+                                                                         K,
+                                                                         split_k_factor,
+                                                                         block_size);
+  } else if (a.scalar_type() == torch::kBFloat16) {
+    status = warpconvnet::split_k_implicit_gemm::
+        run_split_k_implicit_gemm_templated<__nv_bfloat16, __nv_bfloat16, __nv_bfloat16, int>(
+            a.data_ptr(),
+            b.data_ptr(),
+            c.data_ptr(),
+            indices_a.data_ptr<int>(),
+            indices_b.data_ptr<int>(),
+            N,
+            C_a,
+            C_b,
+            K,
+            split_k_factor,
+            block_size);
+  } else {
+    TORCH_CHECK(false, "Unsupported data type for split-K implicit GEMM");
+  }
+
+  // Check status
+  if (status != 0) {
+    TORCH_CHECK(false,
+                "Split-K implicit GEMM kernel failed with status: " + std::to_string(status));
+  }
+
+  return status;
+}
+
 // Implementation of implicit reduction CUDA function
 void implicit_reduction_cuda(torch::Tensor a,
                              torch::Tensor a_indices,
@@ -780,6 +1059,110 @@ void implicit_reduction_cuda(torch::Tensor a,
   }
 }
 
+// Implementation of segmented arithmetic CUDA function
+void segmented_arithmetic_cuda(torch::Tensor tensor_b,
+                               torch::Tensor tensor_c,
+                               torch::Tensor tensor_d,
+                               torch::Tensor offsets,
+                               const std::string &operation,
+                               const std::string &kernel_type) {
+  // Validate input tensors
+  TORCH_CHECK(tensor_b.dim() == 2, "Matrix B must be 2D");
+  TORCH_CHECK(tensor_c.dim() == 2, "Matrix C must be 2D");
+  TORCH_CHECK(tensor_d.dim() == 2, "Matrix D must be 2D");
+  TORCH_CHECK(offsets.dim() == 1, "Offsets must be 1D");
+
+  TORCH_CHECK(offsets.scalar_type() == torch::kInt32 || offsets.scalar_type() == torch::kInt64,
+              "Offsets must be int32 or int64");
+
+  TORCH_CHECK(tensor_b.scalar_type() == tensor_c.scalar_type(),
+              "B and C must have the same data type");
+  TORCH_CHECK(tensor_b.scalar_type() == tensor_d.scalar_type(),
+              "B and D must have the same data type");
+
+  // Validate dimensions
+  int N = tensor_b.size(0);
+  int C = tensor_b.size(1);
+  int K = tensor_c.size(0);
+
+  TORCH_CHECK(tensor_c.size(1) == C, "Matrix C must have same number of columns as B");
+  TORCH_CHECK(tensor_d.size(0) == N, "Matrix D must have same number of rows as B");
+  TORCH_CHECK(tensor_d.size(1) == C, "Matrix D must have same number of columns as B");
+  TORCH_CHECK(offsets.size(0) == K + 1, "Offsets must have K+1 elements");
+
+  // Ensure tensors are on CUDA and contiguous
+  TORCH_CHECK(tensor_b.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(tensor_c.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(tensor_d.is_cuda(), "All tensors must be on CUDA");
+  TORCH_CHECK(offsets.is_cuda(), "All tensors must be on CUDA");
+
+  tensor_b = tensor_b.contiguous();
+  tensor_c = tensor_c.contiguous();
+  tensor_d = tensor_d.contiguous();
+  // offsets must be int32. Convert to int32 if not already
+  offsets = offsets.contiguous().to(torch::kInt32);
+
+  // Dispatch based on data type using template function
+  int status = 0;
+  if (tensor_b.scalar_type() == torch::kFloat32) {
+    status =
+        warpconvnet::segmented_arithmetic::run_segmented_arithmetic_templated<float, float, float>(
+            tensor_b.data_ptr(),
+            tensor_c.data_ptr(),
+            tensor_d.data_ptr(),
+            offsets.data_ptr<int>(),
+            N,
+            C,
+            K,
+            operation,
+            kernel_type);
+  } else if (tensor_b.scalar_type() == torch::kFloat16) {
+    status = warpconvnet::segmented_arithmetic::
+        run_segmented_arithmetic_templated<cutlass::half_t, cutlass::half_t, cutlass::half_t>(
+            tensor_b.data_ptr(),
+            tensor_c.data_ptr(),
+            tensor_d.data_ptr(),
+            offsets.data_ptr<int>(),
+            N,
+            C,
+            K,
+            operation,
+            kernel_type);
+  } else if (tensor_b.scalar_type() == torch::kBFloat16) {
+    status =
+        warpconvnet::segmented_arithmetic::run_segmented_arithmetic_templated<cutlass::bfloat16_t,
+                                                                              cutlass::bfloat16_t,
+                                                                              cutlass::bfloat16_t>(
+            tensor_b.data_ptr(),
+            tensor_c.data_ptr(),
+            tensor_d.data_ptr(),
+            offsets.data_ptr<int>(),
+            N,
+            C,
+            K,
+            operation,
+            kernel_type);
+  } else if (tensor_b.scalar_type() == torch::kFloat64) {
+    status = warpconvnet::segmented_arithmetic::
+        run_segmented_arithmetic_templated<double, double, double>(tensor_b.data_ptr(),
+                                                                   tensor_c.data_ptr(),
+                                                                   tensor_d.data_ptr(),
+                                                                   offsets.data_ptr<int>(),
+                                                                   N,
+                                                                   C,
+                                                                   K,
+                                                                   operation,
+                                                                   kernel_type);
+  } else {
+    TORCH_CHECK(false, "Unsupported data type for segmented arithmetic");
+  }
+
+  // Check status
+  if (status != 0) {
+    TORCH_CHECK(false, "Segmented arithmetic kernel failed with status: " + std::to_string(status));
+  }
+}
+
 PYBIND11_MODULE(_C, m) {
   m.doc() = "CUDA kernels exposed through PyBind11";
 
@@ -841,6 +1224,47 @@ PYBIND11_MODULE(_C, m) {
       },
       py::arg("status"),
       "Return the human-readable string associated with a GemmStatus value");
+
+  // Implicit GEMM functions under gemm submodule
+  gemm.def("implicit_gemm",
+           &implicit_gemm_cuda,
+           "Implicit GEMM kernel: C[out_map] += A[in_map] * B\n"
+           "Performs matrix multiplication with gather-scatter operations\n"
+           "Args:\n"
+           "  a: Input matrix A (hA x wA)\n"
+           "  b: Input matrix B (hB x wB)\n"
+           "  c: Output matrix C (hA x wB), modified in-place\n"
+           "  in_map: Input row mapping (hA,)\n"
+           "  out_map: Output row mapping (hA,)\n"
+           "  kernel_type: Kernel type ('basic' or 'vectorized')\n"
+           "  block_size: CUDA block size (default 16)",
+           py::arg("a"),
+           py::arg("b"),
+           py::arg("c"),
+           py::arg("in_map"),
+           py::arg("out_map"),
+           py::arg("kernel_type") = "basic",
+           py::arg("block_size") = 16);
+
+  gemm.def("split_k_implicit_gemm",
+           &split_k_implicit_gemm_cuda,
+           "Split-K Implicit GEMM kernel: C += transpose(A[indices_a]) @ B[indices_b]\n"
+           "Performs efficient matrix multiplication with CUB block reduction\n"
+           "Args:\n"
+           "  a: Input matrix A (N x C_a)\n"
+           "  b: Input matrix B (N x C_b)\n"
+           "  c: Output matrix C (C_a x C_b), modified in-place\n"
+           "  indices_a: Row indices for matrix A (K,)\n"
+           "  indices_b: Row indices for matrix B (K,)\n"
+           "  split_k_factor: Number of splits for K dimension (default 4)\n"
+           "  block_size: CUDA block size parameter (default 16)",
+           py::arg("a"),
+           py::arg("b"),
+           py::arg("c"),
+           py::arg("indices_a"),
+           py::arg("indices_b"),
+           py::arg("split_k_factor") = 4,
+           py::arg("block_size") = 16);
 
   // Create submodule 'fma' for FMA-related operations
   py::module_ fma =
@@ -908,6 +1332,28 @@ PYBIND11_MODULE(_C, m) {
             py::arg("grid_shape"),
             py::arg("bounds_min"),
             py::arg("bounds_max"));
+
+  // Segmented arithmetic functions
+  utils.def(
+      "segmented_arithmetic",
+      &segmented_arithmetic_cuda,
+      "Segmented arithmetic operations: D[offsets[i]:offsets[i+1], :] = B[offsets[i]:offsets[i+1], "
+      ":] OP C[i, :]\n"
+      "Performs element-wise arithmetic operations on segments of matrix B with corresponding rows "
+      "of matrix C\n"
+      "Args:\n"
+      "  tensor_b: Input matrix B (N x C)\n"
+      "  tensor_c: Segment vectors matrix C (K x C)\n"
+      "  tensor_d: Output matrix D (N x C), modified in-place\n"
+      "  offsets: Segment boundaries (K+1,) where offsets[i] to offsets[i+1] defines segment i\n"
+      "  operation: Operation type ('add', 'subtract'/'sub', 'multiply'/'mul', 'divide'/'div')\n"
+      "  kernel_type: Kernel type ('basic')",
+      py::arg("tensor_b"),
+      py::arg("tensor_c"),
+      py::arg("tensor_d"),
+      py::arg("offsets"),
+      py::arg("operation"),
+      py::arg("kernel_type") = "basic");
 }
 
 // ------------------ Implementation of dispatch helpers with mma_tile switch ------------------

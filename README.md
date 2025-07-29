@@ -130,12 +130,19 @@ pytest tests/ --benchmark-only
 ### Building Documentation
 
 ```bash
+# Install documentation dependencies
+uv pip install -r docs/requirements.txt
+
 # Build docs
-python scripts/build_docs.py
+mkdocs build -f mkdocs-readthedocs.yml
 
 # Serve locally
-python scripts/serve_docs.py
+mkdocs serve -f mkdocs-readthedocs.yml
 ```
+
+📖 **Documentation**: [https://nvlabs.github.io/WarpConvNet/](https://nvlabs.github.io/WarpConvNet/)
+
+The documentation is automatically built and deployed to GitHub Pages on every push to the main branch.
 
 ## License
 

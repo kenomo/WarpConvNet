@@ -3,20 +3,16 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Literal, Optional, Tuple, Union, Generator, Dict, Any, Sequence
+from typing import List, Optional, Tuple, Union, Dict, Any
 
 import numpy as np
 import torch
 from jaxtyping import Float, Int
-import logging
-import cupy as cp
 import math
-import os
 import itertools
 
 from torch import Tensor
 from torch.autograd import Function
-from torch.utils.dlpack import to_dlpack as torch_to_dlpack, from_dlpack as torch_from_dlpack
 
 from warpconvnet.geometry.base.geometry import Geometry
 from warpconvnet.geometry.types.voxels import Voxels
@@ -31,13 +27,19 @@ from warpconvnet.geometry.coords.ops.expand import (
 from warpconvnet.geometry.coords.ops.serialization import POINT_ORDERING, encode
 from warpconvnet.nn.functional.sparse_pool import sparse_reduce
 from warpconvnet.utils.ntuple import ntuple
-from warpconvnet.utils.cuda_utils import load_kernel
 from warpconvnet.utils.logger import get_logger
 from warpconvnet.utils.benchmark_cache import (
+    SpatiallySparseConvConfig,
     load_sparse_conv_benchmark_cache,
     mark_benchmark_cache_dirty,
 )
-from warpconvnet.utils.type_cast import _min_dtype, _max_dtype
+from warpconvnet.utils.type_cast import _min_dtype, _maybe_cast
+from warpconvnet.utils.timer import CUDATimer
+from warpconvnet.utils.ntuple import _pad_tuple
+from warpconvnet.constants import (
+    WARPCONVNET_FWD_ALGO_MODE,
+    WARPCONVNET_BWD_ALGO_MODE,
+)
 
 logger = get_logger(__name__)
 try:
@@ -45,52 +47,6 @@ try:
 except ImportError as e:
     logger.warning(f"Error importing warpconvnet._C: {e}. Using fallback implementation.")
     _C = None
-
-
-_KERNEL_CACHE = {}
-_MAX_GRID_Y = 65535
-
-# Dtype mapping for kernel template
-_DTYPE_TO_CPP_STR = {
-    torch.float16: "half",
-    torch.float32: "float",
-    torch.float64: "double",
-}
-
-# Itype mapping for kernel template
-_ITYPE_TO_CPP_STR = {
-    torch.int32: "int",
-}
-
-_TORCH_DTYPE_TO_CUPY_DTYPE = {
-    torch.float16: cp.float16,
-    torch.float32: cp.float32,
-    torch.float64: cp.float64,
-    torch.int32: cp.int32,
-}
-
-
-def _get_cuda_kernel(
-    kernel_name: str, feature_dtype: torch.dtype, itype: torch.dtype, block_size: int = 32
-):
-    dtype_str = _DTYPE_TO_CPP_STR.get(feature_dtype)
-    # Currently only support int32 for index type
-    itype_str = "int"
-
-    if dtype_str is None:
-        raise ValueError(f"Unsupported feature_dtype for CUDA kernel: {feature_dtype}")
-
-    block_size_str = str(block_size)
-    cache_key = (kernel_name, dtype_str, itype_str, block_size_str)
-
-    if cache_key in _KERNEL_CACHE:
-        return _KERNEL_CACHE[cache_key]
-
-    templated_kernel_name = f"{kernel_name}_{dtype_str}_{itype_str}_b{block_size_str}"
-    # cuda_utils.py automatically handles the csrc path for just filename
-    loaded_kernel = load_kernel(templated_kernel_name, "sparse_conv.cu")
-    _KERNEL_CACHE[cache_key] = loaded_kernel
-    return loaded_kernel
 
 
 class STRIDED_CONV_MODE(Enum):
@@ -113,75 +69,6 @@ class SPARSE_CONV_BWD_ALGO_MODE(Enum):
     CUTLASS_IMPLICIT_GEMM = "cutlass_implicit_gemm"
     # EXPLICIT_GEMM_BATCHED = "explicit_gemm_batched" # TODO: Add if supporting
     AUTO = "auto"  # Benchmark and select the best algorithm
-
-
-def _int_sequence_hash(arr: Sequence[int]) -> int:  # noqa: F821
-    x = hash(arr[0])
-    for i in range(1, len(arr)):
-        x = (x * 31 + hash(arr[i])) & 0xFFFFFFFF  # Keep it within 32-bit range
-    return x
-
-
-_SPARSE_CONV_CONFIG_DTYPE_TO_INT = {
-    torch.bfloat16: 0,
-    torch.float16: 1,
-    torch.float32: 2,
-    torch.float64: 3,
-}
-
-
-@dataclass
-class SpatiallySparseConvConfig:
-    log_num_in_coords: int
-    log_num_out_coords: int
-    in_channels: int
-    out_channels: int
-    kernel_volume: int
-    in_dtype: torch.dtype
-    # explicit_matmul_batch_size: Optional[int] = None # TODO: Add if supporting batched explicit
-
-    def __init__(
-        self,
-        num_in_coords: int,
-        num_out_coords: int,
-        in_channels: int,
-        out_channels: int,
-        kernel_volume: int,
-        in_dtype: torch.dtype,
-        # explicit_matmul_batch_size: Optional[int] = None, # TODO
-    ):
-        self.log_num_in_coords = math.ceil(math.log2(num_in_coords)) if num_in_coords > 0 else 0
-        self.log_num_out_coords = math.ceil(math.log2(num_out_coords)) if num_out_coords > 0 else 0
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_volume = kernel_volume
-        assert in_dtype in _SPARSE_CONV_CONFIG_DTYPE_TO_INT, f"Unsupported in_dtype: {in_dtype}"
-        self.in_dtype = in_dtype
-        # self.explicit_matmul_batch_size = explicit_matmul_batch_size # TODO
-
-    def __hash__(self):
-        return _int_sequence_hash(
-            [
-                # self.log_num_in_coords,
-                # self.log_num_out_coords,
-                self.in_channels,
-                self.out_channels,
-                self.kernel_volume,
-                _SPARSE_CONV_CONFIG_DTYPE_TO_INT[self.in_dtype],
-            ]
-        )
-
-    def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, SpatiallySparseConvConfig):
-            return False
-        return (
-            # self.log_num_in_coords == other.log_num_in_coords
-            # and self.log_num_out_coords == other.log_num_out_coords and
-            self.in_channels == other.in_channels
-            and self.out_channels == other.out_channels
-            and self.kernel_volume == other.kernel_volume
-            and self.in_dtype == other.in_dtype
-        )
 
 
 # Separate benchmark parameters for independent operations
@@ -239,6 +126,10 @@ _BENCHMARK_FORWARD_PARAMS = [
         (SPARSE_CONV_FWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM, params)
         for params in _BENCHMARK_AD_GATHER_SCATTER_PARAMS
     ],
+    *[
+        (SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM, {"fwd_block_size": block_size})
+        for block_size in [4, 16, 32]
+    ],
 ]
 
 # Backward pass combines best AD params with best TrAB params
@@ -268,13 +159,28 @@ _BENCHMARK_BACKWARD_PARAMS = [
         if ad_params.get("split_k_slices") is not None
         or trab_params.get("split_k_slices") is not None
     ],
+    *[
+        (
+            SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM,
+            {
+                "gemm_block_size": gemm_block_size,
+                "split_k_threads_per_block": split_k_threads_per_block,
+                "split_k_factor": split_k_factor,
+            },
+        )
+        for gemm_block_size in [4, 16, 32]
+        for split_k_threads_per_block in [256]
+        for split_k_factor in [2, 4, 8, 16]
+    ],
 ]
 
 _BENCHMARK_FORWARD_RESULTS: Dict[
-    SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]]
+    SpatiallySparseConvConfig,
+    List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]],
 ] = {}
 _BENCHMARK_BACKWARD_RESULTS: Dict[
-    SpatiallySparseConvConfig, List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]]
+    SpatiallySparseConvConfig,
+    List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]],
 ] = {}
 
 
@@ -298,9 +204,78 @@ def _initialize_benchmark_cache():
 _initialize_benchmark_cache()
 
 
-def _maybe_cast(tensor: torch.Tensor, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
-    """Fast dtype conversion if needed."""
-    return tensor if dtype is None else tensor.to(dtype=dtype)
+def _filter_benchmark_params_by_env_config(
+    all_params: List[
+        Tuple[Union[SPARSE_CONV_FWD_ALGO_MODE, SPARSE_CONV_BWD_ALGO_MODE], Dict[str, Any]]
+    ],
+    env_config: Union[str, List[Union[str, SPARSE_CONV_FWD_ALGO_MODE, SPARSE_CONV_BWD_ALGO_MODE]]],
+    is_forward: bool = True,
+) -> List[Tuple[Union[SPARSE_CONV_FWD_ALGO_MODE, SPARSE_CONV_BWD_ALGO_MODE], Dict[str, Any]]]:
+    """Filter benchmark parameters based on environment variable configuration.
+
+    Args:
+        all_params: All available benchmark parameters
+        env_config: Environment variable value (string or list of algorithm names)
+        is_forward: Whether this is for forward pass (affects enum type)
+
+    Returns:
+        Filtered list of benchmark parameters
+    """
+    if env_config == "auto":
+        # When "auto", use all available algorithms
+        return all_params
+
+    # Convert environment config to list of algorithm names
+    if isinstance(env_config, str):
+        algo_names = [env_config]
+    else:
+        algo_names = env_config
+
+    # Map string algorithm names to enum values
+    EnumClass = SPARSE_CONV_FWD_ALGO_MODE if is_forward else SPARSE_CONV_BWD_ALGO_MODE
+
+    # Get target enum values
+    target_algos = []
+    for algo_name in algo_names:
+        if isinstance(algo_name, EnumClass):
+            target_algos.append(algo_name)
+        else:
+            try:
+                target_algos.append(EnumClass(algo_name))
+            except ValueError:
+                logger.warning(f"Unknown algorithm name: {algo_name}")
+
+    if not target_algos:
+        logger.warning(f"No valid algorithms found in {algo_names}, using all algorithms")
+        return all_params
+
+    # Filter parameters to only include target algorithms
+    filtered_params = []
+    for algo_enum, params in all_params:
+        if algo_enum in target_algos:
+            filtered_params.append((algo_enum, params))
+
+    if not filtered_params:
+        logger.warning(
+            f"No benchmark parameters found for algorithms {algo_names}, using all algorithms"
+        )
+        return all_params
+
+    return filtered_params
+
+
+def _get_filtered_forward_params() -> List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any]]]:
+    """Get forward benchmark parameters filtered by environment variable."""
+    return _filter_benchmark_params_by_env_config(
+        _BENCHMARK_FORWARD_PARAMS, WARPCONVNET_FWD_ALGO_MODE, is_forward=True
+    )
+
+
+def _get_filtered_backward_params() -> List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any]]]:
+    """Get backward benchmark parameters filtered by environment variable."""
+    return _filter_benchmark_params_by_env_config(
+        _BENCHMARK_BACKWARD_PARAMS, WARPCONVNET_BWD_ALGO_MODE, is_forward=False
+    )
 
 
 def _explicit_gemm_forward_logic(
@@ -310,6 +285,7 @@ def _explicit_gemm_forward_logic(
     num_out_coords: int,
     compute_dtype: Optional[torch.dtype] = None,
 ) -> Float[Tensor, "M C_out"]:
+    """Reference implementation of forward pass using explicit GEMM."""
     device = in_features.device
     comp_in_feats = _maybe_cast(in_features, compute_dtype)
     comp_weight = _maybe_cast(weight, compute_dtype)
@@ -343,6 +319,7 @@ def _explicit_gemm_backward_logic(
     compute_dtype: Optional[torch.dtype] = None,
     device: torch.device = None,
 ) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+    """Backward pass for explicit GEMM convolution."""
     if device is None:
         device = grad_output.device
 
@@ -386,24 +363,26 @@ def _implicit_gemm_forward_logic(
     compute_dtype: Optional[torch.dtype],
     fwd_block_size: int,
 ) -> Float[Tensor, "M C_out"]:
+    """Forward pass using implicit GEMM with a custom CUDA kernel."""
     device = in_features.device
     feature_dtype = compute_dtype if compute_dtype is not None else in_features.dtype
-    cupy_feature_dtype = _TORCH_DTYPE_TO_CUPY_DTYPE[feature_dtype]
-    index_dtype = torch.int32
+    min_dtype = _min_dtype(feature_dtype, weight.dtype)
 
-    _in_features_detached = in_features.contiguous().detach()  # Detach for safety with DLPack
-    _weight_detached = weight.contiguous().detach()  # Detach for safety with DLPack
+    _in_features_detached = in_features.contiguous().detach().to(dtype=min_dtype)
+    _weight_detached = weight.contiguous().detach().to(dtype=min_dtype)
 
     N_in, C_in = _in_features_detached.shape
     K, _, C_out = _weight_detached.shape
     iden_idx = kernel_map.identity_map_index
 
     if iden_idx is not None:
-        output_feature_tensor_cp = cp.from_dlpack(
-            torch.matmul(_in_features_detached, _weight_detached[iden_idx])
+        output_feature_tensor = torch.matmul(_in_features_detached, _weight_detached[iden_idx]).to(
+            dtype=min_dtype
         )
     else:
-        output_feature_tensor_cp = cp.zeros((num_out_coords, C_out), dtype=cupy_feature_dtype)
+        output_feature_tensor = torch.zeros(
+            (num_out_coords, C_out), dtype=min_dtype, device=device
+        )
 
     if (
         num_out_coords == 0
@@ -412,78 +391,28 @@ def _implicit_gemm_forward_logic(
         or C_out == 0
         or _in_features_detached.shape[0] == 0
     ):
-        return torch.from_dlpack(output_feature_tensor_cp).to(dtype=in_features.dtype)
-
-    matmul_kernel = _get_cuda_kernel("matmul", feature_dtype, index_dtype, fwd_block_size)
-
-    # Use detached tensors for DLPack conversion
-    in_features_cp = cp.from_dlpack(_in_features_detached.to(dtype=feature_dtype))
+        return output_feature_tensor.to(dtype=in_features.dtype)
 
     for k_idx in range(len(kernel_map)):
         if k_idx == iden_idx:
             continue
 
-        # Ensure weight[k_idx] is converted to the correct compute_dtype for CuPy
-        current_weight_k_detached = _weight_detached[k_idx].to(dtype=feature_dtype)
-        current_weight_k_cp = cp.from_dlpack(current_weight_k_detached)
-
         in_map_k, out_map_k = kernel_map[k_idx]
-        in_map_k = in_map_k.to(device=device, dtype=index_dtype).contiguous()
-        out_map_k = out_map_k.to(device=device, dtype=index_dtype).contiguous()
-
         num_active_pairs = in_map_k.shape[0]
         if num_active_pairs == 0:
             continue
 
-        in_map_k_cp = cp.from_dlpack(in_map_k)
-        out_map_k_cp = cp.from_dlpack(out_map_k)
+        _C.gemm.implicit_gemm(
+            _in_features_detached,
+            _weight_detached[k_idx],
+            output_feature_tensor,
+            in_map_k,
+            out_map_k,
+            "basic",
+            fwd_block_size,
+        )
 
-        threads_y = fwd_block_size
-        threads_x = fwd_block_size
-        blocks_y = math.ceil(num_active_pairs / threads_y)
-        blocks_x = math.ceil(C_out / threads_x)
-
-        if blocks_y > 0 and blocks_x > 0 and blocks_y < _MAX_GRID_Y:
-            matmul_kernel(
-                (blocks_x, blocks_y, 1),
-                (threads_x, threads_y, 1),
-                (
-                    in_features_cp,
-                    C_in,
-                    num_active_pairs,
-                    current_weight_k_cp,
-                    C_out,
-                    C_in,
-                    output_feature_tensor_cp,
-                    in_map_k_cp,
-                    out_map_k_cp,
-                ),
-            )
-        elif blocks_y >= _MAX_GRID_Y:
-            num_iters = math.ceil(blocks_y / _MAX_GRID_Y)
-            for iter_idx in range(num_iters):
-                start_idx = iter_idx * _MAX_GRID_Y * threads_y
-                end_idx = min(start_idx + _MAX_GRID_Y * threads_y, num_active_pairs)
-                curr_active_pairs = end_idx - start_idx
-                if curr_active_pairs == 0:
-                    continue
-                matmul_kernel(
-                    (blocks_x, math.ceil(curr_active_pairs / threads_y), 1),
-                    (threads_x, threads_y, 1),
-                    (
-                        in_features_cp,
-                        C_in,
-                        curr_active_pairs,
-                        current_weight_k_cp,
-                        C_out,
-                        C_in,
-                        output_feature_tensor_cp,
-                        in_map_k_cp[start_idx:end_idx],
-                        out_map_k_cp[start_idx:end_idx],
-                    ),
-                )
-
-    return torch.from_dlpack(output_feature_tensor_cp).to(dtype=in_features.dtype)
+    return output_feature_tensor.to(dtype=in_features.dtype)
 
 
 def _implicit_gemm_backward_logic(
@@ -492,32 +421,32 @@ def _implicit_gemm_backward_logic(
     weight: Float[Tensor, "K C_in C_out"],
     kernel_map: IntSearchResult,
     num_out_coords: int,
+    gemm_block_size: int,
+    split_k_threads_per_block: int,
+    split_k_factor: int,
     compute_dtype: Optional[torch.dtype],
-    bwd_block_size: int,
-    device: torch.device,
 ) -> Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]]:
+    """Backward pass using implicit GEMM kernels."""
     feature_dtype = compute_dtype if compute_dtype is not None else in_features.dtype
-    cupy_feature_dtype = _TORCH_DTYPE_TO_CUPY_DTYPE[feature_dtype]
-    index_dtype = torch.int32
+    min_dtype = _min_dtype(feature_dtype, weight.dtype)
+    device = in_features.device
 
-    _in_features_detached = in_features.contiguous().detach().to(dtype=feature_dtype)
-    _weight_detached = weight.contiguous().detach().to(dtype=feature_dtype)
-    _grad_output_detached = grad_output.contiguous().detach().to(dtype=feature_dtype)
-    grad_output_cp = cp.from_dlpack(torch_to_dlpack(_grad_output_detached))
-    in_features_cp = cp.from_dlpack(torch_to_dlpack(_in_features_detached))
+    _in_features_detached = in_features.contiguous().detach().to(dtype=min_dtype)
+    _weight_detached = weight.contiguous().detach().to(dtype=min_dtype)
+    _grad_output_detached = grad_output.contiguous().detach().to(dtype=min_dtype)
 
     N_in, C_in = _in_features_detached.shape
     K, _, C_out = _weight_detached.shape
     iden_idx = kernel_map.identity_map_index
 
-    grad_weight_tensor_cp = cp.zeros((K, C_in, C_out), dtype=cupy_feature_dtype)
+    grad_weight_tensor = torch.zeros((K, C_in, C_out), dtype=min_dtype, device=device)
     if iden_idx is not None:
-        grad_in_features_cp = cp.matmul(
-            grad_output_cp, cp.from_dlpack(_weight_detached[iden_idx].T)
-        )
-        grad_weight_tensor_cp[iden_idx] = cp.matmul(in_features_cp.T, grad_output_cp)
+        grad_in_features = torch.matmul(_grad_output_detached, _weight_detached[iden_idx].T)
+        grad_weight_tensor[iden_idx] = torch.matmul(
+            _in_features_detached.T, _grad_output_detached
+        ).to(dtype=min_dtype)
     else:
-        grad_in_features_cp = cp.zeros((N_in, C_in), dtype=cupy_feature_dtype)
+        grad_in_features = torch.zeros((N_in, C_in), dtype=min_dtype, device=device)
 
     if (
         num_out_coords == 0
@@ -527,87 +456,40 @@ def _implicit_gemm_backward_logic(
         or N_in == 0
         or _grad_output_detached.shape[0] == 0
     ):
-        grad_in_final = torch.from_dlpack(grad_in_features_cp).to(dtype=in_features.dtype)
-        grad_weight_final = torch.from_dlpack(grad_weight_tensor_cp).to(dtype=weight.dtype)
-        return grad_in_final, grad_weight_final
-
-    matmul2_kernel = _get_cuda_kernel("matmul2", feature_dtype, index_dtype, bwd_block_size)
+        return grad_in_features.to(dtype=in_features.dtype), grad_weight_tensor.to(
+            dtype=weight.dtype
+        )
 
     for k_idx in range(len(kernel_map)):
         if k_idx == iden_idx:
             continue
-
-        # Ensure weight_k is on correct device and dtype for CuPy
-        current_weight_k_detached = _weight_detached[k_idx]  # Already compute_dtype
-        current_weight_k_cp = cp.from_dlpack(current_weight_k_detached)
 
         in_map_k, out_map_k = kernel_map[k_idx]
         num_active_pairs = in_map_k.shape[0]
         if num_active_pairs == 0:
             continue
 
-        in_map_k = in_map_k.to(device=device, dtype=index_dtype).contiguous()
-        out_map_k = out_map_k.to(device=device, dtype=index_dtype).contiguous()
+        _C.gemm.implicit_gemm(
+            _grad_output_detached,
+            _weight_detached[k_idx].T,
+            grad_in_features,
+            out_map_k,
+            in_map_k,
+            "basic",
+            gemm_block_size,
+        )
 
-        in_map_k_cp = cp.from_dlpack(in_map_k)
-        out_map_k_cp = cp.from_dlpack(out_map_k)
-        grad_weight_k_cp = grad_weight_tensor_cp[k_idx]
+        _C.gemm.split_k_implicit_gemm(
+            _in_features_detached,
+            _grad_output_detached,
+            grad_weight_tensor[k_idx],
+            in_map_k,
+            out_map_k,
+            split_k_factor=split_k_factor,
+            block_size=split_k_threads_per_block,
+        )
 
-        threads_y = bwd_block_size
-        threads_x = bwd_block_size
-        blocks_x = math.ceil(C_in / threads_x)
-        blocks_y = math.ceil(num_active_pairs / threads_y)
-
-        if blocks_y > 0 and blocks_x > 0 and blocks_y < _MAX_GRID_Y:
-            matmul2_kernel(
-                (blocks_x, blocks_y, 1),
-                (threads_x, threads_y, 1),
-                (
-                    grad_output_cp,
-                    C_out,
-                    num_active_pairs,
-                    current_weight_k_cp,
-                    C_out,
-                    C_in,
-                    in_features_cp,
-                    C_in,
-                    num_active_pairs,
-                    grad_in_features_cp,
-                    grad_weight_k_cp,
-                    in_map_k_cp,
-                    out_map_k_cp,
-                ),
-            )
-        elif blocks_y >= _MAX_GRID_Y:
-            num_iters = math.ceil(blocks_y / _MAX_GRID_Y)
-            for iter_idx in range(num_iters):
-                start_idx = iter_idx * _MAX_GRID_Y * threads_y
-                end_idx = min(start_idx + _MAX_GRID_Y * threads_y, num_active_pairs)
-                curr_active_pairs = end_idx - start_idx
-                if curr_active_pairs == 0:
-                    continue
-                matmul2_kernel(
-                    (blocks_x, math.ceil(curr_active_pairs / threads_y), 1),
-                    (threads_x, threads_y, 1),
-                    (
-                        grad_output_cp,
-                        C_out,
-                        curr_active_pairs,
-                        current_weight_k_cp,
-                        C_out,
-                        C_in,
-                        in_features_cp,
-                        C_in,
-                        curr_active_pairs,
-                        grad_in_features_cp,
-                        grad_weight_k_cp,
-                        in_map_k_cp[start_idx:end_idx],
-                        out_map_k_cp[start_idx:end_idx],
-                    ),
-                )
-    grad_in_final = torch.from_dlpack(grad_in_features_cp).to(dtype=in_features.dtype)
-    grad_weight_final = torch.from_dlpack(grad_weight_tensor_cp).to(dtype=weight.dtype)
-    return grad_in_final, grad_weight_final
+    return grad_in_features.to(dtype=in_features.dtype), grad_weight_tensor.to(dtype=weight.dtype)
 
 
 def _cutlass_implicit_gemm_forward_logic(
@@ -619,6 +501,7 @@ def _cutlass_implicit_gemm_forward_logic(
     split_k_slices: int = 1,
     mma_tile: int = 0,
 ) -> Union[Float[Tensor, "M C_out"], int]:
+    """Forward pass leveraging CUTLASS implicit GEMM kernels."""
     if _C is None:
         raise ImportError(
             "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
@@ -626,14 +509,14 @@ def _cutlass_implicit_gemm_forward_logic(
 
     device = in_features.device
     iden_idx = kernel_map.identity_map_index
-    in_dtype = _min_dtype(in_features.dtype, weight.dtype)
-    in_features = in_features.to(dtype=in_dtype)
-    weight = weight.to(dtype=in_dtype)
+    min_dtype = _min_dtype(in_features.dtype, weight.dtype)
+    _in_features_detached = in_features.contiguous().detach().to(dtype=min_dtype)
+    _weight_detached = weight.contiguous().detach().to(dtype=min_dtype)
     if iden_idx is not None:
-        output_feature_tensor = torch.matmul(in_features, weight[iden_idx])
+        output_feature_tensor = torch.matmul(_in_features_detached, _weight_detached[iden_idx])
     else:
         output_feature_tensor = torch.zeros(
-            num_out_coords, weight.shape[-1], device=device, dtype=in_dtype
+            num_out_coords, weight.shape[-1], device=device, dtype=min_dtype
         )
 
     for i in range(len(kernel_map)):
@@ -646,8 +529,8 @@ def _cutlass_implicit_gemm_forward_logic(
         in_map = in_map.to(device)
         out_map = out_map.to(device)
         status = _C.gemm.cutlass_gemm_AD_gather_scatter(
-            in_features,
-            weight[i],
+            _in_features_detached,
+            _weight_detached[i],
             output_feature_tensor,
             output_feature_tensor,
             in_map,
@@ -674,6 +557,7 @@ def _cutlass_implicit_gemm_backward_logic(
     requires_grad: Tuple[bool, bool] = (True, True),
     device: torch.device = None,
 ) -> Union[Tuple[Float[Tensor, "N C_in"], Float[Tensor, "K C_in C_out"]], Tuple[int, int]]:
+    """Backward pass leveraging CUTLASS implicit GEMM kernels."""
     if _C is None:
         raise ImportError(
             "warpconvnet._C is not available. Please install warpconvnet with cutlass support."
@@ -682,20 +566,18 @@ def _cutlass_implicit_gemm_backward_logic(
     if device is None:
         device = in_features.device
 
-    in_dtype = _min_dtype(in_features.dtype, weight.dtype, grad_output.dtype)
-    grad_output = grad_output.to(dtype=in_dtype)
-    in_features = in_features.to(dtype=in_dtype)
-    orig_weight_dtype = weight.dtype
+    min_dtype = _min_dtype(in_features.dtype, weight.dtype, grad_output.dtype)
+    _grad_output_detached = grad_output.contiguous().detach().to(dtype=min_dtype)
+    _in_features_detached = in_features.contiguous().detach().to(dtype=min_dtype)
+    _weight_detached = weight.contiguous().detach().to(dtype=min_dtype)
     grad_weight = torch.zeros_like(weight, device=device)
-    # Downcast to for input
-    weight = weight.to(dtype=in_dtype)
 
     iden_idx = kernel_map.identity_map_index
     if iden_idx is not None:
-        grad_in_features = torch.matmul(grad_output, weight[iden_idx].T)
-        grad_weight[iden_idx] = torch.matmul(in_features.T, grad_output).to(orig_weight_dtype)
+        grad_in_features = torch.matmul(_grad_output_detached, _weight_detached[iden_idx].T)
+        grad_weight[iden_idx] = torch.matmul(_in_features_detached.T, _grad_output_detached)
     else:
-        grad_in_features = torch.zeros_like(in_features, device=device)
+        grad_in_features = torch.zeros_like(_in_features_detached, device=device)
 
     for i in range(len(kernel_map)):
         if i == iden_idx:
@@ -705,13 +587,11 @@ def _cutlass_implicit_gemm_backward_logic(
         if in_map.shape[0] == 0:
             continue
 
-        curr_weight = weight[i]
-
         # grad_in_features[in_map] += torch.matmul(grad_output[out_map], curr_weight.T)
         if requires_grad[0]:
             status = _C.gemm.cutlass_gemm_AD_gather_scatter(
-                grad_output,
-                curr_weight.T.contiguous(),
+                _grad_output_detached,
+                _weight_detached[i].T.contiguous(),
                 grad_in_features,
                 grad_in_features,
                 out_map,
@@ -726,8 +606,8 @@ def _cutlass_implicit_gemm_backward_logic(
         # grad_weight[i] += torch.matmul(curr_in_feats.T, curr_grad_output)
         if requires_grad[1]:
             status = _C.gemm.cutlass_gemm_trAB_gather(
-                in_features,
-                grad_output,
+                _in_features_detached,
+                _grad_output_detached,
                 grad_weight[i],
                 grad_weight[i],
                 in_map,
@@ -743,26 +623,8 @@ def _cutlass_implicit_gemm_backward_logic(
 
     return (
         grad_in_features.to(dtype=in_features.dtype),
-        grad_weight.to(dtype=orig_weight_dtype),
+        grad_weight.to(dtype=weight.dtype),
     )
-
-
-def _backward_return(
-    grad_in_features: Optional[Float[Tensor, "N C_in"]],
-    grad_weight: Optional[Float[Tensor, "K C_in C_out"]],
-    number_of_outputs: int,
-):
-    """Return the correct number of outputs for the backward pass."""
-    assert number_of_outputs >= 2
-    if number_of_outputs == 2:
-        return grad_in_features, grad_weight
-    else:
-        return_list = [None] * number_of_outputs
-        if grad_in_features is not None:
-            return_list[0] = grad_in_features
-        if grad_weight is not None:
-            return_list[1] = grad_weight
-        return tuple(return_list)
 
 
 class SpatiallySparseConvExplicitGEMMFunction(Function):
@@ -802,7 +664,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 5)
+            return _pad_tuple(None, None, 5)
 
         # Basic check for empty inputs, similar to how it was in Unified Function
         N_in, C_in = in_features.shape
@@ -811,7 +673,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return _backward_return(grad_in_final, grad_weight_final, 5)
+            return _pad_tuple(grad_in_final, grad_weight_final, 5)
 
         grad_in_features, grad_weight = _explicit_gemm_backward_logic(
             grad_output,
@@ -827,7 +689,7 @@ class SpatiallySparseConvExplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return _backward_return(grad_in_features, grad_weight, 5)
+        return _pad_tuple(grad_in_features, grad_weight, 5)
 
 
 class SpatiallySparseConvImplicitGEMMFunction(Function):
@@ -838,9 +700,10 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         weight: Float[Tensor, "K C_in C_out"],
         kernel_map: IntSearchResult,
         num_out_coords: int,
+        gemm_block_size: int = 16,
+        split_k_threads_per_block: int = 128,
+        split_k_factor: int = 4,
         compute_dtype: Optional[torch.dtype] = None,
-        fwd_block_size: int = 16,
-        bwd_block_size: int = 16,  # Saved for backward
     ) -> Float[Tensor, "M C_out"]:
         output_feature_tensor = _implicit_gemm_forward_logic(
             in_features,
@@ -848,14 +711,16 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
             kernel_map,
             num_out_coords,
             compute_dtype,
-            fwd_block_size,
+            gemm_block_size,
         )
         ctx.save_for_backward(in_features, weight)
         ctx.kernel_map = kernel_map
-        ctx.num_out_coords = num_out_coords
-        ctx.compute_dtype = compute_dtype
-        ctx.bwd_block_size = bwd_block_size
-        ctx.device = in_features.device
+        ctx.gemm_params = {
+            "compute_dtype": compute_dtype,
+            "gemm_block_size": gemm_block_size,
+            "split_k_threads_per_block": split_k_threads_per_block,
+            "split_k_factor": split_k_factor,
+        }
         return output_feature_tensor
 
     @staticmethod
@@ -870,13 +735,11 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
     ]:
         in_features, weight = ctx.saved_tensors
         kernel_map = ctx.kernel_map
-        num_out_coords = ctx.num_out_coords
-        compute_dtype = ctx.compute_dtype
-        bwd_block_size = ctx.bwd_block_size
-        device = ctx.device
+        num_out_coords = grad_output.shape[0]
+        gemm_params = ctx.gemm_params
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 7)
+            return _pad_tuple(None, None, 7)
 
         N_in, C_in = in_features.shape
         K, _, C_out = weight.shape
@@ -890,7 +753,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         ):
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return _backward_return(grad_in_final, grad_weight_final, 7)
+            return _pad_tuple(grad_in_final, grad_weight_final, 7)
 
         grad_in_features, grad_weight = _implicit_gemm_backward_logic(
             grad_output,
@@ -898,9 +761,10 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
             weight,
             kernel_map,
             num_out_coords,
-            compute_dtype,
-            bwd_block_size,
-            device,
+            gemm_params["gemm_block_size"],
+            gemm_params["split_k_threads_per_block"],
+            gemm_params["split_k_factor"],
+            gemm_params["compute_dtype"],
         )
 
         if not ctx.needs_input_grad[0]:
@@ -908,7 +772,7 @@ class SpatiallySparseConvImplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return _backward_return(grad_in_features, grad_weight, 7)
+        return _pad_tuple(grad_in_features, grad_weight, 7)
 
 
 class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
@@ -969,7 +833,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         device = ctx.device
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 9)
+            return _pad_tuple(None, None, 9)
 
         # Basic check for empty inputs, similar to how it was in Unified Function
         N_in, C_in = in_features.shape
@@ -978,7 +842,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if K == 0 or C_in == 0 or C_out == 0 or N_in == 0 or grad_output.shape[0] == 0:
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return _backward_return(grad_in_final, grad_weight_final, 9)
+            return _pad_tuple(grad_in_final, grad_weight_final, 9)
 
         grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
             grad_output,
@@ -1002,7 +866,7 @@ class SpatiallySparseConvCutlassImplicitGEMMFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return _backward_return(grad_in_features, grad_weight, 9)
+        return _pad_tuple(grad_in_features, grad_weight, 9)
 
 
 class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
@@ -1108,7 +972,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         grad_weight = None
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 6)
+            return _pad_tuple(None, None, 6)
 
         # Add a dummy row to grad_output for consistent indexing with out_maps
         _padded_grad_output = torch.cat(
@@ -1203,7 +1067,8 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
                 )
 
                 grad_weight_acc[i_start:i_end] += torch.bmm(
-                    masked_curr_in_feat_for_grad_w.transpose(1, 2), masked_curr_grad_out_feat
+                    masked_curr_in_feat_for_grad_w.transpose(1, 2),
+                    masked_curr_grad_out_feat,
                 )
 
         if ctx.needs_input_grad[0]:
@@ -1213,29 +1078,7 @@ class SpatiallySparseConvBatchedExplicitGEMMFunction(Function):
         if ctx.needs_input_grad[1]:
             grad_weight = grad_weight_acc.to(dtype=weight.dtype)
 
-        return _backward_return(grad_in_features, grad_weight, 6)
-
-
-class CUDATimer:
-    """__enter__ and __exit__ to time a block of code.
-    Returns the elapsed time in milliseconds.
-    """
-
-    def __init__(self):
-        self.start_event = None
-        self.end_event = None
-        self.elapsed_time = None
-
-    def __enter__(self):
-        self.start_event = torch.cuda.Event(enable_timing=True)
-        self.end_event = torch.cuda.Event(enable_timing=True)
-        self.start_event.record()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.end_event.record()
-        torch.cuda.synchronize()
-        self.elapsed_time = self.start_event.elapsed_time(self.end_event)
-        return self.elapsed_time
+        return _pad_tuple(grad_in_features, grad_weight, 6)
 
 
 def _run_forward_benchmarks(
@@ -1246,6 +1089,7 @@ def _run_forward_benchmarks(
     compute_dtype: Optional[torch.dtype],
     warmup_iters: int = _BENCHMARK_NUM_RUNS // 2,
     benchmark_iters: int = _BENCHMARK_NUM_RUNS,
+    custom_params: Optional[List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any]]]] = None,
 ) -> Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]:
     """
     Benchmark different forward algorithms and return the best one with its parameters and runtime.
@@ -1254,7 +1098,7 @@ def _run_forward_benchmarks(
     warmup_iters = max(warmup_iters, 1)
     benchmark_iters = max(benchmark_iters, 1)
 
-    logger.warn(
+    logger.warning(
         "Using benchmarked forward algo. Until the algorithm finds the best parameters, forward performance will be slow."
     )
     all_benchmark_results: List[Tuple[SPARSE_CONV_FWD_ALGO_MODE, Dict[str, Any], float]] = []
@@ -1296,7 +1140,8 @@ def _run_forward_benchmarks(
             # Should not happen with current _BENCHMARK_FORWARD_PARAMS
             raise ValueError(f"Unsupported algo_mode in _execute_single_fwd_pass: {algo_mode}")
 
-    for algo_mode, params_config in _BENCHMARK_FORWARD_PARAMS:
+    params_to_use = custom_params if custom_params is not None else _get_filtered_forward_params()
+    for algo_mode, params_config in params_to_use:
         # Warmup runs
         status = None
         for _ in range(warmup_iters):
@@ -1365,6 +1210,7 @@ def _run_backward_benchmarks(
     device: torch.device,
     warmup_iters: int = _BENCHMARK_NUM_RUNS // 2,
     benchmark_iters: int = _BENCHMARK_NUM_RUNS,
+    custom_params: Optional[List[Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any]]]] = None,
 ) -> Tuple[SPARSE_CONV_BWD_ALGO_MODE, Dict[str, Any], float]:
     """
     Benchmark different backward algorithms and return the best one with its parameters and runtime.
@@ -1397,9 +1243,10 @@ def _run_backward_benchmarks(
                 weight,
                 kernel_map,
                 num_out_coords,
+                params_config.get("gemm_block_size", 16),
+                params_config.get("split_k_threads_per_block", 128),
+                params_config.get("split_k_factor", 4),
                 compute_dtype,
-                device=device,
-                **params_config,
             )
         elif algo_mode == SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
             status, _ = _cutlass_implicit_gemm_backward_logic(
@@ -1419,7 +1266,8 @@ def _run_backward_benchmarks(
         else:
             raise ValueError(f"Unsupported algo_mode in _execute_single_bwd_pass: {algo_mode}")
 
-    for algo_mode, params_config in _BENCHMARK_BACKWARD_PARAMS:
+    params_to_use = custom_params if custom_params is not None else _get_filtered_backward_params()
+    for algo_mode, params_config in params_to_use:
         status = None
         for _ in range(warmup_iters):
             status = _execute_single_bwd_pass(algo_mode, params_config)
@@ -1478,50 +1326,98 @@ class UnifiedSpatiallySparseConvFunction(Function):
         weight: Float[Tensor, "K C_in C_out"],
         kernel_map: IntSearchResult,
         num_out_coords: int,
-        fwd_algo: SPARSE_CONV_FWD_ALGO_MODE,
-        bwd_algo: SPARSE_CONV_BWD_ALGO_MODE,
+        fwd_algo: Union[SPARSE_CONV_FWD_ALGO_MODE, List[SPARSE_CONV_FWD_ALGO_MODE]],
+        bwd_algo: Union[SPARSE_CONV_BWD_ALGO_MODE, List[SPARSE_CONV_BWD_ALGO_MODE]],
         compute_dtype: Optional[torch.dtype],
         fwd_block_size: Optional[int],  # For implicit GEMM if not AUTO
         bwd_block_size: Optional[int],  # For implicit GEMM if not AUTO
     ) -> Float[Tensor, "M C_out"]:
+        global _BENCHMARK_FORWARD_RESULTS  # noqa: F824
         output_feature_tensor = None
 
-        chosen_fwd_algo = fwd_algo
-        chosen_fwd_params = {}
-        if fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM and fwd_block_size is not None:
-            chosen_fwd_params = {"fwd_block_size": fwd_block_size}
+        # Convert string inputs to enum if needed
+        if isinstance(fwd_algo, str):
+            fwd_algo = SPARSE_CONV_FWD_ALGO_MODE(fwd_algo)
+        if isinstance(bwd_algo, str):
+            bwd_algo = SPARSE_CONV_BWD_ALGO_MODE(bwd_algo)
+
+        if isinstance(fwd_algo, list):
+            fwd_algo = [
+                SPARSE_CONV_FWD_ALGO_MODE(algo) if isinstance(algo, str) else algo
+                for algo in fwd_algo
+            ]
+        if isinstance(bwd_algo, list):
+            bwd_algo = [
+                SPARSE_CONV_BWD_ALGO_MODE(algo) if isinstance(algo, str) else algo
+                for algo in bwd_algo
+            ]
+
+        # UNIFIED APPROACH: Always benchmark within filtered algorithm space
+        # Step 1: Determine algorithm filter set
+        if isinstance(fwd_algo, list):
+            algorithm_filter = fwd_algo
         elif fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.AUTO:
-            config = SpatiallySparseConvConfig(
-                num_in_coords=in_features.shape[0],
-                num_out_coords=num_out_coords,
-                in_channels=in_features.shape[1],
-                out_channels=weight.shape[2],
-                kernel_volume=weight.shape[0],
-                in_dtype=in_features.dtype,
-            )
-            global _BENCHMARK_FORWARD_RESULTS  # noqa: F824
-            cached_result = _BENCHMARK_FORWARD_RESULTS.get(config)
-            if cached_result is not None:
-                chosen_fwd_algo, chosen_fwd_params, _ = cached_result[0]  # Best is first
-                # print(f"Using cached fwd: {chosen_fwd_algo}, {chosen_fwd_params}")
+            algorithm_filter = "auto"  # All algorithms
+        else:
+            # Single algorithm - create list for consistent processing
+            algorithm_filter = [fwd_algo]
+
+        # Step 2: Generate configuration for caching
+        config = SpatiallySparseConvConfig(
+            num_in_coords=in_features.shape[0],
+            num_out_coords=num_out_coords,
+            in_channels=in_features.shape[1],
+            out_channels=weight.shape[2],
+            kernel_volume=weight.shape[0],
+            in_dtype=in_features.dtype,
+        )
+
+        # Step 3: Check cache first
+        cached_result = _BENCHMARK_FORWARD_RESULTS.get(config)
+        if cached_result is not None:
+            if algorithm_filter == "auto":
+                # Use best overall result
+                chosen_fwd_algo, chosen_fwd_params, _ = cached_result[0]
             else:
-                # print(f"Running fwd benchmark for config: {config}")
-                all_fwd_benchmark_results = _run_forward_benchmarks(
-                    in_features,
-                    weight,
-                    kernel_map,
-                    num_out_coords,
-                    compute_dtype,
+                # Filter cached results to only include algorithms in filter set
+                filtered_cached_results = []
+                for algo, params, time in cached_result:
+                    if algo in algorithm_filter:
+                        filtered_cached_results.append((algo, params, time))
+
+                if filtered_cached_results:
+                    # Use the best performing algorithm from the filtered results
+                    chosen_fwd_algo, chosen_fwd_params, _ = filtered_cached_results[0]
+                else:
+                    raise ValueError(
+                        f"No cached algorithms from {algorithm_filter} found. Please check your algorithm list and try again. If you need to reset the cache, please run `rm -rf ~/.cache/warpconvnet/`."
+                    )
+        else:
+            # Step 4: No cache - always benchmark within filtered space
+            if algorithm_filter == "auto":
+                # Benchmark all algorithms
+                filtered_params = _BENCHMARK_FORWARD_PARAMS
+            else:
+                # Filter benchmark parameters to only include algorithms in filter set
+                filtered_params = _filter_benchmark_params_by_env_config(
+                    _BENCHMARK_FORWARD_PARAMS, algorithm_filter, is_forward=True
                 )
-                _BENCHMARK_FORWARD_RESULTS[config] = all_fwd_benchmark_results
-                chosen_fwd_algo, chosen_fwd_params, min_time = all_fwd_benchmark_results[
-                    0
-                ]  # Best is first
-                # print(f"Chosen fwd after benchmark: {chosen_fwd_algo}, {chosen_fwd_params}, time: {min_time}")
 
-                # Mark cache as dirty - background thread will save periodically
-                mark_benchmark_cache_dirty()
+            # Always run benchmarks to find optimal parameters
+            all_fwd_benchmark_results = _run_forward_benchmarks(
+                in_features,
+                weight,
+                kernel_map,
+                num_out_coords,
+                compute_dtype,
+                custom_params=filtered_params,
+            )
+            _BENCHMARK_FORWARD_RESULTS[config] = all_fwd_benchmark_results
+            chosen_fwd_algo, chosen_fwd_params, _ = all_fwd_benchmark_results[0]  # Best is first
 
+            mark_benchmark_cache_dirty()
+
+        # Step 5: Execute with optimal algorithm and parameters
         if chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM:
             output_feature_tensor = _explicit_gemm_forward_logic(
                 in_features,
@@ -1532,12 +1428,10 @@ class UnifiedSpatiallySparseConvFunction(Function):
             )
         elif chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.IMPLICIT_GEMM:
             current_fwd_block_size = chosen_fwd_params.get("fwd_block_size")
-            if current_fwd_block_size is None:  # Fallback if somehow not set by AUTO or direct
-                current_fwd_block_size = (
-                    fwd_block_size if fwd_block_size is not None else 16
-                )  # Default fallback
-                print(
-                    f"Warning: fwd_block_size not found in chosen_fwd_params for IMPLICIT_GEMM, using {current_fwd_block_size}"
+            if current_fwd_block_size is None:  # Fallback if somehow not set
+                current_fwd_block_size = fwd_block_size if fwd_block_size is not None else 16
+                logger.warning(
+                    f"fwd_block_size not found in chosen_fwd_params for IMPLICIT_GEMM, using fallback {current_fwd_block_size}"
                 )
             output_feature_tensor = _implicit_gemm_forward_logic(
                 in_features,
@@ -1560,10 +1454,6 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 raise RuntimeError(
                     f"Error in _cutlass_implicit_gemm_forward_logic: {_C.gemm.gemm_status_to_string(_C.gemm.GemmStatus(output_feature_tensor))}"
                 )
-        # elif chosen_fwd_algo == SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM_BATCHED: # TODO
-        # if explicit_matmul_batch_size is None:
-        #     raise ValueError("explicit_matmul_batch_size is required for batched explicit GEMM forward.")
-        # output_feature_tensor = _batched_explicit_gemm_forward_logic(...)
         else:
             raise ValueError(f"Unsupported forward algorithm: {chosen_fwd_algo}")
 
@@ -1603,6 +1493,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
         None,
         None,
     ]:
+        global _BENCHMARK_BACKWARD_RESULTS  # noqa: F824
         in_features, weight = ctx.saved_tensors
         kernel_map = ctx.kernel_map
         config_params = ctx.config_params_for_bwd
@@ -1613,10 +1504,20 @@ class UnifiedSpatiallySparseConvFunction(Function):
         initial_bwd_block_size = config_params["initial_bwd_block_size"]
         # explicit_matmul_batch_size = ctx.explicit_matmul_batch_size # TODO
 
+        # Convert string to enum if needed
+        if isinstance(initial_bwd_algo, str):
+            initial_bwd_algo = SPARSE_CONV_BWD_ALGO_MODE(initial_bwd_algo)
+
+        if isinstance(initial_bwd_algo, list):
+            initial_bwd_algo = [
+                SPARSE_CONV_BWD_ALGO_MODE(algo) if isinstance(algo, str) else algo
+                for algo in initial_bwd_algo
+            ]
+
         grad_in_features, grad_weight = None, None
 
         if not ctx.needs_input_grad[0] and not ctx.needs_input_grad[1]:
-            return _backward_return(None, None, 9)
+            return _pad_tuple(None, None, 9)
 
         N_in, C_in = in_features.shape
         K, _, C_out = weight.shape
@@ -1630,53 +1531,79 @@ class UnifiedSpatiallySparseConvFunction(Function):
         ):
             grad_in_final = torch.zeros_like(in_features) if ctx.needs_input_grad[0] else None
             grad_weight_final = torch.zeros_like(weight) if ctx.needs_input_grad[1] else None
-            return _backward_return(grad_in_final, grad_weight_final, 9)
+            return _pad_tuple(grad_in_final, grad_weight_final, 9)
 
-        chosen_bwd_algo = initial_bwd_algo
-        chosen_bwd_params = {}
-
-        if (
-            initial_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM
-            and initial_bwd_block_size is not None
-        ):
-            chosen_bwd_params = {"bwd_block_size": initial_bwd_block_size}
+        # UNIFIED APPROACH: Always benchmark within filtered algorithm space
+        # Step 1: Determine algorithm filter set
+        if isinstance(initial_bwd_algo, list):
+            algorithm_filter = initial_bwd_algo
         elif initial_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.AUTO:
-            config_params = ctx.config_params_for_bwd
-            # Use fwd_block_size from chosen_fwd_params if available for config consistency
-            # If fwd was EXPLICIT, this would be None.
-            # The bwd_block_size in config_params is the user-provided one.
-            config = SpatiallySparseConvConfig(
-                num_in_coords=config_params["num_in_coords"],
-                num_out_coords=config_params["num_out_coords"],
-                in_channels=config_params["in_channels"],
-                out_channels=config_params["out_channels"],
-                kernel_volume=config_params["kernel_volume"],
-                in_dtype=grad_output.dtype,
-            )
-            global _BENCHMARK_BACKWARD_RESULTS  # noqa: F824
-            cached_result = _BENCHMARK_BACKWARD_RESULTS.get(config)
-            if cached_result is not None:
-                chosen_bwd_algo, chosen_bwd_params, _ = cached_result[0]  # Best is first
-                # print(f"Using cached bwd: {chosen_bwd_algo}, {chosen_bwd_params}")
-            else:
-                # print(f"Running bwd benchmark for config: {config}")
-                all_bwd_benchmark_results = _run_backward_benchmarks(
-                    grad_output,
-                    in_features,
-                    weight,
-                    kernel_map,
-                    num_out_coords,
-                    compute_dtype,
-                    device,
-                )
-                _BENCHMARK_BACKWARD_RESULTS[config] = all_bwd_benchmark_results
-                chosen_bwd_algo, chosen_bwd_params, min_time = all_bwd_benchmark_results[
-                    0
-                ]  # Best is first
-                # print(f"Chosen bwd after benchmark: {chosen_bwd_algo}, {chosen_bwd_params}, time: {min_time}")
+            algorithm_filter = "auto"  # All algorithms
+        else:
+            # Single algorithm - create list for consistent processing
+            algorithm_filter = [initial_bwd_algo]
 
-                # Mark cache as dirty - background thread will save periodically
-                mark_benchmark_cache_dirty()
+        # Step 2: Generate configuration for caching
+        config_params = ctx.config_params_for_bwd
+        config = SpatiallySparseConvConfig(
+            num_in_coords=config_params["num_in_coords"],
+            num_out_coords=config_params["num_out_coords"],
+            in_channels=config_params["in_channels"],
+            out_channels=config_params["out_channels"],
+            kernel_volume=config_params["kernel_volume"],
+            in_dtype=grad_output.dtype,
+        )
+
+        # Step 3: Check cache first
+        cached_result = _BENCHMARK_BACKWARD_RESULTS.get(config)
+        if cached_result is not None:
+            if algorithm_filter == "auto":
+                # Use best overall result
+                chosen_bwd_algo, chosen_bwd_params, _ = cached_result[0]
+            else:
+                # Filter cached results to only include algorithms in filter set
+                filtered_cached_results = []
+                for algo, params, time in cached_result:
+                    if algo in algorithm_filter:
+                        filtered_cached_results.append((algo, params, time))
+
+                if filtered_cached_results:
+                    # Use the best performing algorithm from the filtered results
+                    chosen_bwd_algo, chosen_bwd_params, _ = filtered_cached_results[
+                        0
+                    ]  # Best is first
+                else:
+                    # Fallback to best cached result if none from filter set
+                    logger.warning(
+                        f"No cached algorithms from {algorithm_filter} found, using best cached"
+                    )
+                    chosen_bwd_algo, chosen_bwd_params, _ = cached_result[0]
+        else:
+            # Step 4: No cache - always benchmark within filtered space
+            if algorithm_filter == "auto":
+                # Benchmark all algorithms
+                filtered_params = _BENCHMARK_BACKWARD_PARAMS
+            else:
+                # Filter benchmark parameters to only include algorithms in filter set
+                filtered_params = _filter_benchmark_params_by_env_config(
+                    _BENCHMARK_BACKWARD_PARAMS, algorithm_filter, is_forward=False
+                )
+
+            # Always run benchmarks to find optimal parameters
+            all_bwd_benchmark_results = _run_backward_benchmarks(
+                grad_output,
+                in_features,
+                weight,
+                kernel_map,
+                num_out_coords,
+                compute_dtype,
+                device,
+                custom_params=filtered_params,
+            )
+            _BENCHMARK_BACKWARD_RESULTS[config] = all_bwd_benchmark_results
+            chosen_bwd_algo, chosen_bwd_params, _ = all_bwd_benchmark_results[0]  # Best is first
+
+            mark_benchmark_cache_dirty()
 
         if chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM:
             grad_in_features, grad_weight = _explicit_gemm_backward_logic(
@@ -1688,23 +1615,16 @@ class UnifiedSpatiallySparseConvFunction(Function):
                 device,
             )
         elif chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.IMPLICIT_GEMM:
-            current_bwd_block_size = chosen_bwd_params.get("bwd_block_size")
-            if current_bwd_block_size is None:  # Fallback
-                current_bwd_block_size = (
-                    initial_bwd_block_size if initial_bwd_block_size is not None else 16
-                )  # Default fallback
-                print(
-                    f"Warning: bwd_block_size not found in chosen_bwd_params for IMPLICIT_GEMM, using {current_bwd_block_size}"
-                )
             grad_in_features, grad_weight = _implicit_gemm_backward_logic(
                 grad_output,
                 in_features,
                 weight,
                 kernel_map,
                 num_out_coords,
-                compute_dtype,
-                current_bwd_block_size,
-                device,
+                gemm_block_size=chosen_bwd_params.get("bwd_block_size", 16),
+                split_k_threads_per_block=chosen_bwd_params.get("split_k_threads_per_block", 256),
+                split_k_factor=chosen_bwd_params.get("split_k_factor", 4),
+                compute_dtype=compute_dtype,
             )
         elif chosen_bwd_algo == SPARSE_CONV_BWD_ALGO_MODE.CUTLASS_IMPLICIT_GEMM:
             grad_in_features, grad_weight = _cutlass_implicit_gemm_backward_logic(
@@ -1736,7 +1656,7 @@ class UnifiedSpatiallySparseConvFunction(Function):
         if not ctx.needs_input_grad[1]:
             grad_weight = None
 
-        return _backward_return(grad_in_features, grad_weight, 9)
+        return _pad_tuple(grad_in_features, grad_weight, 9)
 
 
 def spatially_sparse_conv(
@@ -1750,8 +1670,12 @@ def spatially_sparse_conv(
     generative: bool = False,
     output_spatially_sparse_tensor: Optional[Geometry] = None,
     transposed: bool = False,
-    fwd_algo: SPARSE_CONV_FWD_ALGO_MODE = SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM,
-    bwd_algo: SPARSE_CONV_BWD_ALGO_MODE = SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM,
+    fwd_algo: Union[
+        SPARSE_CONV_FWD_ALGO_MODE, List[SPARSE_CONV_FWD_ALGO_MODE]
+    ] = SPARSE_CONV_FWD_ALGO_MODE.EXPLICIT_GEMM,
+    bwd_algo: Union[
+        SPARSE_CONV_BWD_ALGO_MODE, List[SPARSE_CONV_BWD_ALGO_MODE]
+    ] = SPARSE_CONV_BWD_ALGO_MODE.EXPLICIT_GEMM,
     stride_mode: STRIDED_CONV_MODE = STRIDED_CONV_MODE.STRIDE_ONLY,
     stride_reduce: str = "max",
     order: POINT_ORDERING = POINT_ORDERING.RANDOM,

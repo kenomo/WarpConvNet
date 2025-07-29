@@ -13,7 +13,7 @@ from warpconvnet.geometry.coords.search.continuous import RealSearchMode
 from warpconvnet.geometry.types.points import Points
 from warpconvnet.nn.modules.base_module import BaseSpatialModule
 from warpconvnet.nn.encodings import SinusoidalEncoding
-from warpconvnet.nn.modules.mlp import FeatureMLPBlock, FeatureResidualMLPBlock
+from warpconvnet.nn.modules.mlp import MLPBlock
 from warpconvnet.ops.reductions import REDUCTION_TYPES_STR, REDUCTIONS, row_reduction
 
 __all__ = ["PointConv"]
@@ -34,7 +34,49 @@ def _get_module_input_channel(module: nn.Module) -> int:
 
 
 class PointConv(BaseSpatialModule):
-    """PointFeatureConv."""
+    """Point convolution operating on `warpconvnet.geometry.types.points.Points`.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input feature channels.
+    out_channels : int
+        Number of output feature channels.
+    neighbor_search_args : `warpconvnet.geometry.coords.search.search_configs.RealSearchConfig`
+        Configuration for neighbor search.
+    pooling_reduction : `warpconvnet.ops.reductions.REDUCTIONS`, optional
+        Reduction used when downsampling points. Required when ``out_point_type`` is
+        ``"downsample"``.
+    pooling_voxel_size : float, optional
+        Size of voxels used for downsampling when ``out_point_type`` is ``"downsample"``.
+    edge_transform_mlp : nn.Module, optional
+        MLP applied to constructed edge features.
+    out_transform_mlp : nn.Module, optional
+        MLP applied after neighborhood reduction.
+    mlp_block : nn.Module, optional
+        Module used to build ``edge_transform_mlp`` and ``out_transform_mlp`` when not
+        provided. Defaults to `MLPBlock`.
+    hidden_dim : int, optional
+        Hidden dimension of the automatically created MLPs.
+    channel_multiplier : int, optional
+        Multiplier used when ``hidden_dim`` is ``None``. Defaults to ``2``.
+    use_rel_pos : bool, optional
+        Include relative coordinates of neighbors as part of the edge features.
+    use_rel_pos_encode : bool, optional
+        Include sinusoidal encoding of relative coordinates in the edge features.
+    pos_encode_dim : int, optional
+        Dimension of the positional encoding. Defaults to ``32``.
+    pos_encode_range : float, optional
+        Range of the positional encoding. Defaults to ``4``.
+    reductions : list of str, optional
+        Reductions applied over the neighbor dimension. Defaults to ``("mean",)``.
+    out_point_type : {"provided", "downsample", "same"}, optional
+        Determines the coordinate set on which output features are computed.
+    provided_in_channels : int, optional
+        Number of channels of the provided query points when ``out_point_type`` is ``"provided"``.
+    bias : bool, optional
+        Whether linear layers contain biases. Defaults to ``True``.
+    """
 
     def __init__(
         self,
@@ -45,7 +87,7 @@ class PointConv(BaseSpatialModule):
         pooling_voxel_size: Optional[float] = None,
         edge_transform_mlp: Optional[nn.Module] = None,
         out_transform_mlp: Optional[nn.Module] = None,
-        mlp_block: Union[FeatureMLPBlock, FeatureResidualMLPBlock] = FeatureMLPBlock,
+        mlp_block: nn.Module = MLPBlock,
         hidden_dim: Optional[int] = None,
         channel_multiplier: int = 2,
         use_rel_pos: bool = False,
@@ -57,15 +99,6 @@ class PointConv(BaseSpatialModule):
         provided_in_channels: Optional[int] = None,
         bias: bool = True,
     ):
-        """
-        If use_relative_position_encoding is True, the positional encoding vertex coordinate
-        difference is added to the edge features.
-
-        out_point_feature_type: If "upsample", the output point features will be upsampled to the input point cloud size.
-
-        use_rel_pos: If True, the relative position of the neighbor points will be used as the edge features.
-        use_rel_pos_encode: If True, the encoding relative position of the neighbor points will be used as the edge features.
-        """
         super().__init__()
         assert (
             isinstance(reductions, (tuple, list)) and len(reductions) > 0
