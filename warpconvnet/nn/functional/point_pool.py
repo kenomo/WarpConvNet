@@ -358,6 +358,7 @@ def point_pool_by_code(
     offsets = offsets_from_offsets(
         pc.offsets,
         to_unique.to_unique_indices,
+        device="cpu"
     )
 
     out_pc = pc.replace(
